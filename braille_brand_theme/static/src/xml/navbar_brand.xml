@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="braille_brand_theme.NavBarBrand"
+       t-inherit="web.NavBar"
+       t-inherit-mode="extension">
+        <xpath expr="//t[@t-call='web.NavBar.AppsMenu']" position="after">
+            <a href="/web"
+               class="o_braille_nav_brand"
+               aria-label="Braille International"
+               title="Braille International">
+                <img src="/braille_brand_theme/static/src/img/braille_mark.png"
+                     class="o_braille_nav_mark"
+                     alt=""/>
+                <span class="o_braille_nav_wordmark">
+                    <strong>BRAILLE</strong>
+                    <small>INTERNATIONAL</small>
+                </span>
+            </a>
+        </xpath>
+    </t>
+</templates>

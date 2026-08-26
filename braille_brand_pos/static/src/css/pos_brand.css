@@ -1,0 +1,42 @@
+/* Braille International POS semantic layer */
+
+:root {
+    --bi-pos-red: #E01F25;
+    --bi-pos-red-strong: #C5161C;
+    --bi-pos-charcoal: #17191B;
+    --bi-pos-surface: #22262A;
+    --bi-pos-border: #40474D;
+}
+
+.pos,
+.pos-content,
+.product-screen,
+.payment-screen,
+.receipt-screen,
+.ticket-screen,
+.floor-screen,
+.login-screen {
+    font-family: "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+.pos .primary,
+.pos .button.highlight,
+.pos .control-button.highlight,
+.pos .pay-order-button,
+.pos .validation-button {
+    background-color: var(--bi-pos-red) !important;
+    border-color: var(--bi-pos-red) !important;
+    color: #FFFFFF !important;
+}
+
+.pos .primary:hover,
+.pos .button.highlight:hover,
+.pos .control-button.highlight:hover {
+    background-color: var(--bi-pos-red-strong) !important;
+}
+
+.pos button:focus-visible,
+.pos .button:focus-visible {
+    outline: 3px solid rgba(224, 31, 37, .45) !important;
+    outline-offset: 2px;
+}

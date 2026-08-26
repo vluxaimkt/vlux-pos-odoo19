@@ -1,0 +1,9 @@
+<odoo noupdate="1">
+    <record id="seq_vlux_fiscal_request" model="ir.sequence">
+        <field name="name">Solicitud de facturación VLUX</field>
+        <field name="code">vlux.fiscal.request</field>
+        <field name="prefix">VFX/%(year)s/</field>
+        <field name="padding">6</field>
+        <field name="company_id" eval="False"/>
+    </record>
+</odoo>

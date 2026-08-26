@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="braille_login_layout"
+              inherit_id="web.login_layout"
+              name="Braille International Login">
+
+        <xpath expr="//div[contains(@t-attf-class, 'o_database_list')]"
+               position="attributes">
+            <attribute name="class"
+                       add="o_braille_login_card"
+                       separator=" "/>
+        </xpath>
+
+        <xpath expr="//div[contains(@t-attf-class, 'o_database_list')]/div[1]/div[1]"
+               position="replace">
+            <div class="o_braille_login_identity text-center pb-3 mb-4">
+                <img src="/braille_brand_theme/static/src/img/braille_logo.png"
+                     class="o_braille_login_logo"
+                     alt="Braille International"/>
+                <p class="o_braille_login_tagline mb-0">
+                    Arquitectura e ingeniería inclusiva
+                </p>
+            </div>
+        </xpath>
+
+        <xpath expr="//div[contains(@t-attf-class, 'o_database_list')]/div[1]/div[last()]"
+               position="replace">
+            <div class="o_braille_login_footer text-center small mt-4 pt-3">
+                Plataforma empresarial Braille International
+            </div>
+        </xpath>
+    </template>
+</odoo>

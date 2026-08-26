@@ -1,0 +1,27 @@
+<odoo>
+    <menuitem id="menu_vlux_facturacion_root"
+              name="VLUX Facturación"
+              sequence="30"
+              groups="base.group_system"/>
+
+    <menuitem id="menu_vlux_fiscal_requests"
+              name="Solicitudes"
+              parent="menu_vlux_facturacion_root"
+              action="action_vlux_fiscal_request"
+              sequence="10"
+              groups="base.group_system"/>
+
+    <menuitem id="menu_vlux_fiscal_config"
+              name="Configuración fiscal"
+              parent="menu_vlux_facturacion_root"
+              action="action_vlux_fiscal_config"
+              sequence="20"
+              groups="base.group_system"/>
+
+    <menuitem id="menu_vlux_pac_providers"
+              name="Proveedores PAC"
+              parent="menu_vlux_facturacion_root"
+              action="action_vlux_pac_provider"
+              sequence="30"
+              groups="base.group_system"/>
+</odoo>

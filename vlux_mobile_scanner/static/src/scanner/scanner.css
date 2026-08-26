@@ -1,0 +1,183 @@
+:root {
+    color-scheme: dark;
+    --bg: #0b0c0f;
+    --surface: #14161b;
+    --surface-2: #1b1e24;
+    --border: rgba(255, 255, 255, 0.09);
+    --text: #f6f7f8;
+    --muted: #969ca6;
+    --accent: #21d4d0;
+    --accent-2: #5df0c6;
+    --success: #2bd67b;
+    --danger: #ff616b;
+    --warning: #ffb43d;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+    background:
+        radial-gradient(circle at 90% -10%, rgba(33, 212, 208, 0.16), transparent 38%),
+        var(--bg);
+    color: var(--text);
+    font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+button, input { font: inherit; }
+.is-hidden { display: none !important; }
+
+.vlux-app {
+    width: min(100%, 560px);
+    min-height: 100dvh;
+    margin: 0 auto;
+    padding: max(18px, env(safe-area-inset-top)) 18px max(24px, env(safe-area-inset-bottom));
+}
+
+.vlux-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0 22px;
+}
+.vlux-brand { display: flex; align-items: center; gap: 11px; }
+.vlux-mark {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border-radius: 14px;
+    background: linear-gradient(145deg, #222730, #111318);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-size: 22px;
+    font-weight: 900;
+}
+.vlux-wordmark { font-size: 18px; font-weight: 850; letter-spacing: 0.13em; }
+.vlux-subtitle { margin-top: 2px; color: var(--muted); font-size: 10px; letter-spacing: 0.18em; }
+
+.vlux-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.035);
+    font-size: 12px;
+    color: var(--muted);
+}
+.vlux-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #555b65; }
+.vlux-status.is-online .vlux-status-dot { background: var(--success); box-shadow: 0 0 0 5px rgba(43, 214, 123, 0.12); }
+.vlux-status.is-sending .vlux-status-dot { background: var(--accent); box-shadow: 0 0 0 5px rgba(33, 212, 208, 0.12); }
+.vlux-status.is-reconnecting .vlux-status-dot { background: var(--warning); }
+
+.vlux-card, .vlux-camera-card {
+    margin-bottom: 14px;
+    padding: 18px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.025));
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    box-shadow: 0 18px 60px rgba(0,0,0,0.22);
+}
+.vlux-pair-card { padding-top: 24px; padding-bottom: 24px; }
+.vlux-eyebrow { margin-bottom: 8px; color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: 0.16em; }
+h1, h2, p { margin-top: 0; }
+h1 { margin-bottom: 9px; font-size: clamp(27px, 8vw, 40px); letter-spacing: -0.04em; line-height: 1.03; }
+h2 { margin-bottom: 7px; font-size: 21px; }
+.vlux-muted { color: var(--muted); line-height: 1.5; }
+
+label { display: block; margin: 18px 0 7px; color: #cbd0d6; font-size: 13px; font-weight: 650; }
+.vlux-input {
+    width: 100%;
+    min-height: 52px;
+    padding: 0 15px;
+    color: var(--text);
+    background: #0e1014;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 13px;
+    outline: none;
+    transition: 0.2s ease;
+}
+.vlux-input:focus { border-color: rgba(33,212,208,0.7); box-shadow: 0 0 0 4px rgba(33,212,208,0.11); }
+.vlux-code-input { text-transform: uppercase; text-align: center; font-size: 29px; font-weight: 800; letter-spacing: 0.18em; }
+
+.vlux-btn {
+    min-height: 50px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 13px;
+    cursor: pointer;
+    font-weight: 750;
+    transition: transform 0.12s ease, opacity 0.12s ease;
+}
+.vlux-btn:active { transform: scale(0.985); }
+.vlux-btn:disabled { opacity: 0.55; cursor: wait; }
+.vlux-btn-primary { color: #07100f; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+.vlux-pair-card .vlux-btn { width: 100%; margin-top: 12px; }
+.vlux-btn-secondary { color: var(--text); background: #242832; }
+.vlux-btn-ghost { width: 100%; color: var(--muted); background: transparent; border: 1px solid var(--border); }
+
+.vlux-connected-line { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 4px 12px; color: var(--muted); }
+.vlux-connected-line strong { color: var(--text); }
+.vlux-camera-card { padding: 10px; }
+.vlux-camera-stage { position: relative; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 15px; background: #060708; }
+#cameraVideo { width: 100%; height: 100%; object-fit: cover; }
+.vlux-camera-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 26px;
+    text-align: center;
+    color: var(--muted);
+}
+.vlux-camera-placeholder strong { color: var(--text); }
+.vlux-camera-placeholder span { max-width: 320px; font-size: 12px; line-height: 1.45; }
+.vlux-camera-icon { margin-bottom: 4px; font-size: 42px; color: var(--accent); }
+.vlux-scan-frame {
+    position: absolute;
+    z-index: 2;
+    left: 10%;
+    top: 28%;
+    width: 80%;
+    height: 42%;
+    border: 2px solid rgba(33,212,208,0.9);
+    border-radius: 16px;
+    box-shadow: 0 0 0 999px rgba(0,0,0,0.26), 0 0 32px rgba(33,212,208,0.18);
+    pointer-events: none;
+}
+.vlux-scan-line { position: absolute; left: 8%; right: 8%; top: 50%; height: 1px; background: var(--accent); box-shadow: 0 0 14px var(--accent); }
+.vlux-camera-actions { display: grid; grid-template-columns: 1fr; gap: 8px; padding-top: 10px; }
+
+.vlux-message { margin-top: 10px; padding: 11px 12px; border-radius: 11px; font-size: 13px; line-height: 1.4; }
+.vlux-message.is-error { color: #ffb9be; background: rgba(255,97,107,0.1); border: 1px solid rgba(255,97,107,0.2); }
+.vlux-message.is-warning { color: #ffd797; background: rgba(255,180,61,0.1); border: 1px solid rgba(255,180,61,0.2); }
+
+.vlux-result-card { min-height: 190px; }
+.vlux-result-icon {
+    width: 46px;
+    height: 46px;
+    display: grid;
+    place-items: center;
+    margin: 4px 0 13px;
+    border-radius: 50%;
+    background: #22262d;
+    font-size: 25px;
+    font-weight: 850;
+}
+.vlux-result-icon.is-success { color: #08140e; background: var(--success); }
+.vlux-result-icon.is-error { color: white; background: var(--danger); }
+.vlux-result-icon.is-sending { color: #07100f; background: var(--accent); }
+.vlux-code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--accent); overflow-wrap: anywhere; }
+.vlux-product { margin-top: 6px; color: #dfe3e8; font-weight: 700; }
+.vlux-inline { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.vlux-footer { padding: 22px 0 6px; color: #5f6570; text-align: center; font-size: 10px; letter-spacing: 0.12em; }
+
+@media (max-width: 390px) {
+    .vlux-header { align-items: flex-start; }
+    .vlux-status { padding: 7px 8px; }
+    .vlux-inline { grid-template-columns: 1fr; }
+}

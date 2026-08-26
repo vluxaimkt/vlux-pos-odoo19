@@ -1,0 +1,10 @@
+<odoo noupdate="1">
+    <record id="vlux_fiscal_config_main_company"
+            model="vlux.fiscal.config">
+        <field name="company_id" ref="base.main_company"/>
+        <field name="mode">simulation</field>
+        <field name="auto_process" eval="True"/>
+        <field name="pac_provider_id"
+               ref="vlux_pac_provider_simulator"/>
+    </record>
+</odoo>

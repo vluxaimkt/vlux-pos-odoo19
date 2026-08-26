@@ -1,0 +1,10 @@
+<odoo noupdate="1">
+    <record id="vlux_pac_provider_simulator" model="vlux.pac.provider">
+        <field name="name">VLUX PAC Simulador</field>
+        <field name="code">vlux_simulator</field>
+        <field name="provider_type">simulator</field>
+        <field name="environment">test</field>
+        <field name="sequence">1</field>
+        <field name="notes">Genera documentos de prueba sin validez fiscal. No crea UUID fiscal.</field>
+    </record>
+</odoo>

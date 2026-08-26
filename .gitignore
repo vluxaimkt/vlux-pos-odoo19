@@ -1,0 +1,12 @@
+/*
+!/.gitignore
+!/vlux_mobile_scanner/
+!/vlux_owner/
+!/vlux_facturacion/
+!/braille_brand_pos/
+!/braille_brand_theme/
+
+**/__pycache__/
+*.py[cod]
+*.log
+.env

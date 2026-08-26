@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="braille_web_layout"
+              inherit_id="web.layout"
+              name="Braille Platform Web Layout">
+
+        <xpath expr="//title" position="replace">
+            <title t-esc="(title + ' | Braille International') if title and title != 'Odoo' else 'Braille International'"/>
+        </xpath>
+
+        <xpath expr="//link[@rel='shortcut icon']" position="replace">
+            <link type="image/png"
+                  rel="shortcut icon"
+                  href="/braille_brand_theme/static/src/img/braille_favicon.png"/>
+        </xpath>
+
+        <xpath expr="//head/meta[last()]" position="after">
+            <meta name="application-name" content="Braille International"/>
+            <meta name="apple-mobile-web-app-title" content="Braille International"/>
+        </xpath>
+    </template>
+
+    <template id="braille_webclient_bootstrap"
+              inherit_id="web.webclient_bootstrap"
+              name="Braille Platform Bootstrap">
+
+        <xpath expr="//meta[@name='theme-color']" position="attributes">
+            <attribute name="content">#E01F25</attribute>
+        </xpath>
+
+        <xpath expr="//link[@rel='manifest']" position="attributes">
+            <attribute name="href">/braille/manifest.webmanifest</attribute>
+        </xpath>
+
+        <xpath expr="//link[@rel='apple-touch-icon']" position="attributes">
+            <attribute name="href">/braille_brand_theme/static/src/img/braille_icon_192.png</attribute>
+        </xpath>
+    </template>
+
+    <template id="braille_offline"
+              inherit_id="web.webclient_offline"
+              name="Braille Platform Offline">
+
+        <xpath expr="//div[hasclass('card')]" position="replace">
+            <div class="card o_braille_offline_card">
+                <img src="/braille_brand_theme/static/src/img/braille_mark.png"
+                     alt="Braille International"/>
+                <h1>Sin conexión</h1>
+                <p>Comprueba tu conexión. Braille International se reanudará automáticamente.</p>
+                <button onclick="location.reload()">Volver a intentar</button>
+            </div>
+        </xpath>
+    </template>
+</odoo>

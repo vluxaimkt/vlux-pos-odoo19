@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+    <t t-name="vlux_mobile_scanner.ControlButtonsExtension" t-inherit="point_of_sale.ControlButtons" t-inherit-mode="extension">
+        <xpath expr="//button[contains(@class, 'more-btn')]" position="before">
+            <button t-if="!props.showRemainingButtons and !this.pos.isSmallProductScreen" class="btn btn-secondary btn-lg vlux-mobile-scanner-button" t-on-click="openVluxMobileScannerPairing" title="Conectar escaner movil">
+                <i class="fa fa-mobile me-2"/>
+                <span>Escaner movil</span>
+            </button>
+        </xpath>
+        <xpath expr="//div[contains(@class, 'control-buttons-modal')]" position="inside">
+            <button t-att-class="buttonClass" t-on-click="openVluxMobileScannerPairing">
+                <i class="fa fa-mobile me-2"/>
+                Conectar escaner movil
+            </button>
+        </xpath>
+    </t>
+</templates>

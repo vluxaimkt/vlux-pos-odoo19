@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="owner_app" name="VLUX Owner">
+        <html lang="es">
+            <head>
+                <meta charset="utf-8"/>
+                <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+                <meta name="theme-color" content="#0d0a14"/>
+                <meta name="apple-mobile-web-app-capable" content="yes"/>
+                <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+                <meta name="apple-mobile-web-app-title" content="VLUX Owner"/>
+                <link rel="manifest" href="/vlux-owner/manifest.webmanifest"/>
+                <link rel="apple-touch-icon" href="/vlux_owner/static/img/icon-192.png"/>
+                <link rel="stylesheet" href="/vlux_owner/static/dist/assets/app.css?v=1.0.2"/>
+                <title>VLUX Owner</title>
+            </head>
+            <body>
+                <div id="root"></div>
+                <script type="module" src="/vlux_owner/static/dist/assets/app.js?v=1.0.2"></script>
+            </body>
+        </html>
+    </template>
+</odoo>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="group_vlux_owner" model="res.groups">
+        <field name="name">VLUX Owner</field>
+        <field name="comment">Permite acceder a la aplicación móvil VLUX Owner y a sus métricas agregadas.</field>
+    </record>
+</odoo>

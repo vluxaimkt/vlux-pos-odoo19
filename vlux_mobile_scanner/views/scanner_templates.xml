@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="scanner_page" name="VLUX Mobile Scanner">
+        <html lang="es">
+            <head>
+                <meta charset="utf-8"/>
+                <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+                <meta name="theme-color" content="#101114"/>
+                <title>VLUX Mobile Scanner</title>
+                <link rel="stylesheet" href="/vlux_mobile_scanner/static/src/scanner/scanner.css"/>
+                <script defer="defer" src="/vlux_mobile_scanner/static/src/scanner/scanner.js"></script>
+            </head>
+            <body t-att-data-db="db_name" t-att-data-pair-code="pair_code">
+                <main class="vlux-app">
+                    <header class="vlux-header">
+                        <div class="vlux-brand">
+                            <div class="vlux-mark">V</div>
+                            <div>
+                                <div class="vlux-wordmark">VLUX</div>
+                                <div class="vlux-subtitle">MOBILE SCANNER</div>
+                            </div>
+                        </div>
+                        <div id="connectionBadge" class="vlux-status is-offline">
+                            <span class="vlux-status-dot"></span>
+                            <span id="connectionText">Desconectado</span>
+                        </div>
+                    </header>
+
+                    <section id="pairPanel" class="vlux-card vlux-pair-card">
+                        <div class="vlux-eyebrow">EMPAREJAMIENTO SEGURO</div>
+                        <h1>Conecta este telefono con tu caja</h1>
+                        <p class="vlux-muted">Introduce el codigo de seis caracteres que aparece en Odoo POS.</p>
+                        <label for="pairCode">Codigo de conexion</label>
+                        <input id="pairCode" class="vlux-input vlux-code-input" maxlength="6" inputmode="text" autocomplete="one-time-code" placeholder="A7K9P2"/>
+                        <button id="pairButton" class="vlux-btn vlux-btn-primary" type="button">Conectar con la caja</button>
+                        <div id="pairError" class="vlux-message is-error is-hidden"></div>
+                    </section>
+
+                    <section id="scannerPanel" class="is-hidden">
+                        <div class="vlux-connected-line"><span>Conectado a</span><strong id="posName">Caja</strong></div>
+
+                        <section class="vlux-camera-card">
+                            <div class="vlux-camera-stage">
+                                <video id="cameraVideo" playsinline="playsinline" muted="muted"></video>
+                                <div class="vlux-scan-frame"><div class="vlux-scan-line"></div></div>
+                                <div id="cameraPlaceholder" class="vlux-camera-placeholder">
+                                    <div class="vlux-camera-icon">▣</div>
+                                    <strong>Camara lista para iniciar</strong>
+                                    <span>El acceso a camara requiere HTTPS en el telefono.</span>
+                                </div>
+                            </div>
+                            <div class="vlux-camera-actions">
+                                <button id="cameraButton" class="vlux-btn vlux-btn-primary" type="button">Activar camara</button>
+                                <button id="pauseButton" class="vlux-btn vlux-btn-secondary is-hidden" type="button">Pausar camara</button>
+                            </div>
+                            <div id="httpsWarning" class="vlux-message is-warning is-hidden">La camara del navegador requiere HTTPS. Puedes probar la integracion usando el campo manual.</div>
+                        </section>
+
+                        <section class="vlux-card vlux-result-card">
+                            <div class="vlux-eyebrow">ULTIMO RESULTADO</div>
+                            <div id="resultIcon" class="vlux-result-icon">—</div>
+                            <h2 id="resultTitle">Esperando un codigo</h2>
+                            <div id="resultCode" class="vlux-code"></div>
+                            <div id="resultProduct" class="vlux-product"></div>
+                            <div id="resultMessage" class="vlux-muted">Escanea un producto o introduce un codigo manualmente.</div>
+                        </section>
+
+                        <section class="vlux-card">
+                            <div class="vlux-eyebrow">PRUEBA SIN CAMARA</div>
+                            <label for="manualBarcode">Introducir codigo manualmente</label>
+                            <div class="vlux-inline">
+                                <input id="manualBarcode" class="vlux-input" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="7501234567890"/>
+                                <button id="manualSendButton" class="vlux-btn vlux-btn-primary" type="button">Enviar</button>
+                            </div>
+                        </section>
+
+                        <button id="disconnectButton" class="vlux-btn vlux-btn-ghost" type="button">Desconectar telefono</button>
+                    </section>
+                    <footer class="vlux-footer">VLUX · AI Transformation Partner</footer>
+                </main>
+            </body>
+        </html>
+    </template>
+</odoo>

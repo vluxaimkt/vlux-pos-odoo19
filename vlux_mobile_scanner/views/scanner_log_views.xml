@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_vlux_mobile_scanner_event_list" model="ir.ui.view">
+        <field name="name">vlux.mobile.scanner.event.list</field>
+        <field name="model">vlux.mobile.scanner.event</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false">
+                <field name="create_date"/>
+                <field name="pos_config_id"/>
+                <field name="pos_session_id"/>
+                <field name="barcode"/>
+                <field name="state"/>
+                <field name="product_name"/>
+                <field name="result_message"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_vlux_mobile_scanner_event_search" model="ir.ui.view">
+        <field name="name">vlux.mobile.scanner.event.search</field>
+        <field name="model">vlux.mobile.scanner.event</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="barcode"/>
+                <field name="pos_config_id"/>
+                <field name="state"/>
+                <filter name="delivered" string="Enviados" domain="[('state','=','delivered')]"/>
+                <filter name="errors" string="Errores" domain="[('state','in',['not_found','failed'])]"/>
+                <group>
+                    <filter name="group_pos" string="Caja" context="{'group_by':'pos_config_id'}"/>
+                    <filter name="group_state" string="Resultado" context="{'group_by':'state'}"/>
+                    <filter name="group_day" string="Dia" context="{'group_by':'create_date:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+    <record id="action_vlux_mobile_scanner_events" model="ir.actions.act_window">
+        <field name="name">VLUX Mobile Scanner - Historial</field>
+        <field name="res_model">vlux.mobile.scanner.event</field>
+        <field name="view_mode">list</field>
+    </record>
+    <menuitem id="menu_vlux_mobile_scanner_events" name="VLUX Mobile Scanner" parent="point_of_sale.menu_point_config_product" action="action_vlux_mobile_scanner_events" sequence="80" groups="point_of_sale.group_pos_manager"/>
+</odoo>

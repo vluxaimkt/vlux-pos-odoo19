@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="portal_facturacion_form" name="Autofacturación VLUX">
+        <t t-call="portal.portal_layout">
+            <div id="wrap" class="oe_structure">
+                <section class="container py-5" style="max-width:760px;">
+                    <div class="text-center mb-4">
+                        <h1>Autofacturación VLUX</h1>
+                        <p class="text-muted">Captura tus datos para generar un XML de simulación.</p>
+                    </div>
+                    <div class="alert alert-warning" role="alert">
+                        <strong>Modo simulación:</strong> no es un CFDI y no tiene validez fiscal ante el SAT.
+                    </div>
+                    <div class="card mb-4"><div class="card-body">
+                        <p class="mb-1"><strong>Ticket:</strong> <span t-esc="pos_order.pos_reference"/></p>
+                        <p class="mb-0"><strong>Total:</strong> <span t-field="pos_order.amount_total" t-options="{'widget':'monetary','display_currency':pos_order.currency_id}"/></p>
+                    </div></div>
+                    <t t-if="errors.get('generic')"><div class="alert alert-danger" t-esc="errors.get('generic')"/></t>
+                    <form method="post" class="card" t-att-action="'/pos/ticket/validate?access_token=%s' % access_token">
+                        <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="fiscal_name" class="form-label">Nombre o razón social *</label>
+                                <input id="fiscal_name" name="fiscal_name" type="text" class="form-control" required="required" maxlength="200" t-att-value="form_values.get('fiscal_name','')"/>
+                                <div class="text-danger small mt-1" t-if="errors.get('fiscal_name')" t-esc="errors.get('fiscal_name')"/>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3"><label for="vat" class="form-label">RFC</label><input id="vat" name="vat" type="text" class="form-control" maxlength="20" t-att-value="form_values.get('vat','')"/></div>
+                                <div class="col-md-6 mb-3"><label for="fiscal_zip" class="form-label">Código postal fiscal</label><input id="fiscal_zip" name="fiscal_zip" type="text" class="form-control" maxlength="10" t-att-value="form_values.get('fiscal_zip','')"/></div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3"><label for="fiscal_regime" class="form-label">Régimen fiscal</label><input id="fiscal_regime" name="fiscal_regime" type="text" class="form-control" maxlength="100" t-att-value="form_values.get('fiscal_regime','')"/></div>
+                                <div class="col-md-6 mb-3"><label for="cfdi_use" class="form-label">Uso del CFDI</label><input id="cfdi_use" name="cfdi_use" type="text" class="form-control" maxlength="100" t-att-value="form_values.get('cfdi_use','')"/></div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3"><label for="email" class="form-label">Correo</label><input id="email" name="email" type="email" class="form-control" maxlength="254" t-att-value="form_values.get('email','')"/></div>
+                                <div class="col-md-6 mb-3"><label for="phone" class="form-label">Teléfono</label><input id="phone" name="phone" type="text" class="form-control" maxlength="30" t-att-value="form_values.get('phone','')"/></div>
+                            </div>
+                            <div class="form-check mb-3">
+                                <input id="simulation_ack" name="simulation_ack" type="checkbox" value="1" class="form-check-input" required="required"/>
+                                <label for="simulation_ack" class="form-check-label">Confirmo que este documento es una simulación sin validez fiscal.</label>
+                                <div class="text-danger small mt-1" t-if="errors.get('simulation_ack')" t-esc="errors.get('simulation_ack')"/>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">Generar simulación</button>
+                        </div>
+                    </form>
+                </section>
+            </div>
+        </t>
+    </template>
+
+    <template id="portal_facturacion_result" name="Resultado de autofacturación VLUX">
+        <t t-call="portal.portal_layout">
+            <div id="wrap" class="oe_structure">
+                <section class="container py-5" style="max-width:760px;">
+                    <t t-if="error_message"><div class="alert alert-danger"><h4>No fue posible continuar</h4><p class="mb-0" t-esc="error_message"/></div></t>
+                    <t t-elif="fiscal_request">
+                        <div class="text-center mb-4"><h1>Solicitud procesada</h1></div>
+                        <div class="alert alert-warning"><strong>Documento de simulación.</strong> No es un CFDI y no tiene validez fiscal.</div>
+                        <div class="card"><div class="card-body">
+                            <p><strong>Solicitud:</strong> <span t-esc="fiscal_request.name"/></p>
+                            <p><strong>Ticket:</strong> <span t-esc="fiscal_request.pos_order_id.pos_reference"/></p>
+                            <p><strong>Referencia:</strong> <span t-esc="fiscal_request.simulation_reference or 'Pendiente'"/></p>
+                            <p><strong>Estado:</strong> <span t-esc="fiscal_request.state"/></p>
+                            <a t-if="attachment" class="btn btn-primary w-100" t-att-href="'/vlux/facturacion/xml/%s' % fiscal_request.access_token">Descargar XML de simulación</a>
+                            <div t-if="not attachment" class="alert alert-info mb-0">El XML todavía no está disponible.</div>
+                        </div></div>
+                    </t>
+                </section>
+            </div>
+        </t>
+    </template>
+</odoo>

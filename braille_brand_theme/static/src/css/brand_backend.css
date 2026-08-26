@@ -1,0 +1,303 @@
+/* Braille International Platform UI — shared backend layer */
+
+:root {
+    --bi-red: #E01F25;
+    --bi-red-strong: #C5161C;
+    --bi-red-soft: #FF6870;
+    --bi-charcoal: #1D1F21;
+    --bi-graphite: #34383C;
+    --bi-silver: #8A9096;
+    --bi-border-light: #D7DADD;
+    --bi-radius-sm: 6px;
+    --bi-radius: 9px;
+    --bi-radius-lg: 14px;
+    --bi-focus-ring: 0 0 0 2px rgba(224, 31, 37, 0.20);
+}
+
+html.bi-platform {
+    accent-color: var(--bi-red);
+}
+
+body.o_web_client {
+    background: #F3F4F5;
+}
+
+/* Header */
+.o_main_navbar {
+    min-height: 50px;
+    background:
+        linear-gradient(90deg, rgba(224, 31, 37, 0.12), transparent 34%),
+        #151617 !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18);
+}
+
+.o_main_navbar,
+.o_main_navbar a,
+.o_main_navbar button,
+.o_main_navbar .o_menu_brand,
+.o_main_navbar .o_nav_entry {
+    color: #FFFFFF !important;
+}
+
+.o_main_navbar .o_nav_entry:hover,
+.o_main_navbar .o_menu_sections > button:hover,
+.o_main_navbar .show > button {
+    background-color: rgba(224, 31, 37, 0.15) !important;
+    box-shadow: inset 0 -3px 0 var(--bi-red);
+}
+
+.o_braille_nav_brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: max-content;
+    height: 50px;
+    padding: 5px 12px 5px 7px;
+    color: #FFFFFF !important;
+    text-decoration: none;
+    border-right: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.o_braille_nav_mark {
+    width: 34px;
+    height: 34px;
+    object-fit: contain;
+}
+
+.o_braille_nav_wordmark {
+    display: flex;
+    flex-direction: column;
+    line-height: .92;
+    letter-spacing: .055em;
+}
+
+.o_braille_nav_wordmark strong {
+    font-size: .88rem;
+    font-weight: 800;
+}
+
+.o_braille_nav_wordmark small {
+    margin-top: 3px;
+    color: #C8CCD0;
+    font-size: .52rem;
+    letter-spacing: .17em;
+}
+
+/* Standard components */
+.btn-primary {
+    background-color: var(--bi-red) !important;
+    border-color: var(--bi-red) !important;
+    color: #FFFFFF !important;
+    font-weight: 650;
+}
+
+.btn-primary:hover,
+.btn-primary:focus {
+    background-color: var(--bi-red-strong) !important;
+    border-color: var(--bi-red-strong) !important;
+}
+
+a,
+.btn-link,
+.text-action {
+    color: var(--bi-red-strong);
+}
+
+.form-control:focus,
+.form-select:focus,
+.o_input:focus,
+.o_searchview:focus-within {
+    border-color: var(--bi-red) !important;
+    box-shadow: var(--bi-focus-ring) !important;
+}
+
+.o_web_client :focus-visible {
+    outline: 2px solid var(--bi-red) !important;
+    outline-offset: 2px;
+}
+
+.o_control_panel {
+    border-bottom-color: var(--bi-border-light) !important;
+}
+
+.o_form_sheet,
+.o_kanban_record,
+.card,
+.modal-content,
+.dropdown-menu,
+.o_searchview {
+    border-radius: var(--bi-radius) !important;
+}
+
+.o_form_sheet {
+    box-shadow: 0 12px 34px rgba(16, 18, 20, .10);
+}
+
+/* Search panel used by Apps and many future modules */
+.o_search_panel {
+    border-inline-end: 1px solid var(--bi-border-light);
+}
+
+.o_search_panel .list-group-item.active,
+.o_search_panel .o_search_panel_category_value.active {
+    background-color: rgba(224, 31, 37, .10) !important;
+    color: var(--bi-red-strong) !important;
+    border-color: transparent !important;
+}
+
+/* Module cards */
+.o_modules_kanban .o_kanban_record,
+.o_kanban_view.o_modules_kanban .o_kanban_record {
+    border: 1px solid var(--bi-border-light) !important;
+    box-shadow: 0 5px 18px rgba(0, 0, 0, .06);
+}
+
+.o_modules_kanban .btn-info,
+.o_kanban_view.o_modules_kanban .btn-info {
+    background: transparent !important;
+    border-color: var(--bi-red) !important;
+    color: var(--bi-red-strong) !important;
+}
+
+/* Offline screen */
+.o_braille_offline_card {
+    width: min(520px, 88vw);
+    margin: 12vh auto;
+    padding: 36px;
+    text-align: center;
+    background: #1C1F22;
+    color: #F6F7F8;
+    border: 1px solid #3A4045;
+    border-radius: 18px;
+}
+
+.o_braille_offline_card img {
+    width: 120px;
+}
+
+.o_braille_offline_card button {
+    padding: 10px 18px;
+    background: var(--bi-red);
+    color: #FFFFFF;
+    border: 0;
+    border-radius: 8px;
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+    .o_braille_nav_wordmark {
+        display: none;
+    }
+
+    .o_braille_nav_brand {
+        padding-right: 6px;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .o_braille_nav_brand {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .btn,
+    .o_kanban_record,
+    .dropdown-item,
+    .o_nav_entry {
+        transition:
+            background-color 130ms ease,
+            border-color 130ms ease,
+            box-shadow 130ms ease,
+            transform 130ms ease;
+    }
+}
+
+
+/* ========================================================================== */
+/* V6.4 — SAFE POST-COMPILED BRAND TOKENS                                     */
+/* This file is plain CSS. It does not depend on Sass variables or maps.       */
+/* ========================================================================== */
+
+:root {
+    --bs-primary: #E01F25;
+    --bs-primary-rgb: 224, 31, 37;
+    --bs-link-color: #C5161C;
+    --bs-link-hover-color: #A91117;
+    --bs-focus-ring-color: rgba(224, 31, 37, 0.22);
+}
+
+.text-primary,
+.text-action {
+    color: #C5161C !important;
+}
+
+.bg-primary {
+    background-color: #E01F25 !important;
+}
+
+.border-primary {
+    border-color: #E01F25 !important;
+}
+
+.btn-outline-primary {
+    color: #C5161C !important;
+    border-color: #E01F25 !important;
+}
+
+.btn-outline-primary:hover,
+.btn-outline-primary:focus,
+.btn-outline-primary:active {
+    color: #FFFFFF !important;
+    background-color: #E01F25 !important;
+    border-color: #E01F25 !important;
+}
+
+.form-check-input:checked {
+    background-color: #E01F25 !important;
+    border-color: #E01F25 !important;
+}
+
+.form-check-input:focus {
+    border-color: #E01F25 !important;
+    box-shadow: 0 0 0 0.2rem rgba(224, 31, 37, 0.18) !important;
+}
+
+.progress-bar {
+    background-color: #E01F25;
+}
+
+.page-item.active .page-link,
+.list-group-item.active,
+.nav-pills .nav-link.active,
+.nav-pills .show > .nav-link {
+    color: #FFFFFF !important;
+    background-color: #E01F25 !important;
+    border-color: #E01F25 !important;
+}
+
+.o_statusbar_status .o_arrow_button.btn-primary,
+.o_statusbar_status .o_arrow_button.o_arrow_button_current {
+    color: #FFFFFF !important;
+    background-color: #E01F25 !important;
+    border-color: #E01F25 !important;
+}
+
+.badge.text-bg-primary,
+.badge.bg-primary {
+    color: #FFFFFF !important;
+    background-color: #E01F25 !important;
+}
+
+.o_required_modifier.o_input,
+.o_required_modifier .o_input,
+.o_field_required .o_input {
+    border-bottom-color: #E01F25 !important;
+}
+
+.o_main_navbar .o_nav_entry.active,
+.o_main_navbar .o_menu_sections > button.active {
+    background-color: rgba(224, 31, 37, 0.18) !important;
+    box-shadow: inset 0 -3px 0 #E01F25;
+}

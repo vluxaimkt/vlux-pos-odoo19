@@ -1,0 +1,110 @@
+<odoo>
+    <record id="view_vlux_fiscal_config_list" model="ir.ui.view">
+        <field name="name">vlux.fiscal.config.list</field>
+        <field name="model">vlux.fiscal.config</field>
+        <field name="arch" type="xml">
+            <list decoration-success="is_validated"
+                  decoration-warning="not is_validated">
+                <field name="company_id"/>
+                <field name="mode"/>
+                <field name="pac_provider_id"/>
+                <field name="auto_process"/>
+                <field name="csd_status"/>
+                <field name="is_validated"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_vlux_fiscal_config_form" model="ir.ui.view">
+        <field name="name">vlux.fiscal.config.form</field>
+        <field name="model">vlux.fiscal.config</field>
+        <field name="arch" type="xml">
+            <form string="Configuración fiscal">
+                <header>
+                    <button name="action_load_company_data"
+                            type="object"
+                            string="Cargar datos de empresa"/>
+                    <button name="action_test_provider"
+                            type="object"
+                            string="Probar proveedor"/>
+                    <button name="action_validate_configuration"
+                            type="object"
+                            string="Validar configuración"
+                            class="btn-primary"/>
+                </header>
+                <sheet>
+                    <div class="alert alert-success"
+                         role="alert"
+                         invisible="not is_validated">
+                        Configuración validada y lista para automatización.
+                    </div>
+                    <div class="alert alert-warning"
+                         role="alert"
+                         invisible="is_validated">
+                        Complete y valide esta configuración antes de
+                        procesar solicitudes automáticamente.
+                    </div>
+                    <div class="oe_title">
+                        <label for="name"/>
+                        <h1><field name="name"/></h1>
+                    </div>
+                    <group>
+                        <group string="Operación">
+                            <field name="company_id"/>
+                            <field name="mode"/>
+                            <field name="pac_provider_id"/>
+                            <field name="auto_process"/>
+                            <field name="active"/>
+                        </group>
+                        <group string="Validación">
+                            <field name="is_validated"/>
+                            <field name="validated_at"/>
+                            <field name="last_validation_message"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Datos del emisor">
+                            <group>
+                                <group>
+                                    <field name="fiscal_name"/>
+                                    <field name="vat"/>
+                                </group>
+                                <group>
+                                    <field name="fiscal_zip"/>
+                                    <field name="fiscal_regime"/>
+                                    <field name="billing_email"/>
+                                </group>
+                            </group>
+                        </page>
+                        <page string="CSD">
+                            <div class="alert alert-info" role="alert">
+                                La bóveda cifrada para cargar los archivos
+                                .cer y .key se añadirá en el siguiente
+                                incremento. No cargue secretos todavía.
+                            </div>
+                            <group>
+                                <group>
+                                    <field name="csd_status"/>
+                                    <field name="certificate_serial"/>
+                                    <field name="certificate_rfc"/>
+                                </group>
+                                <group>
+                                    <field name="certificate_valid_from"/>
+                                    <field name="certificate_valid_to"/>
+                                </group>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_vlux_fiscal_config"
+            model="ir.actions.act_window">
+        <field name="name">Configuración fiscal</field>
+        <field name="res_model">vlux.fiscal.config</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>

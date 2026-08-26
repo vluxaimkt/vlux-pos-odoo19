@@ -1,0 +1,205 @@
+<odoo>
+    <record id="view_vlux_fiscal_request_list" model="ir.ui.view">
+        <field name="name">vlux.fiscal.request.list</field>
+        <field name="model">vlux.fiscal.request</field>
+        <field name="arch" type="xml">
+            <list decoration-danger="state == 'stamp_error'"
+                  decoration-success="state == 'stamped'"
+                  decoration-info="state == 'simulation_completed'">
+                <field name="name"/>
+                <field name="request_date"/>
+                <field name="pos_order_id"/>
+                <field name="partner_id"/>
+                <field name="amount_total"/>
+                <field name="config_id"/>
+                <field name="pac_provider_id"/>
+                <field name="automatic_processing"/>
+                <field name="state"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_vlux_fiscal_request_search" model="ir.ui.view">
+        <field name="name">vlux.fiscal.request.search</field>
+        <field name="model">vlux.fiscal.request</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="pos_order_id"/>
+                <field name="partner_id"/>
+                <field name="vat"/>
+                <field name="state"/>
+                <filter name="filter_pending"
+                        string="Pendientes de timbrado"
+                        domain="[('state', 'in', ['confirmed', 'ready_to_stamp', 'stamp_error'])]"/>
+                <filter name="filter_simulation"
+                        string="Simulaciones"
+                        domain="[('state', '=', 'simulation_completed')]"/>
+                <filter name="filter_stamped"
+                        string="Timbradas"
+                        domain="[('state', '=', 'stamped')]"/>
+                <group>
+                    <filter name="group_state"
+                            string="Estado"
+                            context="{'group_by': 'state'}"/>
+                    <filter name="group_provider"
+                            string="PAC"
+                            context="{'group_by': 'pac_provider_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="view_vlux_fiscal_request_form" model="ir.ui.view">
+        <field name="name">vlux.fiscal.request.form</field>
+        <field name="model">vlux.fiscal.request</field>
+        <field name="arch" type="xml">
+            <form string="Solicitud de facturación">
+                <header>
+                    <button name="action_process_automatically"
+                            type="object"
+                            string="Procesar automáticamente"
+                            class="btn-primary"
+                            invisible="state not in ('draft', 'validated', 'confirmed', 'ready_to_stamp', 'stamp_error')"/>
+                    <button name="action_validate_data"
+                            type="object"
+                            string="Validar datos"
+                            invisible="state not in ('draft', 'stamp_error')"/>
+                    <button name="action_confirm"
+                            type="object"
+                            string="Confirmar"
+                            invisible="state != 'validated'"/>
+                    <button name="action_mark_ready"
+                            type="object"
+                            string="Lista para timbrar"
+                            invisible="state != 'confirmed'"/>
+                    <button name="action_send_to_pac"
+                            type="object"
+                            string="Enviar al PAC"
+                            invisible="state not in ('ready_to_stamp', 'stamp_error')"/>
+                    <button name="action_reset_to_draft"
+                            type="object"
+                            string="Volver a borrador"
+                            invisible="state in ('draft', 'stamped', 'cancelled')"/>
+                    <button name="action_request_cancellation"
+                            type="object"
+                            string="Solicitar cancelación"
+                            invisible="state != 'stamped'"/>
+                    <field name="state"
+                           widget="statusbar"
+                           statusbar_visible="draft,validated,confirmed,ready_to_stamp,stamping,simulation_completed,stamped,stamp_error,cancelled"/>
+                </header>
+
+                <sheet>
+                    <div class="alert alert-warning"
+                         role="alert"
+                         invisible="state == 'stamped'">
+                        Documento sin validez fiscal hasta recibir un
+                        timbre válido de un PAC autorizado.
+                    </div>
+
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_open_pos_order"
+                                type="object"
+                                class="oe_stat_button"
+                                icon="fa-shopping-cart">
+                            <div class="o_stat_info">
+                                <span class="o_stat_text">Venta POS</span>
+                            </div>
+                        </button>
+
+                        <button name="action_open_invoice"
+                                type="object"
+                                class="oe_stat_button"
+                                icon="fa-file-text-o"
+                                invisible="not account_move_id">
+                            <div class="o_stat_info">
+                                <span class="o_stat_text">
+                                    Factura contable
+                                </span>
+                            </div>
+                        </button>
+                    </div>
+
+                    <div class="oe_title">
+                        <label for="name"/>
+                        <h1>
+                            <field name="name"/>
+                        </h1>
+                    </div>
+
+                    <group>
+                        <group string="Venta">
+                            <field name="pos_order_id"/>
+                            <field name="account_move_id"/>
+                            <field name="partner_id"/>
+                            <field name="amount_total"/>
+                            <field name="company_id" invisible="1"/>
+                            <field name="currency_id" invisible="1"/>
+                        </group>
+
+                        <group string="Automatización">
+                            <field name="config_id"/>
+                            <field name="pac_provider_id"/>
+                            <field name="automatic_processing"/>
+                            <field name="request_date"/>
+                            <field name="confirmed_at"/>
+                            <field name="retry_count"/>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <page string="Datos fiscales">
+                            <group>
+                                <group>
+                                    <field name="fiscal_name"/>
+                                    <field name="vat"/>
+                                    <field name="fiscal_zip"/>
+                                </group>
+
+                                <group>
+                                    <field name="fiscal_regime"/>
+                                    <field name="cfdi_use"/>
+                                    <field name="email"/>
+                                    <field name="phone"/>
+                                </group>
+                            </group>
+                        </page>
+
+                        <page string="Timbrado y simulación">
+                            <group>
+                                <group>
+                                    <field name="simulation_reference"/>
+                                    <field name="fiscal_uuid"/>
+                                    <field name="stamped_at"/>
+                                </group>
+
+                                <group>
+                                    <field name="last_error"/>
+                                </group>
+                            </group>
+                        </page>
+
+                        <page string="Seguridad">
+                            <group>
+                                <field name="access_token"
+                                       password="True"/>
+                                <field name="token_expires_at"/>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_vlux_fiscal_request"
+            model="ir.actions.act_window">
+        <field name="name">Solicitudes de facturación</field>
+        <field name="res_model">vlux.fiscal.request</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id"
+               ref="view_vlux_fiscal_request_search"/>
+    </record>
+</odoo>

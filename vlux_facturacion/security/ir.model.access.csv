@@ -1,0 +1,4 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_vlux_fiscal_request_system,vlux.fiscal.request system,model_vlux_fiscal_request,base.group_system,1,1,1,1
+access_vlux_pac_provider_system,vlux.pac.provider system,model_vlux_pac_provider,base.group_system,1,1,1,1
+access_vlux_fiscal_config_system,vlux.fiscal.config system,model_vlux_fiscal_config,base.group_system,1,1,1,1

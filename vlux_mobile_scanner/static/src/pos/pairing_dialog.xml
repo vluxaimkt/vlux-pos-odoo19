@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+    <t t-name="vlux_mobile_scanner.MobilePairingDialog">
+        <Dialog title="'VLUX Mobile Scanner'" size="'md'" footer="false">
+            <div class="vlux-pairing-dialog">
+                <div class="vlux-pairing-brand">
+                    <span class="vlux-pairing-logo">V</span>
+                    <div><strong>VLUX MOBILE SCANNER</strong><small t-esc="props.pairing.pos_name"/></div>
+                </div>
+                <div class="vlux-pairing-status" t-att-class="statusClass">
+                    <span class="vlux-pairing-dot"/><t t-esc="statusText"/>
+                </div>
+                <div class="vlux-pairing-grid">
+                    <div class="vlux-pairing-qr"><img t-att-src="props.pairing.qr_data_uri" alt="QR de conexion"/></div>
+                    <div class="vlux-pairing-code-panel">
+                        <span>Codigo de conexion</span><strong t-esc="props.pairing.code"/><small>Expira en 10 minutos</small>
+                    </div>
+                </div>
+                <p class="text-muted mt-3 mb-2">Escanea el QR con la camara del telefono o abre el enlace. El telefono quedara vinculado solamente a esta caja.</p>
+                <div class="vlux-pairing-url"><code t-esc="props.pairing.scanner_url"/></div>
+                <div class="d-flex gap-2 mt-3 flex-wrap">
+                    <button class="btn btn-primary" t-on-click="copyUrl"><i class="fa fa-copy me-1"/><t t-if="state.copied">Copiado</t><t t-else="">Copiar enlace</t></button>
+                    <button class="btn btn-outline-danger" t-on-click="revoke" t-att-disabled="state.status === 'revoked'">Revocar</button>
+                    <button class="btn btn-secondary ms-auto" t-on-click="props.close">Cerrar</button>
+                </div>
+            </div>
+        </Dialog>
+    </t>
+</templates>
