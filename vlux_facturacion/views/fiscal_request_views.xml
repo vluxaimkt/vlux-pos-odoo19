@@ -182,9 +182,8 @@
 
                         <page string="Seguridad">
                             <group>
-                                <field name="access_token"
-                                       password="True"/>
                                 <field name="token_expires_at"/>
+                                <field name="token_revoked_at"/>
                             </group>
                         </page>
                     </notebook>

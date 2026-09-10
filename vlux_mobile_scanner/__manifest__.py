@@ -5,7 +5,7 @@
         "Empareja un telefono con una caja POS mediante codigo temporal y "
         "envia codigos de barras al flujo estandar de escaneo de Odoo POS."
     ),
-    "version": "19.0.1.3.0",
+    "version": "19.0.1.4.0",
     "category": "Sales/Point of Sale",
     "author": "VLUX",
     "website": "https://vlux.com.mx",

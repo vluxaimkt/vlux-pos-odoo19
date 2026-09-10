@@ -1,7 +1,7 @@
 {
     "name": "VLUX Facturación",
     "summary": "Autofacturación automática con arquitectura abierta para PAC",
-    "version": "19.0.0.3.0",
+    "version": "19.0.0.4.0",
     "category": "Accounting/Accounting",
     "author": "VLUX",
     "license": "LGPL-3",

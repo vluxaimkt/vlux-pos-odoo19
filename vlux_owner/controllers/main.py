@@ -1,10 +1,12 @@
-import hmac
 import json
+import logging
 
 from odoo import http
 from odoo.exceptions import AccessError
 from odoo.http import Response, request
 from odoo.tools import file_open
+
+_logger = logging.getLogger(__name__)
 
 
 class VluxOwnerController(http.Controller):
@@ -21,6 +23,22 @@ class VluxOwnerController(http.Controller):
         )
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        return response
+
+    def _secure_html_response(self, response):
+        response.headers["Cache-Control"] = "no-store, private, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self'; style-src 'self'; "
+            "img-src 'self' data:; connect-src 'self'; worker-src 'self'; "
+            "manifest-src 'self'; object-src 'none'; base-uri 'self'; "
+            "form-action 'self'; frame-ancestors 'none'"
+        )
         return response
 
     @http.route("/vlux-owner", type="http", auth="user", methods=["GET"], sitemap=False)
@@ -30,7 +48,7 @@ class VluxOwnerController(http.Controller):
     @http.route("/vlux-owner/", type="http", auth="user", methods=["GET"], sitemap=False)
     def owner_app(self, **kwargs):
         self._ensure_owner_access()
-        return request.render("vlux_owner.owner_app")
+        return self._secure_html_response(request.render("vlux_owner.owner_app"))
 
     @http.route("/vlux_owner/api/dashboard", type="jsonrpc", auth="user", methods=["POST"], readonly=True)
     def dashboard(self, date=None, **kwargs):
@@ -40,40 +58,60 @@ class VluxOwnerController(http.Controller):
     @http.route(
         "/vlux_owner/api/share/dashboard",
         type="http",
-        auth="public",
+        auth="bearer",
         methods=["POST"],
         csrf=False,
         save_session=False,
         sitemap=False,
     )
     def shared_dashboard(self, **kwargs):
-        params = request.env["ir.config_parameter"].sudo()
-        expected_token = params.get_param("vlux_owner.demo_api_token", "")
-        provided_token = request.httprequest.headers.get("X-VLUX-Owner-Token", "")
-
-        if not expected_token or not provided_token or not hmac.compare_digest(expected_token, provided_token):
+        authorization = request.httprequest.headers.get("Authorization", "")
+        if not authorization.lower().startswith("bearer "):
             return self._json_response({"ok": False, "error": "unauthorized"}, status=401)
+        if not request.env.user.has_group("vlux_owner.group_vlux_owner"):
+            return self._json_response({"ok": False, "error": "forbidden"}, status=403)
+        if not request.httprequest.is_json:
+            return self._json_response(
+                {"ok": False, "error": "invalid_content_type"},
+                status=415,
+            )
+        if (request.httprequest.content_length or 0) > 16 * 1024:
+            return self._json_response(
+                {"ok": False, "error": "request_too_large"},
+                status=413,
+            )
+        allowed = request.env["vlux.owner.rate.limit"].sudo().consume(
+            "shared_dashboard",
+            request.env.user.id,
+            30,
+            60,
+        )
+        if not allowed:
+            response = self._json_response(
+                {"ok": False, "error": "rate_limited"},
+                status=429,
+            )
+            response.headers["Retry-After"] = "60"
+            return response
 
         try:
             payload = request.httprequest.get_json(silent=True) or {}
+            if not isinstance(payload, dict):
+                return self._json_response(
+                    {"ok": False, "error": "invalid_request"},
+                    status=400,
+                )
             requested_date = payload.get("date")
-
-            user_id = int(params.get_param("vlux_owner.demo_user_id", "2") or 2)
-            demo_user = request.env["res.users"].sudo().browse(user_id).exists()
-            if not demo_user or not demo_user.active:
-                return self._json_response({"ok": False, "error": "demo_user_unavailable"}, status=503)
-
-            service = (
-                request.env["vlux.owner.dashboard.service"]
-                .with_user(demo_user)
-                .with_company(demo_user.company_id)
-            )
-            data = service.get_dashboard(date=requested_date)
+            with request.env.cr.savepoint():
+                service = request.env[
+                    "vlux.owner.dashboard.service"
+                ].with_company(request.env.company)
+                data = service.get_dashboard(date=requested_date)
             return self._json_response({"ok": True, "data": data})
         except (TypeError, ValueError):
             return self._json_response({"ok": False, "error": "invalid_request"}, status=400)
         except Exception:
-            request.env.cr.rollback()
+            _logger.exception("No fue posible generar el dashboard compartido.")
             return self._json_response({"ok": False, "error": "dashboard_unavailable"}, status=503)
 
     @http.route("/vlux-owner/manifest.webmanifest", type="http", auth="public", methods=["GET"], sitemap=False)

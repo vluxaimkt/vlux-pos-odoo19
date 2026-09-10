@@ -6,10 +6,11 @@ from odoo import api, fields, models
 
 
 PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-PAIR_CODE_LENGTH = 6
+PAIR_CODE_LENGTH = 8
 PAIR_CODE_TTL_MINUTES = 10
 MOBILE_TOKEN_TTL_HOURS = 8
 DEFAULT_COOLDOWN_MS = 1500
+PAIRING_RETENTION_DAYS = 30
 
 
 class VluxMobileScannerPairing(models.Model):
@@ -110,6 +111,10 @@ class VluxMobileScannerPairing(models.Model):
 
     def issue_mobile_token(self):
         self.ensure_one()
+        locked = self.try_lock_for_update()
+        if not locked:
+            return False
+        self = locked
         self.refresh_state()
         if self.state != "waiting":
             return False
@@ -141,3 +146,10 @@ class VluxMobileScannerPairing(models.Model):
     @api.autovacuum
     def _gc_expired_pairings(self):
         self.sudo().search([("state", "in", ["waiting", "paired"])]).refresh_state()
+        cutoff = fields.Datetime.now() - timedelta(days=PAIRING_RETENTION_DAYS)
+        self.sudo().search(
+            [
+                ("state", "in", ["revoked", "expired"]),
+                ("write_date", "<", cutoff),
+            ]
+        ).unlink()

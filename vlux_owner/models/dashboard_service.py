@@ -153,7 +153,12 @@ class VluxOwnerDashboardService(models.AbstractModel):
             })
 
         threshold = float(self.env["ir.config_parameter"].sudo().get_param("vlux_owner.low_stock_threshold", "10") or 10)
-        Product = self.env["product.product"].sudo().with_company(self.env.company)
+        Product = (
+            self.env["product.product"]
+            .sudo()
+            .with_company(self.env.company)
+            .with_context(allowed_company_ids=self.env.company.ids)
+        )
         product_domain = [
             ("active", "=", True),
             ("available_in_pos", "=", True),

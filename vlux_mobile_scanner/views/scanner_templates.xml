@@ -29,9 +29,9 @@
                     <section id="pairPanel" class="vlux-card vlux-pair-card">
                         <div class="vlux-eyebrow">EMPAREJAMIENTO SEGURO</div>
                         <h1>Conecta este telefono con tu caja</h1>
-                        <p class="vlux-muted">Introduce el codigo de seis caracteres que aparece en Odoo POS.</p>
+                        <p class="vlux-muted">Introduce el codigo de ocho caracteres que aparece en Odoo POS.</p>
                         <label for="pairCode">Codigo de conexion</label>
-                        <input id="pairCode" class="vlux-input vlux-code-input" maxlength="6" inputmode="text" autocomplete="one-time-code" placeholder="A7K9P2"/>
+                        <input id="pairCode" class="vlux-input vlux-code-input" maxlength="8" inputmode="text" autocomplete="one-time-code" placeholder="A7K9P2Q4"/>
                         <button id="pairButton" class="vlux-btn vlux-btn-primary" type="button">Conectar con la caja</button>
                         <div id="pairError" class="vlux-message is-error is-hidden"></div>
                     </section>

@@ -1,9 +1,16 @@
 import base64
+import hashlib
 import secrets
+from datetime import timedelta
 from xml.sax.saxutils import escape
 
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError, ValidationError
+
+
+PUBLIC_LINK_TTL_MINUTES = 10
+PUBLIC_SESSION_TTL_HOURS = 1
+PUBLIC_TOKEN_MAX_LENGTH = 256
 
 
 class VluxFiscalRequest(models.Model):
@@ -166,16 +173,22 @@ class VluxFiscalRequest(models.Model):
         copy=False,
         tracking=True,
     )
-    access_token = fields.Char(
-        string="Token público",
-        default=lambda self: secrets.token_urlsafe(32),
-        required=True,
+    access_token_hash = fields.Char(
+        string="Hash del token público",
         readonly=True,
         copy=False,
         index=True,
+        groups="base.group_no_one",
     )
     token_expires_at = fields.Datetime(
         string="Vencimiento del token",
+        readonly=True,
+        index=True,
+        copy=False,
+    )
+    token_revoked_at = fields.Datetime(
+        string="Revocación del token",
+        readonly=True,
         copy=False,
     )
     confirmed_at = fields.Datetime(
@@ -184,18 +197,83 @@ class VluxFiscalRequest(models.Model):
         copy=False,
     )
 
-    _sql_constraints = [
-        (
-            "request_pos_order_unique",
-            "unique(pos_order_id)",
-            "Ya existe una solicitud de facturación para esta venta POS.",
-        ),
-        (
-            "request_token_unique",
-            "unique(access_token)",
-            "El token público debe ser único.",
-        ),
-    ]
+    _pos_order_unique = models.Constraint(
+        "UNIQUE (pos_order_id)",
+        "Ya existe una solicitud de facturación para esta venta POS.",
+    )
+    _access_token_hash_unique = models.Constraint(
+        "UNIQUE (access_token_hash)",
+        "El token público debe ser único.",
+    )
+
+    @api.model
+    def _hash_public_token(self, raw_token):
+        if not isinstance(raw_token, str) or not raw_token:
+            return ""
+        if len(raw_token) > PUBLIC_TOKEN_MAX_LENGTH:
+            return ""
+        return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+    @api.model
+    def authenticate_public_token(self, raw_token, request_id=None):
+        digest = self._hash_public_token(raw_token)
+        if not digest:
+            return self.browse()
+        domain = [
+            ("access_token_hash", "=", digest),
+            ("token_revoked_at", "=", False),
+            ("token_expires_at", ">", fields.Datetime.now()),
+        ]
+        if request_id:
+            domain.append(("id", "=", request_id))
+        return self.sudo().search(domain, limit=1)
+
+    def issue_public_link_token(self):
+        self.ensure_one()
+        raw_token = secrets.token_urlsafe(32)
+        self.sudo().write(
+            {
+                "access_token_hash": self._hash_public_token(raw_token),
+                "token_expires_at": fields.Datetime.now()
+                + timedelta(minutes=PUBLIC_LINK_TTL_MINUTES),
+                "token_revoked_at": False,
+            }
+        )
+        return raw_token
+
+    @api.model
+    def exchange_public_link_token(self, raw_token):
+        record = self.authenticate_public_token(raw_token)
+        if not record:
+            return self.browse(), ""
+
+        locked = record.try_lock_for_update()
+        if not locked:
+            return self.browse(), ""
+        record = self.authenticate_public_token(raw_token, request_id=locked.id)
+        if not record:
+            return self.browse(), ""
+
+        session_token = secrets.token_urlsafe(32)
+        record.sudo().write(
+            {
+                "access_token_hash": self._hash_public_token(session_token),
+                "token_expires_at": fields.Datetime.now()
+                + timedelta(hours=PUBLIC_SESSION_TTL_HOURS),
+                "token_revoked_at": False,
+            }
+        )
+        return record, session_token
+
+    def revoke_public_token(self):
+        self.sudo().write(
+            {
+                "access_token_hash": False,
+                "token_expires_at": False,
+                "token_revoked_at": fields.Datetime.now(),
+            }
+        )
+        return True
 
     def _find_company_config(self, company):
         self.ensure_one()

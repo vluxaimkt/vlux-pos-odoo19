@@ -1,4 +1,9 @@
-from odoo import fields, models
+from datetime import timedelta
+
+from odoo import api, fields, models
+
+
+EVENT_RETENTION_DAYS = 30
 
 
 class VluxMobileScannerEvent(models.Model):
@@ -35,3 +40,8 @@ class VluxMobileScannerEvent(models.Model):
         "unique (request_id)",
         "El identificador de solicitud debe ser unico.",
     )
+
+    @api.autovacuum
+    def _gc_old_events(self):
+        cutoff = fields.Datetime.now() - timedelta(days=EVENT_RETENTION_DAYS)
+        self.sudo().search([("create_date", "<", cutoff)]).unlink()

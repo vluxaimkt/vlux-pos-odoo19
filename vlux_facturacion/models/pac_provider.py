@@ -23,9 +23,10 @@ class VluxPacProvider(models.Model):
     )
     notes = fields.Text()
 
-    _sql_constraints = [
-        ("provider_code_unique", "unique(code)", "El código del proveedor PAC debe ser único."),
-    ]
+    _code_unique = models.Constraint(
+        "UNIQUE (code)",
+        "El código del proveedor PAC debe ser único.",
+    )
 
     def validate_credentials(self):
         self.ensure_one()

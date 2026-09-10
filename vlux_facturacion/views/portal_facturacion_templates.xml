@@ -62,7 +62,7 @@
                             <p><strong>Ticket:</strong> <span t-esc="fiscal_request.pos_order_id.pos_reference"/></p>
                             <p><strong>Referencia:</strong> <span t-esc="fiscal_request.simulation_reference or 'Pendiente'"/></p>
                             <p><strong>Estado:</strong> <span t-esc="fiscal_request.state"/></p>
-                            <a t-if="attachment" class="btn btn-primary w-100" t-att-href="'/vlux/facturacion/xml/%s' % fiscal_request.access_token">Descargar XML de simulación</a>
+                            <a t-if="attachment" class="btn btn-primary w-100" t-att-href="'/vlux/facturacion/document/%s/xml' % fiscal_request.id">Descargar XML de simulación</a>
                             <div t-if="not attachment" class="alert alert-info mb-0">El XML todavía no está disponible.</div>
                         </div></div>
                     </t>

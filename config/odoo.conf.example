@@ -1,0 +1,30 @@
+[options]
+; Genere un secreto distinto para cada ambiente. No use este marcador.
+admin_passwd = REEMPLAZAR_CON_SECRETO_MAESTRO
+
+; PostgreSQL
+db_host = localhost
+db_port = 5432
+db_user = odoo
+db_password = REEMPLAZAR_CON_SECRETO_POSTGRESQL
+
+; Ajuste las rutas al equipo. La tercera ruta es la raíz de este repositorio.
+addons_path = C:\Odoo\src\odoo\odoo\addons,C:\Odoo\src\odoo\addons,C:\Odoo\custom_addons\vlux-pos-odoo19
+data_dir = C:\Odoo\data
+
+; Desarrollo local. En producción use loopback detrás de un proxy HTTPS.
+http_interface = 127.0.0.1
+http_port = 8069
+proxy_mode = False
+
+; En desarrollo permite elegir una base. En producción debe ser False.
+list_db = True
+dbfilter = ^vlux_pos_dev$
+
+; Logs
+logfile = C:\Odoo\logs\odoo.log
+log_level = info
+
+; Procesamiento local
+workers = 0
+max_cron_threads = 1

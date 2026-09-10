@@ -59,21 +59,21 @@
     const comparison = data.summary.comparison_vs_yesterday_pct;
     const comparisonHtml = comparison === null ? "" : `<p class="${comparison >= 0 ? "positive" : "negative"}">${comparison >= 0 ? "▲" : "▼"} ${Math.abs(comparison).toFixed(1)}% vs ayer a esta hora</p>`;
     const registers = data.sales_by_register.map((item) => `
-      <div class="register-row"><div class="register-head"><strong>${escapeHtml(item.name)}</strong><span>${money(item.amount)} · ${Number(item.share_pct).toFixed(1)}%</span></div><div class="progress"><i style="width:${Math.min(Number(item.share_pct), 100)}%"></i></div></div>`).join("");
+      <div class="register-row"><div class="register-head"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(money(item.amount))} · ${Number(item.share_pct).toFixed(1)}%</span></div><div class="progress"><i style="width:${Math.min(Number(item.share_pct), 100)}%"></i></div></div>`).join("");
     return `
-      <section class="hero-card"><div><span>VENTAS TOTALES HOY</span><strong>${money(data.summary.sales_today)}</strong>${comparisonHtml}</div><canvas class="sparkline" id="sparkline" width="252" height="180"></canvas></section>
+      <section class="hero-card"><div><span>VENTAS TOTALES HOY</span><strong>${escapeHtml(money(data.summary.sales_today))}</strong>${comparisonHtml}</div><canvas class="sparkline" id="sparkline" width="252" height="180"></canvas></section>
       <section class="kpi-grid">${kpi("Tickets", data.summary.tickets, "T")}${kpi("Productos vendidos", data.summary.units_sold, "P")}${kpi("Ticket promedio", money(data.summary.average_ticket), "$")}${kpi("Cajas con ventas", data.sales_by_register.length, "C")}</section>
       <section class="section-block"><div class="section-title"><div><span>VENTAS POR HORA</span><h2>Ritmo del día</h2></div></div><div class="chart-card"><canvas class="chart-canvas" id="salesChart"></canvas></div></section>
       <section class="section-block"><div class="section-title"><div><span>OPERACIÓN</span><h2>Ventas por caja</h2></div><button data-tab="sales">Ver todas</button></div><div class="list-surface">${registers || '<div class="empty-state">Todavía no hay ventas confirmadas hoy.</div>'}</div></section>`;
   }
 
   function salesView() {
-    const rows = state.data.latest_sales.map((sale) => `<div class="detail-row"><div class="grow"><strong>${escapeHtml(sale.reference)}</strong><small>${escapeHtml(sale.time)} · ${escapeHtml(sale.register)} · ${escapeHtml(sale.cashier)}</small></div><strong>${money(sale.amount)}</strong></div>`).join("");
+    const rows = state.data.latest_sales.map((sale) => `<div class="detail-row"><div class="grow"><strong>${escapeHtml(sale.reference)}</strong><small>${escapeHtml(sale.time)} · ${escapeHtml(sale.register)} · ${escapeHtml(sale.cashier)}</small></div><strong>${escapeHtml(money(sale.amount))}</strong></div>`).join("");
     return `<section class="page-section"><p class="eyebrow">VENTAS</p><h2>Últimas ventas confirmadas</h2><div class="list-surface">${rows || '<div class="empty-state">Sin ventas confirmadas.</div>'}</div></section>`;
   }
 
   function productsView() {
-    const rows = state.data.top_products.map((product, index) => `<div class="detail-row"><span class="rank">${index + 1}</span><div class="grow"><strong>${escapeHtml(product.name)}</strong><small>${Number(product.qty).toFixed(0)} unidades</small></div><strong>${money(product.amount)}</strong></div>`).join("");
+    const rows = state.data.top_products.map((product, index) => `<div class="detail-row"><span class="rank">${index + 1}</span><div class="grow"><strong>${escapeHtml(product.name)}</strong><small>${Number(product.qty).toFixed(0)} unidades</small></div><strong>${escapeHtml(money(product.amount))}</strong></div>`).join("");
     return `<section class="page-section"><p class="eyebrow">PRODUCTOS</p><h2>Más vendidos hoy</h2><div class="list-surface">${rows || '<div class="empty-state">Aún no hay datos de productos.</div>'}</div></section>`;
   }
 

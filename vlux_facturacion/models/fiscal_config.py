@@ -109,13 +109,10 @@ class VluxFiscalConfig(models.Model):
         tracking=True,
     )
 
-    _sql_constraints = [
-        (
-            "vlux_fiscal_config_company_unique",
-            "unique(company_id)",
-            "Solo puede existir una configuración fiscal por empresa.",
-        ),
-    ]
+    _company_unique = models.Constraint(
+        "UNIQUE (company_id)",
+        "Solo puede existir una configuración fiscal por empresa.",
+    )
 
     @api.depends("company_id")
     def _compute_name(self):

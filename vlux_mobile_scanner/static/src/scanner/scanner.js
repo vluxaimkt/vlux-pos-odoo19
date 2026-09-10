@@ -126,8 +126,8 @@
 
     async function pair(code) {
         const clean = (code || "").trim().toUpperCase();
-        if (clean.length !== 6) {
-            setPairError("Introduce un codigo de conexion de 6 caracteres.");
+        if (clean.length !== 8) {
+            setPairError("Introduce un codigo de conexion de 8 caracteres.");
             return;
         }
         setPairError("");
@@ -157,7 +157,7 @@
     async function heartbeat() {
         if (!state.token) return false;
         try {
-            const data = await requestJson("/vlux/mobile/heartbeat", { method: "GET" });
+            const data = await requestJson("/vlux/mobile/heartbeat", { method: "POST" });
             state.posName = data.pos_name;
             state.cooldownMs = Number(data.cooldown_ms || state.cooldownMs);
             showScanner(state.posName);
@@ -180,8 +180,11 @@
             await new Promise((resolve) => window.setTimeout(resolve, 250));
             try {
                 const result = await requestJson(
-                    `/vlux/mobile/result?request_id=${encodeURIComponent(requestId)}`,
-                    { method: "GET" },
+                    "/vlux/mobile/result",
+                    {
+                        method: "POST",
+                        body: JSON.stringify({ request_id: requestId }),
+                    },
                     true
                 );
                 if (result.status === "queued") continue;

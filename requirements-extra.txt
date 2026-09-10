@@ -1,0 +1,2 @@
+# Dependencia externa declarada por vlux_mobile_scanner.
+qrcode==7.4.2

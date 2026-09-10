@@ -12,7 +12,8 @@ from odoo.http import request
 
 
 BARCODE_MAX_LENGTH = 128
-PAIR_CODE_RE = re.compile(r"^[A-Z2-9]{6}$")
+JSON_BODY_MAX_BYTES = 16 * 1024
+PAIR_CODE_RE = re.compile(r"^[A-Z2-9]{8}$")
 
 
 class VluxMobileScannerController(http.Controller):
@@ -21,14 +22,67 @@ class VluxMobileScannerController(http.Controller):
         payload = request.httprequest.get_json(silent=True)
         return payload if isinstance(payload, dict) else {}
 
+    def _validate_json_request(self):
+        if not request.httprequest.is_json:
+            return self._error(
+                "El contenido debe ser JSON.",
+                status=415,
+                code="INVALID_CONTENT_TYPE",
+            )
+        if (request.httprequest.content_length or 0) > JSON_BODY_MAX_BYTES:
+            return self._error(
+                "La solicitud supera el tamaño permitido.",
+                status=413,
+                code="REQUEST_TOO_LARGE",
+            )
+        return None
+
     def _json(self, payload, status=200):
-        return request.make_json_response(payload, status=status)
+        response = request.make_json_response(payload, status=status)
+        response.headers["Cache-Control"] = "no-store, private, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
 
     def _error(self, message, status=400, code="ERROR"):
         return self._json({"ok": False, "code": code, "message": message}, status=status)
 
     def _require_pos_user(self):
         return request.env.user.has_group("point_of_sale.group_pos_user")
+
+    def _require_pos_csrf(self):
+        token = request.httprequest.headers.get("X-CSRF-Token", "")
+        return bool(token and request.validate_csrf(token))
+
+    def _client_identity(self):
+        return request.httprequest.remote_addr or "unknown"
+
+    def _consume_rate_limit(self, scope, identity, limit, window_seconds):
+        return request.env["vlux.mobile.scanner.rate.limit"].sudo().consume(
+            scope,
+            identity,
+            limit,
+            window_seconds,
+        )
+
+    def _rate_limit_error(self):
+        response = self._error(
+            "Demasiadas solicitudes. Intente nuevamente más tarde.",
+            status=429,
+            code="RATE_LIMITED",
+        )
+        response.headers["Retry-After"] = "60"
+        return response
+
+    def _accessible_pos_session(self, session_id, config_id=None):
+        domain = [
+            ("id", "=", session_id),
+            ("company_id", "in", request.env.companies.ids),
+        ]
+        if config_id is not None:
+            domain.append(("config_id", "=", config_id))
+        return request.env["pos.session"].search(domain, limit=1)
 
     def _mobile_token(self):
         authorization = request.httprequest.headers.get("Authorization", "")
@@ -45,14 +99,15 @@ class VluxMobileScannerController(http.Controller):
             return ""
         try:
             parsed = urlsplit(value)
+            host = parsed.hostname
+            port_number = parsed.port
         except ValueError:
             return ""
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        if parsed.scheme not in ("http", "https") or not host:
             return ""
-        host = parsed.hostname
         if ":" in host and not host.startswith("["):
             host = f"[{host}]"
-        port = f":{parsed.port}" if parsed.port else ""
+        port = f":{port_number}" if port_number else ""
         return f"{parsed.scheme}://{host}{port}"
 
     def _is_loopback_url(self, value):
@@ -114,7 +169,14 @@ class VluxMobileScannerController(http.Controller):
             return False, "El codigo contiene caracteres de control no permitidos."
         return barcode, False
 
-    @http.route("/vlux/scanner", type="http", auth="public", methods=["GET"], sitemap=False)
+    @http.route(
+        "/vlux/scanner",
+        type="http",
+        auth="public",
+        methods=["GET"],
+        sitemap=False,
+        save_session=False,
+    )
     def scanner_page(self, **kwargs):
         pair_code = str(kwargs.get("pair") or "").strip().upper()
         response = request.render(
@@ -122,10 +184,31 @@ class VluxMobileScannerController(http.Controller):
             {"db_name": request.db or "", "pair_code": pair_code},
         )
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+        response.headers["Permissions-Policy"] = "camera=(self)"
         return response
 
-    @http.route("/vlux/mobile/pair", type="http", auth="public", methods=["POST"], csrf=False)
+    @http.route(
+        "/vlux/mobile/pair",
+        type="http",
+        auth="public",
+        methods=["POST"],
+        csrf=False,
+        save_session=False,
+    )
     def mobile_pair(self, **kwargs):
+        invalid_request = self._validate_json_request()
+        if invalid_request:
+            return invalid_request
+        if not self._consume_rate_limit(
+            "pair",
+            self._client_identity(),
+            5,
+            60,
+        ):
+            return self._rate_limit_error()
         payload = self._json_payload()
         pair_code = str(payload.get("code") or "").strip().upper()
         if not PAIR_CODE_RE.match(pair_code):
@@ -136,12 +219,16 @@ class VluxMobileScannerController(http.Controller):
         )
         if not pairing:
             return self._error(
-                "El codigo no existe o ya no esta disponible.", status=404, code="PAIR_NOT_FOUND"
+                "El codigo no existe, expiro o ya fue utilizado.",
+                status=400,
+                code="PAIR_UNAVAILABLE",
             )
         pairing.refresh_state()
         if pairing.state != "waiting":
             return self._error(
-                "El codigo de conexion expiro o ya fue utilizado.", status=409, code="PAIR_UNAVAILABLE"
+                "El codigo no existe, expiro o ya fue utilizado.",
+                status=400,
+                code="PAIR_UNAVAILABLE",
             )
         if pairing.pos_session_id.state not in ("opening_control", "opened"):
             pairing.action_revoke()
@@ -165,13 +252,25 @@ class VluxMobileScannerController(http.Controller):
             }
         )
 
-    @http.route("/vlux/mobile/heartbeat", type="http", auth="public", methods=["GET"], csrf=False)
+    @http.route(
+        "/vlux/mobile/heartbeat",
+        type="http",
+        auth="public",
+        methods=["POST"],
+        csrf=False,
+        save_session=False,
+    )
     def mobile_heartbeat(self, **kwargs):
+        invalid_request = self._validate_json_request()
+        if invalid_request:
+            return invalid_request
         pairing = self._authenticate_mobile()
         if not pairing:
             return self._error(
                 "La vinculacion movil no es valida o expiro.", status=401, code="INVALID_TOKEN"
             )
+        if not self._consume_rate_limit("heartbeat", pairing.id, 12, 60):
+            return self._rate_limit_error()
         if pairing.pos_session_id.state not in ("opening_control", "opened"):
             pairing.action_revoke()
             return self._error(
@@ -187,21 +286,45 @@ class VluxMobileScannerController(http.Controller):
             }
         )
 
-    @http.route("/vlux/mobile/disconnect", type="http", auth="public", methods=["POST"], csrf=False)
+    @http.route(
+        "/vlux/mobile/disconnect",
+        type="http",
+        auth="public",
+        methods=["POST"],
+        csrf=False,
+        save_session=False,
+    )
     def mobile_disconnect(self, **kwargs):
+        invalid_request = self._validate_json_request()
+        if invalid_request:
+            return invalid_request
         pairing = self._authenticate_mobile()
         if not pairing:
             return self._json({"ok": True, "revoked": False})
+        if not self._consume_rate_limit("disconnect", pairing.id, 5, 60):
+            return self._rate_limit_error()
         pairing.action_revoke()
         return self._json({"ok": True, "revoked": True})
 
-    @http.route("/vlux/mobile/scan", type="http", auth="public", methods=["POST"], csrf=False)
+    @http.route(
+        "/vlux/mobile/scan",
+        type="http",
+        auth="public",
+        methods=["POST"],
+        csrf=False,
+        save_session=False,
+    )
     def mobile_scan(self, **kwargs):
+        invalid_request = self._validate_json_request()
+        if invalid_request:
+            return invalid_request
         pairing = self._authenticate_mobile()
         if not pairing:
             return self._error(
                 "La vinculacion movil no es valida o expiro.", status=401, code="INVALID_TOKEN"
             )
+        if not self._consume_rate_limit("scan", pairing.id, 120, 60):
+            return self._rate_limit_error()
         if pairing.pos_session_id.state not in ("opening_control", "opened"):
             pairing.action_revoke()
             return self._error("La caja no tiene una sesion activa.", status=409, code="POS_SESSION_CLOSED")
@@ -262,14 +385,27 @@ class VluxMobileScannerController(http.Controller):
             status=202,
         )
 
-    @http.route("/vlux/mobile/result", type="http", auth="public", methods=["GET"], csrf=False)
+    @http.route(
+        "/vlux/mobile/result",
+        type="http",
+        auth="public",
+        methods=["POST"],
+        csrf=False,
+        save_session=False,
+    )
     def mobile_result(self, **kwargs):
+        invalid_request = self._validate_json_request()
+        if invalid_request:
+            return invalid_request
         pairing = self._authenticate_mobile()
         if not pairing:
             return self._error(
                 "La vinculacion movil no es valida o expiro.", status=401, code="INVALID_TOKEN"
             )
-        request_id = str(kwargs.get("request_id") or "").strip()
+        if not self._consume_rate_limit("result", pairing.id, 180, 60):
+            return self._rate_limit_error()
+        payload = self._json_payload()
+        request_id = str(payload.get("request_id") or "").strip()
         event = request.env["vlux.mobile.scanner.event"].sudo().search(
             [("request_id", "=", request_id), ("pairing_id", "=", pairing.id)], limit=1
         )
@@ -298,6 +434,11 @@ class VluxMobileScannerController(http.Controller):
     def pos_pairing_create(self, **kwargs):
         if not self._require_pos_user():
             return self._error("Acceso denegado.", status=403, code="ACCESS_DENIED")
+        if not self._require_pos_csrf():
+            return self._error("Solicitud inválida.", status=403, code="INVALID_CSRF")
+        invalid_request = self._validate_json_request()
+        if invalid_request:
+            return invalid_request
         payload = self._json_payload()
         try:
             session_id = int(payload.get("pos_session_id"))
@@ -309,7 +450,7 @@ class VluxMobileScannerController(http.Controller):
         if not device_identifier or len(device_identifier) > 128:
             return self._error("No se pudo identificar este dispositivo POS.", code="INVALID_DEVICE")
 
-        session = request.env["pos.session"].browse(session_id).exists()
+        session = self._accessible_pos_session(session_id, config_id=config_id)
         if (
             not session
             or session.config_id.id != config_id
@@ -343,19 +484,26 @@ class VluxMobileScannerController(http.Controller):
         return (
             pairing.pos_session_id.id == session_id
             and pairing.device_identifier == device_identifier
+            and bool(self._accessible_pos_session(session_id))
         )
 
-    @http.route("/vlux/pos/pairing/status", type="http", auth="user", methods=["GET"], csrf=False)
+    @http.route("/vlux/pos/pairing/status", type="http", auth="user", methods=["POST"], csrf=False)
     def pos_pairing_status(self, **kwargs):
         if not self._require_pos_user():
             return self._error("Acceso denegado.", status=403, code="ACCESS_DENIED")
+        if not self._require_pos_csrf():
+            return self._error("Solicitud inválida.", status=403, code="INVALID_CSRF")
+        invalid_request = self._validate_json_request()
+        if invalid_request:
+            return invalid_request
+        payload = self._json_payload()
         try:
-            pairing_id = int(kwargs.get("pairing_id"))
-            session_id = int(kwargs.get("pos_session_id"))
+            pairing_id = int(payload.get("pairing_id"))
+            session_id = int(payload.get("pos_session_id"))
         except (TypeError, ValueError):
             return self._error("Vinculacion invalida.", code="INVALID_PAIRING")
 
-        device_identifier = str(kwargs.get("device_identifier") or "").strip()
+        device_identifier = str(payload.get("device_identifier") or "").strip()
         pairing = request.env["vlux.mobile.scanner.pairing"].sudo().browse(pairing_id).exists()
         if not pairing:
             return self._error("Vinculacion no encontrada.", status=404)
@@ -384,6 +532,11 @@ class VluxMobileScannerController(http.Controller):
     def pos_pairing_revoke(self, **kwargs):
         if not self._require_pos_user():
             return self._error("Acceso denegado.", status=403, code="ACCESS_DENIED")
+        if not self._require_pos_csrf():
+            return self._error("Solicitud inválida.", status=403, code="INVALID_CSRF")
+        invalid_request = self._validate_json_request()
+        if invalid_request:
+            return invalid_request
         payload = self._json_payload()
         try:
             pairing_id = int(payload.get("pairing_id"))
@@ -410,6 +563,11 @@ class VluxMobileScannerController(http.Controller):
     def pos_ack(self, **kwargs):
         if not self._require_pos_user():
             return self._error("Acceso denegado.", status=403, code="ACCESS_DENIED")
+        if not self._require_pos_csrf():
+            return self._error("Solicitud inválida.", status=403, code="INVALID_CSRF")
+        invalid_request = self._validate_json_request()
+        if invalid_request:
+            return invalid_request
         payload = self._json_payload()
         request_id = str(payload.get("request_id") or "").strip()
         event = request.env["vlux.mobile.scanner.event"].sudo().search(
@@ -425,7 +583,11 @@ class VluxMobileScannerController(http.Controller):
 
         device_identifier = str(payload.get("device_identifier") or "").strip()
         pairing = event.pairing_id
-        if pairing.pos_session_id.id != session_id or pairing.device_identifier != device_identifier:
+        if not self._validate_pos_pairing_scope(
+            pairing,
+            session_id,
+            device_identifier,
+        ):
             return self._error(
                 "La respuesta no corresponde a esta caja.", status=403, code="PAIRING_MISMATCH"
             )
@@ -438,7 +600,13 @@ class VluxMobileScannerController(http.Controller):
         product_id = payload.get("product_id")
         if product_id:
             try:
-                product = request.env["product.product"].sudo().browse(int(product_id)).exists()
+                product = request.env["product.product"].search(
+                    [
+                        ("id", "=", int(product_id)),
+                        ("company_id", "in", [False, *request.env.companies.ids]),
+                    ],
+                    limit=1,
+                )
             except (TypeError, ValueError):
                 product = request.env["product.product"]
 

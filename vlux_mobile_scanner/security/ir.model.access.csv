@@ -1,3 +1,4 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_vlux_mobile_pairing_manager,vlux.mobile.scanner.pairing manager,model_vlux_mobile_scanner_pairing,point_of_sale.group_pos_manager,1,1,1,1
 access_vlux_mobile_event_manager,vlux.mobile.scanner.event manager,model_vlux_mobile_scanner_event,point_of_sale.group_pos_manager,1,1,1,1
+access_vlux_mobile_rate_limit_system,vlux.mobile.scanner.rate.limit system,model_vlux_mobile_scanner_rate_limit,base.group_system,1,1,1,1

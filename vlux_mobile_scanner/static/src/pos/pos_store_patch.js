@@ -6,6 +6,7 @@ async function jsonRequest(url, options = {}) {
         credentials: "same-origin",
         headers: {
             "Content-Type": "application/json",
+            "X-CSRF-Token": odoo.csrf_token,
             ...(options.headers || {}),
         },
         ...options,
@@ -47,12 +48,14 @@ patch(PosStore.prototype, {
     },
 
     async vluxPairingStatus(pairingId) {
-        const params = new URLSearchParams({
-            pairing_id: String(pairingId),
-            pos_session_id: String(this.session.id),
-            device_identifier: this.device.identifier,
+        return await jsonRequest("/vlux/pos/pairing/status", {
+            method: "POST",
+            body: JSON.stringify({
+                pairing_id: pairingId,
+                pos_session_id: this.session.id,
+                device_identifier: this.device.identifier,
+            }),
         });
-        return await jsonRequest(`/vlux/pos/pairing/status?${params.toString()}`);
     },
 
     async vluxRevokePairing(pairingId) {
