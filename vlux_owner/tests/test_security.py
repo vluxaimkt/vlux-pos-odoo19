@@ -3,6 +3,33 @@ from odoo.tests.common import TransactionCase, tagged
 
 @tagged("post_install", "-at_install")
 class TestVluxOwnerSecurity(TransactionCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.other_company = cls.env["res.company"].sudo().create(
+            {"name": "VLUX Owner Otra Empresa"}
+        )
+
+    def test_dashboard_metrics_are_company_scoped(self):
+        service = self.env["vlux.owner.dashboard.service"].with_company(
+            self.env.company
+        )
+        today = service._local_date()
+
+        orders = service._orders_for_day(today)
+        self.assertFalse(orders.filtered(lambda order: order.company_id != self.env.company))
+
+    def test_dashboard_empty_metrics_are_coherent(self):
+        service = self.env["vlux.owner.dashboard.service"].with_company(
+            self.other_company
+        )
+        dashboard = service.get_dashboard()
+
+        self.assertEqual(dashboard["summary"]["sales_today"], 0.0)
+        self.assertEqual(dashboard["summary"]["tickets"], 0)
+        self.assertEqual(dashboard["summary"]["average_ticket"], 0.0)
+        self.assertEqual(dashboard["store"]["company_name"], self.other_company.name)
+
     def test_rate_limit_blocks_excess_requests(self):
         limiter = self.env["vlux.owner.rate.limit"].sudo()
 

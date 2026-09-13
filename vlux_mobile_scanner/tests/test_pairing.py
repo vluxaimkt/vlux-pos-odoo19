@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+from psycopg2.errors import UniqueViolation
+
 from odoo import fields
 from odoo.tests.common import TransactionCase, tagged
 
@@ -64,6 +66,42 @@ class TestVluxMobileScannerPairing(TransactionCase):
         )
         self.assertFalse(pairing.authenticate_mobile_token(raw_token))
         self.assertEqual(pairing.state, "expired")
+
+    def test_expired_pairing_cannot_issue_token(self):
+        pairing = self.env[
+            "vlux.mobile.scanner.pairing"
+        ].create_waiting_pairing(self.pos_session, "expired-device")
+        pairing.sudo().write(
+            {
+                "pair_expires_at": fields.Datetime.now()
+                - timedelta(seconds=1)
+            }
+        )
+
+        self.assertFalse(pairing.issue_mobile_token())
+        self.assertEqual(pairing.state, "expired")
+
+    def test_invalid_mobile_token_is_rejected(self):
+        pairing_model = self.env["vlux.mobile.scanner.pairing"]
+
+        self.assertFalse(pairing_model.authenticate_mobile_token(""))
+        self.assertFalse(pairing_model.authenticate_mobile_token("invalid-token"))
+        self.assertFalse(pairing_model.authenticate_mobile_token("x" * 300))
+
+    def test_request_id_is_idempotency_key(self):
+        pairing = self.env[
+            "vlux.mobile.scanner.pairing"
+        ].create_waiting_pairing(self.pos_session, "idempotency-device")
+        values = {
+            "request_id": "req-idempotent",
+            "pairing_id": pairing.id,
+            "barcode": "7501234567890",
+            "device_identifier": pairing.device_identifier,
+        }
+        self.env["vlux.mobile.scanner.event"].sudo().create(values)
+
+        with self.assertRaises(UniqueViolation), self.env.cr.savepoint():
+            self.env["vlux.mobile.scanner.event"].sudo().create(values)
 
     def test_rate_limit_blocks_excess_requests(self):
         limiter = self.env["vlux.mobile.scanner.rate.limit"].sudo()

@@ -6,7 +6,7 @@ Una base Odoo está compuesta por:
 
 1. Dump PostgreSQL.
 2. Filestore de la misma base y del mismo momento.
-3. Commits exactos de Odoo core y addons.
+3. Commit exacto de Odoo core y release VLUX exacta instalada.
 4. Inventario de configuración necesario para restaurar el servicio.
 
 Un dump sin filestore puede dejar imágenes y adjuntos perdidos. Un filestore sin
@@ -67,12 +67,20 @@ Copy-Item `
 
 ### 5. Registrar versiones
 
+Registre el commit de Odoo core, la release VLUX activa y el manifest de release
+si está disponible:
+
 ```powershell
 git -C C:\Odoo\src\odoo rev-parse HEAD |
   Set-Content "$Backup\odoo-core-commit.txt"
 
-git -C C:\Odoo\custom_addons\vlux-pos-odoo19 rev-parse HEAD |
-  Set-Content "$Backup\vlux-pos-commit.txt"
+Copy-Item C:\Odoo\vlux_current_release.txt `
+  "$Backup\vlux-current-release.txt" `
+  -ErrorAction SilentlyContinue
+
+Copy-Item C:\Odoo\vlux_releases\CURRENT_VERSION\release-manifest.json `
+  "$Backup\release-manifest.json" `
+  -ErrorAction SilentlyContinue
 ```
 
 Registre también versión de PostgreSQL, Python, nombre de base, fecha y motivo
@@ -100,8 +108,9 @@ Pruebe siempre con un nombre distinto, por ejemplo `vlux_pos_restore_test`.
 
 ### 1. Preparar código
 
-Haga checkout de los commits registrados en el respaldo e instale sus
-dependencias. No restaure primero y busque versiones después.
+Prepare el baseline de Odoo registrado y active exactamente la release VLUX
+registrada en el backup. No restaure primero y busque versiones después. En
+clientes, use el paquete `VLUX_POS_<version>.zip` correspondiente, no `git pull`.
 
 ### 2. Crear base vacía
 
@@ -184,3 +193,16 @@ Una copia no se considera respaldo verificado hasta demostrar que:
 
 El catálogo de `pg_restore` y un hash solo prueban que el archivo es legible; no
 sustituyen una restauración completa.
+
+## Rollback de release
+
+Si una migración de módulos ya corrió, el rollback debe restaurar de forma
+consistente:
+
+1. PostgreSQL desde el dump previo.
+2. Filestore del mismo backup.
+3. Release VLUX previa registrada.
+
+No use DB nueva con código viejo ni código viejo con DB migrada. En Windows,
+`scripts\windows\06_rollback.bat` requiere backup, release previa y confirmación
+explícita `CONFIRM`.

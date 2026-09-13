@@ -57,11 +57,13 @@ contraseñas o datos personales productivos sin un proceso autorizado.
 
 Cada despliegue debe identificar:
 
-- Tag o commit del repositorio VLUX POS.
+- Paquete `VLUX_POS_<version>.zip` aprobado.
+- `release-manifest.json` asociado.
+- SHA256 del paquete verificado.
+- Commit fuente interno del repositorio VLUX POS.
 - Commit exacto de Odoo core.
 - Versiones de Python, PostgreSQL y dependencias.
 - Lista y versión de addons instalados.
-- Hash del artefacto o commit desplegado.
 - Respaldo previo asociado.
 
 Flujo recomendado:
@@ -71,12 +73,14 @@ Flujo recomendado:
 3. Ejecutar instalación limpia y pruebas.
 4. Desplegar el commit en staging.
 5. Ejecutar validación funcional.
-6. Crear un tag de release.
-7. Respaldar producción.
-8. Desplegar exactamente el tag aprobado.
-9. Ejecutar migración y health checks.
+6. Construir `VLUX_POS_<version>.zip` con `scripts\release\BUILD_RELEASE.bat`.
+7. Verificar manifest y SHA256.
+8. Respaldar producción.
+9. Desplegar exactamente el paquete aprobado.
+10. Ejecutar migración dirigida y health checks.
 
-No despliegue con `git pull` sobre una rama mutable.
+GitHub privado es fuente interna de VLUX. Los clientes no deben ejecutar
+`git pull`, `git fetch` ni recibir acceso al historial Git.
 
 ## Configuración mínima de Odoo
 
@@ -196,22 +200,23 @@ revocación para cada secreto.
 
 ## Despliegue
 
-Con la release ya disponible en el servidor:
+En Windows Local use el paquete aprobado y los scripts de
+`scripts\windows`:
 
-```bash
-sudo systemctl stop odoo
-
-/opt/odoo/venv/bin/python /opt/odoo/core/odoo-bin \
-  -c /etc/odoo/odoo.conf \
-  -d vlux_pos_prod \
-  -u vlux_mobile_scanner,vlux_owner,vlux_facturacion \
-  --stop-after-init
-
-sudo systemctl start odoo
-sudo systemctl status odoo
+```bat
+set ODOO_DB=vlux_pos_prod
+set ODOO_SERVICE_NAME=odoo-vlux
+set BACKUP_ROOT=D:\OdooBackups
+set VLUX_PROFILE=scanner_owner
+VLUX_UPDATE.bat C:\Updates\VLUX_POS_1.0.1.zip
 ```
 
-Después verifique login, POS, WebSocket, escáner, dashboard y logs.
+El perfil decide qué módulos VLUX se actualizan. No use `-u all` y no instale
+`vlux_facturacion` automáticamente en todos los clientes; sigue siendo
+simulador.
+
+Después verifique login, POS, WebSocket, escáner, dashboard, logs y el estado de
+los addons contratados.
 
 ## Rollback
 

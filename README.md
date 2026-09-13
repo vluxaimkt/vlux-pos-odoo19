@@ -81,6 +81,18 @@ Para reproducir datos existentes se necesitan un dump PostgreSQL y el filestore
 correspondiente a la misma base. Para una instalación nueva se crea una base
 vacía y se realiza la configuración funcional desde cero.
 
+## Releases para cliente
+
+GitHub privado es fuente interna de VLUX. Los equipos de cliente no deben tener
+tokens, deploy keys ni ejecutar `git pull` o `git fetch`.
+
+VLUX distribuye paquetes `VLUX_POS_<version>.zip` acompañados por
+`release-manifest.json` y `SHA256`. El manifest registra producto, versión,
+commit fuente, baseline Odoo, Python, PostgreSQL soportado, addons incluidos,
+versiones de addons y hash del paquete. La firma digital queda preparada como
+punto de extensión, pero no se declara configurada hasta contar con
+infraestructura real de firma.
+
 ## Documentación
 
 - [Arquitectura](docs/ARQUITECTURA.md)
