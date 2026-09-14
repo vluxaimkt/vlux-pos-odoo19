@@ -16,11 +16,26 @@ on:
           - local_core
           - local_complete
           - cloud_managed
+  push:
+    branches:
+      - feature/production-distribution
+      - release/**
+    paths:
+      - ".github/workflows/distribution.yml"
+      - "packaging/**"
+      - "scripts/release/**"
+      - "scripts/distribution/**"
+      - "vlux_core/**"
+      - "vlux_mobile_scanner/**"
+      - "vlux_owner/**"
+      - "requirements-extra.txt"
 
 env:
   ODOO_COMMIT: a2d73c5900d8886d115afe1ccb7f5c97c7e71a97
   ODOO_DIR: ${{ github.workspace }}/odoo
   ADDONS_DIR: ${{ github.workspace }}/vlux-addons
+  DIST_VERSION: ${{ inputs.version || '0.0.0-buildfactory' }}
+  DIST_EDITION: ${{ inputs.edition || 'local_complete' }}
   PYTHON_VERSION: "3.12.10"
   SUPPORTED_POSTGRESQL: "16.14"
   WIX_VERSION: "4.0.5"
@@ -63,7 +78,7 @@ jobs:
           python scripts/release/public_repo_scan.py
           python scripts/release/test_build_release.py
           python -m compileall scripts/release
-          python scripts/release/build_release.py "${{ inputs.version }}" --edition "${{ inputs.edition }}" --odoo-home "$ODOO_DIR"
+          python scripts/release/build_release.py "${{ env.DIST_VERSION }}" --edition "${{ env.DIST_EDITION }}" --odoo-home "$ODOO_DIR"
 
   windows:
     name: Windows MSI and Burn EXE
@@ -106,9 +121,9 @@ jobs:
         shell: pwsh
         working-directory: ${{ env.ADDONS_DIR }}
         run: |
-          $version = "${{ inputs.version }}"
-          python scripts/release/build_release.py $version --edition "${{ inputs.edition }}" --odoo-home "$env:ODOO_DIR"
-          $canonical = Resolve-Path "..\vlux_release_output\$version\VLUX_POS_${{ inputs.edition }}_$version.zip"
+          $version = "${{ env.DIST_VERSION }}"
+          python scripts/release/build_release.py $version --edition "${{ env.DIST_EDITION }}" --odoo-home "$env:ODOO_DIR"
+          $canonical = Resolve-Path "..\vlux_release_output\$version\VLUX_POS_${{ env.DIST_EDITION }}_$version.zip"
           python scripts/release/build_windows_wix.py --version $version --canonical-zip $canonical --out-dir dist\windows --wix-version "$env:WIX_VERSION"
           Get-Content "dist\windows\VLUX_POS_${version}_x64.msi.sha256", "dist\windows\VLUX_POS_Setup_${version}.exe.sha256" | ForEach-Object {
             $parts = $_ -split '\s+'
@@ -119,7 +134,7 @@ jobs:
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: vlux-pos-windows-${{ inputs.version }}
+          name: vlux-pos-windows-${{ env.DIST_VERSION }}
           path: |
             ${{ env.ADDONS_DIR }}/dist/windows/*.msi
             ${{ env.ADDONS_DIR }}/dist/windows/*.exe
@@ -153,9 +168,9 @@ jobs:
       - name: Build Ubuntu DEB
         working-directory: ${{ env.ADDONS_DIR }}
         run: |
-          version="${{ inputs.version }}"
-          python scripts/release/build_release.py "$version" --edition "${{ inputs.edition }}" --odoo-home "$ODOO_DIR"
-          canonical="../vlux_release_output/$version/VLUX_POS_${{ inputs.edition }}_$version.zip"
+          version="${{ env.DIST_VERSION }}"
+          python scripts/release/build_release.py "$version" --edition "${{ env.DIST_EDITION }}" --odoo-home "$ODOO_DIR"
+          canonical="../vlux_release_output/$version/VLUX_POS_${{ env.DIST_EDITION }}_$version.zip"
           python scripts/release/build_ubuntu_deb.py --version "$version" --canonical-zip "$canonical" --out-dir dist/ubuntu
           sha256sum -c "dist/ubuntu/vlux-pos_${version}_amd64.deb.sha256"
           dpkg-deb --info "dist/ubuntu/vlux-pos_${version}_amd64.deb"
@@ -164,7 +179,7 @@ jobs:
       - name: Install smoke
         working-directory: ${{ env.ADDONS_DIR }}
         run: |
-          version="${{ inputs.version }}"
+          version="${{ env.DIST_VERSION }}"
           sudo dpkg -i --force-depends "dist/ubuntu/vlux-pos_${version}_amd64.deb"
           test -d /opt/vlux/pos
           test -x /usr/bin/vlux-pos
@@ -182,7 +197,7 @@ jobs:
       - name: Upload Ubuntu artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: vlux-pos-ubuntu-${{ inputs.version }}
+          name: vlux-pos-ubuntu-${{ env.DIST_VERSION }}
           path: |
             ${{ env.ADDONS_DIR }}/dist/ubuntu/*.deb
             ${{ env.ADDONS_DIR }}/dist/ubuntu/*.sha256
@@ -205,7 +220,7 @@ jobs:
       - name: Build and export OCI artifact
         working-directory: ${{ env.ADDONS_DIR }}
         run: |
-          version="${{ inputs.version }}"
+          version="${{ env.DIST_VERSION }}"
           source_sha="${{ needs.precheck.outputs.source_sha }}"
           created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           mkdir -p dist/cloud
@@ -232,7 +247,7 @@ jobs:
             --oci-tar "dist/cloud/vlux-pos_${version}_amd64.oci.tar" \
             --version "$version" \
             --source-commit "$source_sha" \
-            --edition "${{ inputs.edition }}" \
+            --edition "${{ env.DIST_EDITION }}" \
             --out-dir dist/cloud
           python - <<'PY'
           import json
@@ -247,7 +262,7 @@ jobs:
       - name: Upload Cloud artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: vlux-pos-cloud-${{ inputs.version }}
+          name: vlux-pos-cloud-${{ env.DIST_VERSION }}
           path: |
             ${{ env.ADDONS_DIR }}/dist/cloud/*.oci.tar
             ${{ env.ADDONS_DIR }}/dist/cloud/*.sha256
@@ -277,8 +292,8 @@ jobs:
         working-directory: ${{ env.ADDONS_DIR }}
         run: |
           python scripts/release/write_distribution_manifest.py \
-            --version "${{ inputs.version }}" \
-            --edition "${{ inputs.edition }}" \
+            --version "${{ env.DIST_VERSION }}" \
+            --edition "${{ env.DIST_EDITION }}" \
             --source-commit "${{ needs.precheck.outputs.source_sha }}" \
             --artifacts-root "$GITHUB_WORKSPACE/gathered" \
             --out-dir dist/manifests
@@ -286,7 +301,7 @@ jobs:
       - name: Upload global manifests
         uses: actions/upload-artifact@v4
         with:
-          name: vlux-pos-manifests-${{ inputs.version }}
+          name: vlux-pos-manifests-${{ env.DIST_VERSION }}
           path: |
             ${{ env.ADDONS_DIR }}/dist/manifests/distribution-manifest.json
             ${{ env.ADDONS_DIR }}/dist/manifests/SHA256SUMS
