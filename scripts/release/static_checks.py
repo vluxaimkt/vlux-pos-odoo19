@@ -124,6 +124,7 @@ def check_obvious_secrets() -> None:
             if (
                 "REEMPLAZAR_" in match.group(0)
                 or "SECRETO_" in match.group(0)
+                or "__VLUX_" in match.group(0)
                 or "example" in match.group(0).lower()
             ):
                 continue

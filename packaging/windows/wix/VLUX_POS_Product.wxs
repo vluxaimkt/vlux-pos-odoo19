@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="VLUX POS"
+      Manufacturer="VLUX"
+      Version="$(var.ProductVersion)"
+      UpgradeCode="$(var.ProductUpgradeCode)"
+      Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer VLUX POS version is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="MainFeature" Title="VLUX POS" Level="1">
+      <ComponentGroupRef Id="VLUXProgramFiles" />
+      <ComponentGroupRef Id="VLUXProgramData" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="VLUXProgramFilesRoot" Name="VLUX">
+        <Directory Id="INSTALLFOLDER" Name="POS" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="VLUXProgramDataRoot" Name="VLUX">
+        <Directory Id="VLUXProgramDataPOS" Name="POS">
+          <Directory Id="VLUXConfigDir" Name="config" />
+          <Directory Id="VLUXDataDir" Name="data" />
+          <Directory Id="VLUXFilestoreDir" Name="filestore" />
+          <Directory Id="VLUXBackupsDir" Name="backups" />
+          <Directory Id="VLUXLogsDir" Name="logs" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <ComponentGroup Id="VLUXProgramFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PayloadRoot)\**" Exclude="$(var.PayloadRoot)\release-manifest.json" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="VLUXProgramData" Directory="VLUXProgramDataPOS">
+      <Component Id="VLUXProgramDataFolders" Guid="$(var.ProgramDataFoldersGuid)">
+        <CreateFolder Directory="VLUXConfigDir" />
+        <CreateFolder Directory="VLUXDataDir" />
+        <CreateFolder Directory="VLUXFilestoreDir" />
+        <CreateFolder Directory="VLUXBackupsDir" />
+        <CreateFolder Directory="VLUXLogsDir" />
+      </Component>
+    </ComponentGroup>
+  </Package>
+</Wix>

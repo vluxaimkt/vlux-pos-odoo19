@@ -1,4 +1,5 @@
 /*
+!/.gitattributes
 !/.gitignore
 !/README.md
 !/requirements-extra.txt
@@ -8,10 +9,14 @@
 !/scripts/
 !/scripts/release/
 !/scripts/release/**
+!/scripts/distribution/
+!/scripts/distribution/**
 !/scripts/windows/
 !/scripts/windows/**
 !/config/
 !/docs/
+!/packaging/
+!/packaging/**
 !/vlux_core/
 !/vlux_mobile_scanner/
 !/vlux_owner/

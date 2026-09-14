@@ -1,8 +1,10 @@
 import os
 
-mods = ["vlux_mobile_scanner", "vlux_owner"]
-profile = (os.environ.get("VLUX_PROFILE") or "scanner_owner").lower()
-if profile == "scanner":
+mods = ["vlux_core", "vlux_mobile_scanner", "vlux_owner"]
+profile = (os.environ.get("VLUX_PROFILE") or "local_complete").lower()
+if profile == "local_core":
+    mods = ["vlux_core"]
+elif profile == "scanner":
     mods = ["vlux_mobile_scanner"]
 elif profile == "owner":
     mods = ["vlux_owner"]

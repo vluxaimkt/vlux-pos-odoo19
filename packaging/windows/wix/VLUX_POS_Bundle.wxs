@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle
+      Name="VLUX POS Setup"
+      Manufacturer="VLUX"
+      Version="$(var.ProductVersion)"
+      UpgradeCode="$(var.BundleUpgradeCode)"
+      IconSourceFile="$(var.BundleIcon)">
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+          LicenseUrl=""
+          Theme="hyperlinkLicense" />
+    </BootstrapperApplication>
+
+    <Chain>
+      <!-- Runtime and PostgreSQL installers are resolved by the build pipeline,
+           not stored in Git. Add ExePackage entries once approved artifacts are
+           mirrored internally with checksums. -->
+      <MsiPackage
+          SourceFile="$(var.MsiPath)"
+          DisplayInternalUI="yes"
+          Vital="yes" />
+    </Chain>
+  </Bundle>
+</Wix>

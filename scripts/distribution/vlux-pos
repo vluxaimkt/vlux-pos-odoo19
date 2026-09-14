@@ -1,0 +1,2 @@
+#!/usr/bin/env sh
+exec /usr/bin/python3 /opt/vlux/pos/scripts/distribution/vlux_pos.py "$@"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import argparse
 import hashlib
 import json
 import os
@@ -13,7 +14,14 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_facturacion")
+PRODUCT_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner")
+REGRESSION_ADDONS = ("vlux_facturacion",)
+ADDON_PROFILES = {
+    "local_core": ("vlux_core",),
+    "local_complete": PRODUCT_ADDONS,
+    "cloud_managed": PRODUCT_ADDONS,
+}
+ALL_KNOWN_ADDONS = PRODUCT_ADDONS + REGRESSION_ADDONS
 ODOO_COMMIT = "a2d73c5900d8886d115afe1ccb7f5c97c7e71a97"
 PYTHON_VERSION = "3.12.10"
 SUPPORTED_POSTGRESQL = "16.14"
@@ -134,54 +142,86 @@ def zip_dir(src: Path, zip_path: Path) -> None:
                 archive.write(path, path.relative_to(src).as_posix())
 
 
-def build(version: str) -> Path:
+def write_json(path: Path, payload: dict) -> None:
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def sha256_tree(root: Path) -> dict[str, str]:
+    hashes = {}
+    for path in sorted(root.rglob("*")):
+        if path.is_file():
+            hashes[path.relative_to(root).as_posix()] = sha256_file(path)
+    return hashes
+
+
+def build(version: str, edition: str = "local_complete") -> Path:
     if not version:
-        fail("Usage: BUILD_RELEASE.bat <version>")
+        fail("Usage: build_release.py <version> [--edition local_complete]")
+    if edition not in ADDON_PROFILES:
+        fail(f"Unknown edition {edition!r}. Expected one of: {', '.join(ADDON_PROFILES)}")
     if os.environ.get("VLUX_ALLOW_DIRTY_BUILD") != "1":
         ensure_clean_tree()
     validate_odoo_baseline()
 
     source_commit = git_sha(ROOT)
-    addon_versions = {addon: read_manifest(addon).get("version") for addon in ADDONS}
-    created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    included_addons = ADDON_PROFILES[edition]
+    addon_versions = {addon: read_manifest(addon).get("version") for addon in included_addons}
+    regression_addon_versions = {
+        addon: read_manifest(addon).get("version") for addon in REGRESSION_ADDONS
+    }
+    build_date = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
     out_root = ROOT.parent / "vlux_release_output" / version
     staging = out_root / "staging"
-    package_name = f"VLUX_POS_{version}.zip"
+    package_name = f"VLUX_POS_{edition}_{version}.zip"
     package_path = out_root / package_name
 
     if out_root.exists():
         shutil.rmtree(out_root)
     staging.mkdir(parents=True)
 
-    for addon in ADDONS:
+    for addon in included_addons:
         copy_tree(ROOT / addon, staging / "addons" / addon)
     shutil.copy2(ROOT / "requirements-extra.txt", staging / "requirements-extra.txt")
     copy_tree(ROOT / "config", staging / "config")
     copy_tree(ROOT / "docs", staging / "docs")
+    copy_tree(ROOT / "scripts" / "distribution", staging / "scripts" / "distribution")
     copy_tree(ROOT / "scripts" / "windows", staging / "scripts" / "windows")
+    copy_tree(ROOT / "packaging", staging / "packaging")
 
     manifest = {
         "product": PRODUCT,
         "version": version,
-        "created_at": created_at,
+        "build_date": build_date,
         "source_commit": source_commit,
         "odoo_commit": ODOO_COMMIT,
         "python_version": PYTHON_VERSION,
-        "supported_postgresql": SUPPORTED_POSTGRESQL,
-        "included_addons": list(ADDONS),
+        "postgresql_version": SUPPORTED_POSTGRESQL,
+        "edition": edition,
+        "included_addons": list(included_addons),
         "addon_versions": addon_versions,
-        "package_sha256": "RECORDED_IN_SIDECAR_MANIFEST",
+        "regression_addons_available_in_source": list(REGRESSION_ADDONS),
+        "regression_addon_versions": regression_addon_versions,
+        "artifact_sha256": "RECORDED_IN_SIDECAR_MANIFEST",
+        "logical_release_targets": ["windows_local", "ubuntu_local", "cloud_managed"],
+        "facturacion_policy": "simulation_only_not_productive_default",
+        "odoo_source": {
+            "repository": "https://github.com/odoo/odoo",
+            "commit": ODOO_COMMIT,
+            "install_strategy": "pinned_checkout_or_internal_mirror",
+        },
         "signature": {
             "status": "not_configured",
+            "windows_authenticode": "pending",
             "algorithm": None,
             "value": None,
         },
     }
-    (staging / "release-manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    write_json(staging / "release-manifest.json", manifest)
+    write_json(staging / "checksums.json", sha256_tree(staging))
 
     zip_dir(staging, package_path)
     package_sha = sha256_file(package_path)
@@ -190,12 +230,9 @@ def build(version: str) -> Path:
         fail("SHA256 verification mismatch after package creation.")
 
     sidecar_manifest = dict(manifest)
-    sidecar_manifest["package_sha256"] = package_sha
-    sidecar_manifest["package_file"] = package_name
-    (out_root / "release-manifest.json").write_text(
-        json.dumps(sidecar_manifest, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    sidecar_manifest["artifact_sha256"] = package_sha
+    sidecar_manifest["artifact_file"] = package_name
+    write_json(out_root / "release-manifest.json", sidecar_manifest)
     (out_root / f"{package_name}.sha256").write_text(
         f"{package_sha}  {package_name}\n",
         encoding="ascii",
@@ -205,7 +242,16 @@ def build(version: str) -> Path:
 
 
 def main(argv: list[str]) -> int:
-    package = build(argv[1] if len(argv) > 1 else "")
+    parser = argparse.ArgumentParser(description="Build a canonical VLUX POS release artifact.")
+    parser.add_argument("version")
+    parser.add_argument(
+        "--edition",
+        choices=sorted(ADDON_PROFILES),
+        default="local_complete",
+        help="Release edition to include in the canonical artifact.",
+    )
+    args = parser.parse_args(argv[1:])
+    package = build(args.version, edition=args.edition)
     print(f"Release package created: {package}")
     print(f"SHA256: {sha256_file(package)}")
     return 0

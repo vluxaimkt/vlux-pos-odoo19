@@ -1,0 +1,11 @@
+Package: vlux-pos
+Version: 0.0.0
+Section: web
+Priority: optional
+Architecture: amd64
+Maintainer: VLUX <soporte@vlux.local>
+Depends: python3 (>= 3.12), python3-venv, postgresql-16, caddy, adduser, ca-certificates
+Description: VLUX POS for Odoo 19
+ Production distribution package for VLUX POS local Ubuntu installations.
+ The package installs application files and service recipes only. Customer
+ data, filestore, backups and secrets are created during setup and preserved.

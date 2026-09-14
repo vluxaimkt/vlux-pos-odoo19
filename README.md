@@ -101,6 +101,7 @@ infraestructura real de firma.
 - [Configuración funcional](docs/CONFIGURACION_FUNCIONAL.md)
 - [Operación diaria](docs/OPERACION.md)
 - [Validación y pruebas](docs/VALIDACION.md)
+- [Distribución de producción](docs/DISTRIBUCION_PRODUCCION.md)
 - [Producción controlada](docs/PRODUCCION.md)
 - [Respaldo y restauración](docs/RESPALDO_RESTAURACION.md)
 

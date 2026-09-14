@@ -93,6 +93,7 @@ jobs:
         working-directory: ${{ env.ADDONS_DIR }}
         run: |
           python scripts/release/static_checks.py
+          python scripts/release/public_repo_scan.py
 
       - name: Create test database
         env:
@@ -130,3 +131,9 @@ jobs:
             --test-tags /vlux_core,/vlux_mobile_scanner,/vlux_owner,/vlux_facturacion \
             --stop-after-init \
             --log-level=test
+
+      - name: Build VLUX distribution metadata
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          python scripts/release/build_release.py ci-smoke --edition local_complete
+          python scripts/release/build_distribution.py ci-smoke --out-dir dist
