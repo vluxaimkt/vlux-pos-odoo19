@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,6 +65,17 @@ def msi_version(logical_version: str) -> str:
     return ".".join(str(min(int(part), 65535)) for part in normalized)
 
 
+def safe_id(value: str, prefix: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_]", "_", value)
+    if not cleaned or cleaned[0].isdigit():
+        cleaned = f"{prefix}_{cleaned}"
+    return cleaned[:70]
+
+
+def deterministic_guid(name: str) -> str:
+    return str(uuid.uuid5(uuid.UUID("11111111-2222-4333-8444-555555555555"), name)).upper()
+
+
 def extract_payload(canonical_zip: Path, payload_dir: Path) -> dict:
     if payload_dir.exists():
         shutil.rmtree(payload_dir)
@@ -77,9 +89,55 @@ def extract_payload(canonical_zip: Path, payload_dir: Path) -> dict:
 
 
 def generate_product_wxs(payload_dir: Path, product_wxs: Path, version: str) -> None:
-    if not any(path.is_file() for path in payload_dir.rglob("*")):
+    payload_files = [
+        path
+        for path in sorted(payload_dir.rglob("*"))
+        if path.is_file()
+        and path.relative_to(payload_dir).as_posix() not in {"release-manifest.json", "checksums.json"}
+    ]
+    if not payload_files:
         fail("Windows payload is empty; refusing to build MSI.")
-    payload = escape(str(payload_dir))
+    component_refs: list[str] = []
+
+    tree: dict = {"dirs": {}, "files": []}
+    for index, path in enumerate(payload_files):
+        rel = path.relative_to(payload_dir)
+        node = tree
+        for part in rel.parts[:-1]:
+            node = node["dirs"].setdefault(part, {"dirs": {}, "files": []})
+        component_id = safe_id(f"CMP_{index}_{rel.as_posix()}", "CMP")
+        file_id = safe_id(f"FIL_{index}_{rel.as_posix()}", "FIL")
+        node["files"].append(
+            {
+                "component_id": component_id,
+                "file_id": file_id,
+                "guid": deterministic_guid(rel.as_posix()),
+                "source": str(path),
+            }
+        )
+        component_refs.append(f'      <ComponentRef Id="{component_id}" />')
+
+    def emit_directory(node: dict, rel_prefix: str = "", indent: int = 3) -> list[str]:
+        lines: list[str] = []
+        pad = "  " * indent
+        for file_entry in node["files"]:
+            lines.extend(
+                [
+                    f'{pad}<Component Id="{file_entry["component_id"]}" Guid="{file_entry["guid"]}">',
+                    f'{pad}  <File Id="{file_entry["file_id"]}" Source="{escape(file_entry["source"])}" KeyPath="yes" />',
+                    f"{pad}</Component>",
+                ]
+            )
+        for name, child in sorted(node["dirs"].items()):
+            child_rel = f"{rel_prefix}/{name}" if rel_prefix else name
+            directory_id = safe_id(f"DIR_{deterministic_guid(child_rel)[:8]}_{name}", "DIR")
+            lines.append(f'{pad}<Directory Id="{directory_id}" Name="{escape(name)}">')
+            lines.extend(emit_directory(child, child_rel, indent + 1))
+            lines.append(f"{pad}</Directory>")
+        return lines
+
+    payload_directory = "\n".join(emit_directory(tree, indent=5))
+    component_group = "\n".join(component_refs)
 
     product_wxs.write_text(
         f'''<?xml version="1.0" encoding="utf-8"?>
@@ -95,7 +153,9 @@ def generate_product_wxs(payload_dir: Path, product_wxs: Path, version: str) -> 
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="VLUXProgramFilesRoot" Name="VLUX">
-        <Directory Id="INSTALLFOLDER" Name="POS" />
+        <Directory Id="INSTALLFOLDER" Name="POS">
+{payload_directory}
+        </Directory>
       </Directory>
     </StandardDirectory>
 
@@ -111,8 +171,8 @@ def generate_product_wxs(payload_dir: Path, product_wxs: Path, version: str) -> 
       </Directory>
     </StandardDirectory>
 
-    <ComponentGroup Id="VLUXProgramFiles" Directory="INSTALLFOLDER">
-      <Files Include="{payload}\\**" Exclude="{payload}\\release-manifest.json;{payload}\\checksums.json" />
+    <ComponentGroup Id="VLUXProgramFiles">
+{component_group}
     </ComponentGroup>
 
     <Component Id="VLUXProgramDataFolders" Directory="VLUXProgramDataPOS" Guid="33333333-3333-4333-8333-333333333333">

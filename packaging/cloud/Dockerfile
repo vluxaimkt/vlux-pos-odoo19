@@ -20,7 +20,7 @@ ENV ODOO_HOME=/opt/vlux/pos/odoo \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-      build-essential ca-certificates curl git libpq-dev libpq5 libxml2 libxslt1.1 libsasl2-2 libldap-2.5-0 \
+      build-essential ca-certificates curl git libldap2-dev libpq-dev libpq5 libsasl2-dev libxml2 libxslt1.1 libsasl2-2 libldap-2.5-0 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --system --home /var/lib/vlux-pos --create-home --shell /usr/sbin/nologin vlux-pos
