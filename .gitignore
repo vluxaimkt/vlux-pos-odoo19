@@ -51,4 +51,8 @@ htmlcov/
 /_release_output/
 /vlux_release_output/
 *.zip
+*.msi
+*.exe
+*.deb
+*.oci.tar
 *.sha256

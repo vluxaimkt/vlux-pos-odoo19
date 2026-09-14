@@ -2,10 +2,15 @@ FROM python:3.12.10-slim-bookworm
 
 ARG ODOO_COMMIT=a2d73c5900d8886d115afe1ccb7f5c97c7e71a97
 ARG VLUX_VERSION=0.0.0
+ARG SOURCE_COMMIT=unknown
+ARG BUILD_CREATED=unknown
 
 LABEL org.opencontainers.image.title="VLUX POS"
 LABEL org.opencontainers.image.version="${VLUX_VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/vluxaimkt/vlux-pos-odoo19"
+LABEL org.opencontainers.image.revision="${SOURCE_COMMIT}"
+LABEL org.opencontainers.image.created="${BUILD_CREATED}"
+LABEL vlux.odoo.commit="${ODOO_COMMIT}"
 
 ENV ODOO_HOME=/opt/vlux/pos/odoo \
     VLUX_POS_ROOT=/opt/vlux/pos \
