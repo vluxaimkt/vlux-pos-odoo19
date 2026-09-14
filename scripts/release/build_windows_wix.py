@@ -27,7 +27,20 @@ def fail(message: str) -> None:
 
 
 def run(args: list[str], cwd: Path | None = None) -> str:
-    return subprocess.check_output(args, cwd=cwd, text=True, encoding="utf-8").strip()
+    completed = subprocess.run(
+        args,
+        cwd=cwd,
+        text=True,
+        encoding="utf-8",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if completed.stdout:
+        print(completed.stdout)
+    if completed.returncode:
+        raise subprocess.CalledProcessError(completed.returncode, args, completed.stdout)
+    return completed.stdout.strip()
 
 
 def sha256_file(path: Path) -> str:

@@ -172,7 +172,7 @@ jobs:
           python scripts/release/build_release.py "$version" --edition "${{ env.DIST_EDITION }}" --odoo-home "$ODOO_DIR"
           canonical="../vlux_release_output/$version/VLUX_POS_${{ env.DIST_EDITION }}_$version.zip"
           python scripts/release/build_ubuntu_deb.py --version "$version" --canonical-zip "$canonical" --out-dir dist/ubuntu
-          sha256sum -c "dist/ubuntu/vlux-pos_${version}_amd64.deb.sha256"
+          (cd dist/ubuntu && sha256sum -c "vlux-pos_${version}_amd64.deb.sha256")
           dpkg-deb --info "dist/ubuntu/vlux-pos_${version}_amd64.deb"
           dpkg-deb --contents "dist/ubuntu/vlux-pos_${version}_amd64.deb"
 
@@ -257,7 +257,7 @@ jobs:
           data["validation"]["container_smoke"] = "PASS"
           path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           PY
-          sha256sum -c "dist/cloud/vlux-pos_${version}_amd64.oci.tar.sha256"
+          (cd dist/cloud && sha256sum -c "vlux-pos_${version}_amd64.oci.tar.sha256")
 
       - name: Upload Cloud artifacts
         uses: actions/upload-artifact@v4
