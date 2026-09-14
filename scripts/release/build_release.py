@@ -26,6 +26,7 @@ ODOO_COMMIT = "a2d73c5900d8886d115afe1ccb7f5c97c7e71a97"
 PYTHON_VERSION = "3.12.10"
 SUPPORTED_POSTGRESQL = "16.14"
 PRODUCT = "VLUX POS"
+DEFAULT_ODOO_HOME = Path(r"C:\Odoo\src\odoo")
 
 EXCLUDE_DIRS = {
     ".git",
@@ -84,13 +85,32 @@ def git_sha(path: Path) -> str:
     return run(["git", "rev-parse", "HEAD"], cwd=path)
 
 
-def validate_odoo_baseline() -> None:
-    odoo_home = Path(os.environ.get("ODOO_HOME", r"C:\Odoo\src\odoo"))
+def resolve_odoo_home(explicit_path: str | os.PathLike[str] | None = None) -> Path:
+    raw_path = explicit_path or os.environ.get("ODOO_HOME") or DEFAULT_ODOO_HOME
+    odoo_home = Path(raw_path).expanduser().resolve()
+    if not odoo_home.exists():
+        fail(f"ODOO_HOME does not exist: {odoo_home}")
     if not (odoo_home / ".git").exists():
         fail(f"ODOO_HOME is not a git checkout: {odoo_home}")
-    current = git_sha(odoo_home)
+    try:
+        inside_work_tree = run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=odoo_home,
+        )
+    except subprocess.CalledProcessError as exc:
+        fail(f"ODOO_HOME is not a valid git checkout: {odoo_home} ({exc})")
+    if inside_work_tree != "true":
+        fail(f"ODOO_HOME is not a git work tree: {odoo_home}")
+    return odoo_home
+
+
+def validate_odoo_baseline(odoo_home: str | os.PathLike[str] | None = None) -> Path:
+    resolved = resolve_odoo_home(odoo_home)
+    current = git_sha(resolved)
     if current != ODOO_COMMIT:
         fail(f"Unexpected Odoo commit {current}; expected {ODOO_COMMIT}")
+    print(f"Odoo baseline OK: {resolved} ({current})")
+    return resolved
 
 
 def read_manifest(addon: str) -> dict:
@@ -157,14 +177,18 @@ def sha256_tree(root: Path) -> dict[str, str]:
     return hashes
 
 
-def build(version: str, edition: str = "local_complete") -> Path:
+def build(
+    version: str,
+    edition: str = "local_complete",
+    odoo_home: str | os.PathLike[str] | None = None,
+) -> Path:
     if not version:
         fail("Usage: build_release.py <version> [--edition local_complete]")
     if edition not in ADDON_PROFILES:
         fail(f"Unknown edition {edition!r}. Expected one of: {', '.join(ADDON_PROFILES)}")
     if os.environ.get("VLUX_ALLOW_DIRTY_BUILD") != "1":
         ensure_clean_tree()
-    validate_odoo_baseline()
+    validate_odoo_baseline(odoo_home)
 
     source_commit = git_sha(ROOT)
     included_addons = ADDON_PROFILES[edition]
@@ -250,8 +274,12 @@ def main(argv: list[str]) -> int:
         default="local_complete",
         help="Release edition to include in the canonical artifact.",
     )
+    parser.add_argument(
+        "--odoo-home",
+        help="Path to the pinned Odoo checkout. Defaults to ODOO_HOME, then C:\\Odoo\\src\\odoo.",
+    )
     args = parser.parse_args(argv[1:])
-    package = build(args.version, edition=args.edition)
+    package = build(args.version, edition=args.edition, odoo_home=args.odoo_home)
     print(f"Release package created: {package}")
     print(f"SHA256: {sha256_file(package)}")
     return 0

@@ -54,10 +54,10 @@ def tool_status(tool: str) -> str:
     return "available" if shutil.which(tool) else "missing"
 
 
-def build(version: str, out_dir: Path) -> dict:
+def build(version: str, out_dir: Path, odoo_home: str | os.PathLike[str] | None = None) -> dict:
     if os.environ.get("VLUX_ALLOW_DIRTY_BUILD") != "1":
         build_release.ensure_clean_tree()
-    canonical = build_release.build(version, edition="local_complete")
+    canonical = build_release.build(version, edition="local_complete", odoo_home=odoo_home)
     source_commit = run(["git", "rev-parse", "HEAD"])
     build_date = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -135,8 +135,12 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Build VLUX POS distribution metadata and source bundles.")
     parser.add_argument("version")
     parser.add_argument("--out-dir", default=str(ROOT / "dist"))
+    parser.add_argument(
+        "--odoo-home",
+        help="Path to the pinned Odoo checkout. Passed through to build_release.py.",
+    )
     args = parser.parse_args(argv[1:])
-    summary = build(args.version, Path(args.out_dir))
+    summary = build(args.version, Path(args.out_dir), odoo_home=args.odoo_home)
     print(json.dumps(summary, indent=2, ensure_ascii=False, sort_keys=True))
     return 0
 

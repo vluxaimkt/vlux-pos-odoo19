@@ -94,6 +94,7 @@ jobs:
         run: |
           python scripts/release/static_checks.py
           python scripts/release/public_repo_scan.py
+          python scripts/release/test_build_release.py
 
       - name: Create test database
         env:
@@ -135,5 +136,5 @@ jobs:
       - name: Build VLUX distribution metadata
         working-directory: ${{ env.ADDONS_DIR }}
         run: |
-          python scripts/release/build_release.py ci-smoke --edition local_complete
-          python scripts/release/build_distribution.py ci-smoke --out-dir dist
+          python scripts/release/build_release.py ci-smoke --edition local_complete --odoo-home "$ODOO_DIR"
+          python scripts/release/build_distribution.py ci-smoke --out-dir dist --odoo-home "$ODOO_DIR"
