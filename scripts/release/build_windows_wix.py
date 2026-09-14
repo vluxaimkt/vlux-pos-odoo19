@@ -198,7 +198,7 @@ def generate_bundle_wxs(bundle_wxs: Path, msi_path: Path, version: str) -> None:
       <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense" LicenseUrl="" />
     </BootstrapperApplication>
     <Chain>
-      <MsiPackage SourceFile="{escape(str(msi_path))}" DisplayInternalUI="yes" Vital="yes" Compressed="yes" />
+      <MsiPackage SourceFile="{escape(str(msi_path))}" Vital="yes" Compressed="yes" />
     </Chain>
   </Bundle>
 </Wix>
