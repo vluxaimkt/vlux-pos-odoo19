@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-ADDONS = ("vlux_mobile_scanner", "vlux_owner", "vlux_facturacion")
+ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_facturacion")
 SECRET_RE = re.compile(
     r"(?m)^\s*[A-Za-z0-9_.-]*(password|passwd|secret|token|api[_-]?key)"
     r"\s*=\s*(['\"][^'\"]{12,}|[A-Z0-9_./+=-]{12,})"

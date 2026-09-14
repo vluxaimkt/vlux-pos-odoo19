@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <record id="param_vlux_core_edition" model="ir.config_parameter">
+        <field name="key">vlux_core.edition</field>
+        <field name="value">local_core</field>
+    </record>
+</odoo>

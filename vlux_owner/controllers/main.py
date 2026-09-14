@@ -12,7 +12,10 @@ _logger = logging.getLogger(__name__)
 class VluxOwnerController(http.Controller):
 
     def _ensure_owner_access(self):
-        if not request.env.user.has_group("vlux_owner.group_vlux_owner"):
+        if not (
+            request.env.user.has_group("vlux_owner.group_vlux_owner")
+            or request.env.user.has_group("vlux_core.group_vlux_owner")
+        ):
             raise AccessError("Tu usuario no tiene acceso a VLUX Owner.")
 
     def _json_response(self, payload, status=200):
@@ -68,7 +71,10 @@ class VluxOwnerController(http.Controller):
         authorization = request.httprequest.headers.get("Authorization", "")
         if not authorization.lower().startswith("bearer "):
             return self._json_response({"ok": False, "error": "unauthorized"}, status=401)
-        if not request.env.user.has_group("vlux_owner.group_vlux_owner"):
+        if not (
+            request.env.user.has_group("vlux_owner.group_vlux_owner")
+            or request.env.user.has_group("vlux_core.group_vlux_owner")
+        ):
             return self._json_response({"ok": False, "error": "forbidden"}, status=403)
         if not request.httprequest.is_json:
             return self._json_response(

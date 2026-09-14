@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-ADDONS = ("vlux_mobile_scanner", "vlux_owner", "vlux_facturacion")
+ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_facturacion")
 ODOO_COMMIT = "a2d73c5900d8886d115afe1ccb7f5c97c7e71a97"
 PYTHON_VERSION = "3.12.10"
 SUPPORTED_POSTGRESQL = "16.14"

@@ -5,7 +5,7 @@
     "category": "Point of Sale",
     "author": "VLUX",
     "license": "LGPL-3",
-    "depends": ["point_of_sale", "stock", "web"],
+    "depends": ["vlux_core", "point_of_sale", "stock", "web"],
     "data": [
         "security/security.xml",
         "security/ir.model.access.csv",

@@ -12,6 +12,7 @@
 !/scripts/windows/**
 !/config/
 !/docs/
+!/vlux_core/
 !/vlux_mobile_scanner/
 !/vlux_owner/
 !/vlux_facturacion/

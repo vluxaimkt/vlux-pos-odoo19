@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["main", "release/**"]
+    branches: ["main", "release/**", "feature/**"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:
@@ -12,7 +12,7 @@ env:
   ODOO_DIR: ${{ github.workspace }}/odoo
   ADDONS_DIR: ${{ github.workspace }}/vlux-addons
   TEST_DB: vlux_ci
-  VLUX_ADDONS: vlux_mobile_scanner,vlux_owner,vlux_facturacion
+  VLUX_ADDONS: vlux_core,vlux_mobile_scanner,vlux_owner,vlux_facturacion
 
 jobs:
   test:
@@ -127,6 +127,6 @@ jobs:
             -d "$TEST_DB" \
             -u "$VLUX_ADDONS" \
             --test-enable \
-            --test-tags /vlux_mobile_scanner,/vlux_owner,/vlux_facturacion \
+            --test-tags /vlux_core,/vlux_mobile_scanner,/vlux_owner,/vlux_facturacion \
             --stop-after-init \
             --log-level=test
