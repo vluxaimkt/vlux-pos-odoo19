@@ -188,6 +188,7 @@ public sealed class VluxPosWorker : BackgroundService
         var caddyfile = $$"""
         {
             admin off
+            auto_https disable_redirects
         }
 
         :{{CaddyHttpPort}} {
