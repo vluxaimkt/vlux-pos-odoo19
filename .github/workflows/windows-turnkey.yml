@@ -125,6 +125,16 @@ jobs:
           Set-Content -Path "C:\ProgramData\VLUX\POS\data\preserve.marker" -Value "preserve"
           Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart" -Wait -NoNewWindow
           if (!(Test-Path "C:\ProgramData\VLUX\POS\data\preserve.marker")) { throw "Data preservation marker was removed" }
+          $manifestPath = "dist\windows\manifest.json"
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $manifest.validation.install_smoke = "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName runner_install_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName service_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName health_smoke -NotePropertyValue "BLOCKED_RUNTIME_CHAIN"
+          $manifest.validation | Add-Member -Force -NotePropertyName uninstall_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName data_preservation -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName clean_machine_e2e -NotePropertyValue "MANUAL_PENDING"
+          $manifest | ConvertTo-Json -Depth 12 | Set-Content -Encoding UTF8 $manifestPath
 
       - name: Upload turnkey artifacts
         uses: actions/upload-artifact@v4
