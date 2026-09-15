@@ -311,6 +311,9 @@ public sealed class VluxPosWorker : BackgroundService
                 paths.OdooBin,
                 "-c", paths.OdooConf,
                 "-d", DatabaseName,
+                "--db_host", "127.0.0.1",
+                "--db_port", PostgresPort.ToString(),
+                "--db_user", OdooDbUser,
                 "-i", "vlux_core,vlux_mobile_scanner,vlux_owner",
                 "--stop-after-init",
                 "--without-demo=all",
@@ -319,7 +322,7 @@ public sealed class VluxPosWorker : BackgroundService
             paths.OdooInitLog,
             token,
             sensitive: false,
-            environment: new Dictionary<string, string> { ["PYTHONPATH"] = paths.OdooDir },
+            environment: OdooEnvironment(paths, LoadOrCreateSecrets(paths)),
             timeout: TimeSpan.FromMinutes(10)
         );
         await File.WriteAllTextAsync(paths.OdooInitializedMarker, DateTimeOffset.UtcNow.ToString("O") + Environment.NewLine, token);
@@ -329,13 +332,34 @@ public sealed class VluxPosWorker : BackgroundService
     {
         _odoo = StartManagedProcess(
             paths.PythonExe,
-            new[] { paths.OdooBin, "-c", paths.OdooConf, "-d", DatabaseName },
+            new[]
+            {
+                paths.OdooBin,
+                "-c", paths.OdooConf,
+                "-d", DatabaseName,
+                "--db_host", "127.0.0.1",
+                "--db_port", PostgresPort.ToString(),
+                "--db_user", OdooDbUser,
+            },
             paths.Root,
             paths.OdooStdoutLog,
             paths.OdooStderrLog,
-            new Dictionary<string, string> { ["PYTHONPATH"] = paths.OdooDir }
+            OdooEnvironment(paths, LoadOrCreateSecrets(paths))
         );
         _logger.LogInformation("Odoo process started with PID {Pid}.", _odoo.Id);
+    }
+
+    private static Dictionary<string, string> OdooEnvironment(RuntimePaths paths, SecretState secrets)
+    {
+        return new Dictionary<string, string>
+        {
+            ["PYTHONPATH"] = paths.OdooDir,
+            ["PGHOST"] = "127.0.0.1",
+            ["PGPORT"] = PostgresPort.ToString(),
+            ["PGUSER"] = OdooDbUser,
+            ["PGPASSWORD"] = secrets.DbPassword,
+            ["PGDATABASE"] = DatabaseName,
+        };
     }
 
     private void StartCaddy(RuntimePaths paths)
