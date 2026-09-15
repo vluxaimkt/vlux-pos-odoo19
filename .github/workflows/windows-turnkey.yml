@@ -130,6 +130,48 @@ jobs:
           $version = "$env:TURNKEY_VERSION"
           $setup = Resolve-Path "dist\windows\VLUX_POS_Setup_${version}_x64.exe"
           $msi = Resolve-Path "dist\windows\VLUX_POS_${version}_x64.msi"
+          $diagnosticsDir = "dist\windows\diagnostics"
+          New-Item -ItemType Directory -Force -Path $diagnosticsDir | Out-Null
+
+          function Copy-IfExists {
+            param([string]$Path, [string]$Destination)
+            if (Test-Path $Path) {
+              Copy-Item $Path $Destination -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          function Write-Diagnostics {
+            param([string]$Reason)
+            New-Item -ItemType Directory -Force -Path $diagnosticsDir | Out-Null
+            Set-Content -Path "$diagnosticsDir\failure-reason.txt" -Value $Reason
+            Get-Service -Name VLUXPOS -ErrorAction SilentlyContinue | Format-List * | Out-File "$diagnosticsDir\service.txt"
+            sc.exe queryex VLUXPOS | Out-File "$diagnosticsDir\sc-queryex.txt" -ErrorAction SilentlyContinue
+            Get-ChildItem "C:\Program Files\VLUX\POS" -Recurse -ErrorAction SilentlyContinue |
+              Select-Object FullName,Length,LastWriteTime |
+              Out-File "$diagnosticsDir\program-files-tree.txt"
+            Get-ChildItem "C:\ProgramData\VLUX\POS" -Recurse -ErrorAction SilentlyContinue |
+              Select-Object FullName,Length,LastWriteTime |
+              Out-File "$diagnosticsDir\program-data-tree.txt"
+            Copy-IfExists "C:\ProgramData\VLUX\POS\logs" "$diagnosticsDir\programdata-logs"
+            Copy-IfExists "C:\ProgramData\VLUX\POS\config\odoo.conf" "$diagnosticsDir\odoo.conf"
+            if (Test-Path "$diagnosticsDir\odoo.conf") {
+              (Get-Content "$diagnosticsDir\odoo.conf") `
+                -replace '(?im)^(admin_passwd\s*=\s*).+$', '$1[REDACTED]' `
+                -replace '(?im)^(db_password\s*=\s*).+$', '$1[REDACTED]' |
+                Set-Content "$diagnosticsDir\odoo.conf"
+            }
+            Get-ChildItem $diagnosticsDir -Recurse -File -ErrorAction SilentlyContinue |
+              ForEach-Object {
+                (Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue) `
+                  -replace '(?i)(password|passwd|secret|token)\s*[:=]\s*[^,\r\n]+', '$1=[REDACTED]' |
+                  Set-Content $_.FullName -ErrorAction SilentlyContinue
+              }
+          }
+
+          trap {
+            Write-Diagnostics $_.Exception.Message
+            throw
+          }
 
           function Wait-VluxHealth {
             param([string]$Url, [int]$Seconds = 900)
@@ -167,7 +209,9 @@ jobs:
             }
           }
 
-          Start-Process -FilePath $setup -ArgumentList "/quiet /norestart" -Wait -NoNewWindow
+          $installLog = (Resolve-Path $diagnosticsDir).Path
+          $install = Start-Process -FilePath $setup -ArgumentList "/quiet /norestart /log `"$installLog\setup-install.log`"" -Wait -NoNewWindow -PassThru
+          if ($install.ExitCode -ne 0) { throw "Setup install failed with exit code $($install.ExitCode)" }
           if (!(Test-Path "C:\Program Files\VLUX\POS\bin\servicehost\Vlux.Pos.ServiceHost.exe")) { throw "Service host missing" }
           if (!(Test-Path "C:\Program Files\VLUX\POS\runtime\python\python.exe")) { throw "Private Python missing" }
           if (!(Test-Path "C:\Program Files\VLUX\POS\runtime\postgresql\bin\postgres.exe")) { throw "PostgreSQL runtime missing" }
@@ -213,12 +257,14 @@ jobs:
             }
           }
 
-          Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart" -Wait -NoNewWindow
+          $uninstall = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart /L*v `"$installLog\msi-uninstall.log`"" -Wait -NoNewWindow -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "MSI uninstall failed with exit code $($uninstall.ExitCode)" }
           if (!(Test-Path "C:\ProgramData\VLUX\POS\data\preserve.marker")) { throw "Data preservation marker was removed" }
           if (!(Test-Path "C:\ProgramData\VLUX\POS\filestore\preserve.marker")) { throw "Filestore preservation marker was removed" }
           if (!(Test-Path "C:\ProgramData\VLUX\POS\backups\preserve.marker")) { throw "Backup preservation marker was removed" }
 
-          Start-Process -FilePath $setup -ArgumentList "/quiet /norestart" -Wait -NoNewWindow
+          $reinstall = Start-Process -FilePath $setup -ArgumentList "/quiet /norestart /log `"$installLog\setup-reinstall.log`"" -Wait -NoNewWindow -PassThru
+          if ($reinstall.ExitCode -ne 0) { throw "Setup reinstall failed with exit code $($reinstall.ExitCode)" }
           $service = Get-Service -Name VLUXPOS -ErrorAction Stop
           if ($service.Status -ne "Running") { Start-Service VLUXPOS }
           Wait-VluxHealth "http://127.0.0.1:8080/vlux/health?db=vlux_pos" | Out-Null
@@ -249,6 +295,7 @@ jobs:
           $manifest | ConvertTo-Json -Depth 12 | Set-Content -Encoding UTF8 $manifestPath
 
       - name: Upload turnkey artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: vlux-pos-windows-turnkey-${{ env.TURNKEY_VERSION }}
@@ -259,4 +306,5 @@ jobs:
             ${{ env.ADDONS_DIR }}/dist/windows/manifest.json
             ${{ env.ADDONS_DIR }}/dist/windows/runtime-manifest.json
             ${{ env.ADDONS_DIR }}/dist/windows/payload-scan.json
+            ${{ env.ADDONS_DIR }}/dist/windows/diagnostics/**
           if-no-files-found: error
