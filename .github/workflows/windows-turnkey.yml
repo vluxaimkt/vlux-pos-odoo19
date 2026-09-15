@@ -216,7 +216,7 @@ jobs:
 
           function Assert-CurlOk {
             param([string]$Url)
-            $output = & curl.exe -sS -i $Url
+            $output = & curl.exe --ssl-no-revoke -sS -i $Url
             if ($LASTEXITCODE -ne 0) { throw "curl failed for $Url with exit code $LASTEXITCODE. Output: $output" }
             if ($output -notmatch "HTTP/\\S+\\s+200") { throw "curl did not receive HTTP 200 for $Url. Output: $output" }
             return $output
