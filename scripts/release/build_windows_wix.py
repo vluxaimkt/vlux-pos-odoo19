@@ -269,6 +269,12 @@ def generate_product_wxs(payload_dir: Path, product_wxs: Path, version: str) -> 
 
     payload_directory = "\n".join(emit_directory(tree, indent=5))
     component_group = "\n".join(component_refs)
+    trust_script = r'[INSTALLFOLDER]windows-turnkey\Trust-VluxPosLocalCA.ps1'
+    trust_ca_command = (
+        r'powershell.exe '
+        r'-NoProfile -ExecutionPolicy Bypass -File '
+        f'"{trust_script}"'
+    )
 
     product_wxs.write_text(
         f'''<?xml version="1.0" encoding="utf-8"?>
@@ -276,6 +282,10 @@ def generate_product_wxs(payload_dir: Path, product_wxs: Path, version: str) -> 
   <Package Name="VLUX POS" Manufacturer="VLUX" Version="{msi_version(version)}" UpgradeCode="{PRODUCT_UPGRADE_CODE}" Scope="perMachine">
     <MajorUpgrade DowngradeErrorMessage="A newer VLUX POS version is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    <CustomAction Id="VLUXTrustLocalCA" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check" ExeCommand="{escape(trust_ca_command, {'"': '&quot;'})}" />
+    <InstallExecuteSequence>
+      <Custom Action="VLUXTrustLocalCA" After="StartServices" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
 
     <Feature Id="MainFeature" Title="VLUX POS" Level="1">
       <ComponentGroupRef Id="VLUXProgramFiles" />

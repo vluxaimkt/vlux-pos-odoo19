@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -37,8 +39,10 @@ public sealed class VluxPosWorker : BackgroundService
         ValidatePayload(_paths);
 
         var secrets = LoadOrCreateSecrets(_paths);
+        var tlsIdentity = DetectLanTlsIdentity();
         WriteOdooConfig(_paths, secrets);
-        WriteCaddyfile(_paths);
+        WriteCaddyfile(_paths, tlsIdentity);
+        WriteLanTlsMetadata(_paths, tlsIdentity);
 
         await EnsurePostgresqlAsync(_paths, secrets, stoppingToken);
         await EnsureDatabaseAsync(_paths, secrets, stoppingToken);
@@ -47,6 +51,8 @@ public sealed class VluxPosWorker : BackgroundService
         await WaitForHttpAsync($"http://127.0.0.1:{OdooHttpPort}/vlux/health?db={DatabaseName}", stoppingToken);
         StartCaddy(_paths);
         await WaitForHttpAsync($"http://127.0.0.1:{CaddyHttpPort}/vlux/health?db={DatabaseName}", stoppingToken);
+        await EnsurePublicCaExportAsync(_paths, stoppingToken);
+        await ProtectCaddyPrivateKeysAsync(_paths, stoppingToken);
 
         _logger.LogInformation("VLUX POS runtime is healthy on local HTTP port {HttpPort} and local TLS port {HttpsPort}.", CaddyHttpPort, CaddyHttpsPort);
         while (!stoppingToken.IsCancellationRequested)
@@ -183,8 +189,9 @@ public sealed class VluxPosWorker : BackgroundService
         File.WriteAllText(paths.OdooConf, config.Replace("\r\n", "\n"), Utf8NoBom);
     }
 
-    private static void WriteCaddyfile(RuntimePaths paths)
+    private static void WriteCaddyfile(RuntimePaths paths, LanTlsIdentity tlsIdentity)
     {
+        var httpsSites = string.Join(", ", tlsIdentity.SanList.Select(ToCaddyHttpsSite));
         var caddyfile = $$"""
         {
             admin off
@@ -195,12 +202,179 @@ public sealed class VluxPosWorker : BackgroundService
             reverse_proxy 127.0.0.1:{{OdooHttpPort}}
         }
 
-        localhost:{{CaddyHttpsPort}} {
+        {{httpsSites}} {
             tls internal
             reverse_proxy 127.0.0.1:{{OdooHttpPort}}
         }
         """;
         File.WriteAllText(paths.Caddyfile, caddyfile.Replace("\r\n", "\n"), Utf8NoBom);
+    }
+
+    private static string ToCaddyHttpsSite(string identity)
+    {
+        return $"https://{identity}:{CaddyHttpsPort}";
+    }
+
+    private static void WriteLanTlsMetadata(RuntimePaths paths, LanTlsIdentity tlsIdentity)
+    {
+        var payload = new
+        {
+            primary_name = tlsIdentity.PrimaryName,
+            san_list = tlsIdentity.SanList,
+            lan_ips = tlsIdentity.LanIps,
+            optional_remote_interfaces = tlsIdentity.OptionalRemoteInterfaces,
+        };
+        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(paths.LanTlsMetadataFile, json + Environment.NewLine, Utf8NoBom);
+    }
+
+    private static LanTlsIdentity DetectLanTlsIdentity()
+    {
+        var primaryName = "vlux-pos.local";
+        var machineName = SanitizeDnsName(Environment.MachineName);
+        var lanIps = GetLanIps().ToArray();
+        var optionalRemote = GetOptionalRemoteIps().ToArray();
+        var names = new List<string> { "localhost", primaryName };
+        if (!string.IsNullOrWhiteSpace(machineName))
+        {
+            names.Add(machineName);
+            names.Add($"{machineName}.local");
+        }
+        names.AddRange(lanIps);
+        return new LanTlsIdentity(
+            primaryName,
+            DistinctSanEntries(names).ToArray(),
+            lanIps,
+            optionalRemote
+        );
+    }
+
+    private static IEnumerable<string> DistinctSanEntries(IEnumerable<string> entries)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries)
+        {
+            if (!string.IsNullOrWhiteSpace(entry) && seen.Add(entry))
+            {
+                yield return entry;
+            }
+        }
+    }
+
+    private static string SanitizeDnsName(string value)
+    {
+        var cleaned = new string(value.ToLowerInvariant().Select(ch =>
+            char.IsAsciiLetterOrDigit(ch) || ch == '-' ? ch : '-'
+        ).ToArray()).Trim('-');
+        return cleaned.Length == 0 ? "" : cleaned;
+    }
+
+    private static IEnumerable<string> GetLanIps()
+    {
+        var addresses = NetworkInterface.GetAllNetworkInterfaces()
+            .Where(nic => nic.OperationalStatus == OperationalStatus.Up && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+            .SelectMany(nic => nic.GetIPProperties().UnicastAddresses)
+            .Select(address => address.Address)
+            .Where(address => address.AddressFamily == AddressFamily.InterNetwork)
+            .Where(IsRfc1918LanAddress)
+            .Select(address => address.ToString())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return addresses
+            .OrderBy(AddressPriority)
+            .ThenBy(address => address, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> GetOptionalRemoteIps()
+    {
+        return NetworkInterface.GetAllNetworkInterfaces()
+            .Where(nic => nic.OperationalStatus == OperationalStatus.Up && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+            .SelectMany(nic => nic.GetIPProperties().UnicastAddresses)
+            .Select(address => address.Address)
+            .Where(address => address.AddressFamily == AddressFamily.InterNetwork)
+            .Where(IsTailscaleAddress)
+            .Select(address => address.ToString())
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRfc1918LanAddress(IPAddress address)
+    {
+        var bytes = address.GetAddressBytes();
+        if (bytes[0] == 169 && bytes[1] == 254)
+        {
+            return false;
+        }
+        if (IsTailscaleAddress(address))
+        {
+            return false;
+        }
+        return bytes[0] == 10
+            || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
+            || (bytes[0] == 192 && bytes[1] == 168);
+    }
+
+    private static bool IsTailscaleAddress(IPAddress address)
+    {
+        var bytes = address.GetAddressBytes();
+        return bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127;
+    }
+
+    private static int AddressPriority(string address)
+    {
+        if (address.StartsWith("192.168.", StringComparison.Ordinal))
+        {
+            return 0;
+        }
+        if (address.StartsWith("10.", StringComparison.Ordinal))
+        {
+            return 1;
+        }
+        return 2;
+    }
+
+    private static async Task EnsurePublicCaExportAsync(RuntimePaths paths, CancellationToken token)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(60);
+        while (!File.Exists(paths.CaddyRootCa) && DateTimeOffset.UtcNow < deadline && !token.IsCancellationRequested)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1), token);
+        }
+        if (!File.Exists(paths.CaddyRootCa))
+        {
+            throw new FileNotFoundException($"Caddy local root CA was not generated: {paths.CaddyRootCa}");
+        }
+        Directory.CreateDirectory(paths.CertificatesDir);
+        File.Copy(paths.CaddyRootCa, paths.PublicCaExport, overwrite: true);
+        if (!File.Exists(paths.PublicCaExport))
+        {
+            throw new FileNotFoundException($"VLUX public CA export was not created: {paths.PublicCaExport}");
+        }
+    }
+
+    private static async Task ProtectCaddyPrivateKeysAsync(RuntimePaths paths, CancellationToken token)
+    {
+        if (!Directory.Exists(paths.CaddyPkiDir))
+        {
+            return;
+        }
+        var icacls = Path.Combine(Environment.SystemDirectory, "icacls.exe");
+        await RunAsync(
+            icacls,
+            new[]
+            {
+                paths.CaddyPkiDir,
+                "/inheritance:r",
+                "/grant:r",
+                "*S-1-5-18:(OI)(CI)F",
+                "*S-1-5-32-544:(OI)(CI)F",
+                "*S-1-5-19:(OI)(CI)F",
+            },
+            paths.Root,
+            paths.CaddyAclLog,
+            token,
+            sensitive: false,
+            ignoreExitCode: true
+        );
     }
 
     private static async Task EnsurePostgresqlAsync(RuntimePaths paths, SecretState secrets, CancellationToken token)
@@ -589,6 +763,13 @@ public sealed class RuntimePaths
     public required string Caddyfile { get; init; }
     public required string CaddyStdoutLog { get; init; }
     public required string CaddyStderrLog { get; init; }
+    public required string CaddyAclLog { get; init; }
+    public required string CaddyPkiDir { get; init; }
+    public required string CaddyRootCa { get; init; }
+    public required string CaddyRootKey { get; init; }
+    public required string CertificatesDir { get; init; }
+    public required string PublicCaExport { get; init; }
+    public required string LanTlsMetadataFile { get; init; }
     public required string SecretsFile { get; init; }
 
     public static RuntimePaths Create()
@@ -600,6 +781,9 @@ public sealed class RuntimePaths
         var dataDir = Path.Combine(programDataRoot, "data");
         var logsDir = Environment.GetEnvironmentVariable("VLUX_POS_LOGS") ?? Path.Combine(programDataRoot, "logs");
         var postgresData = Path.Combine(programDataRoot, "postgresql", "data");
+        var caddyPki = Path.Combine(programDataRoot, "caddy", "data", "caddy", "pki");
+        var caddyLocalCa = Path.Combine(caddyPki, "authorities", "local");
+        var certificatesDir = Path.Combine(programDataRoot, "certificates");
         return new RuntimePaths
         {
             Root = root,
@@ -630,6 +814,13 @@ public sealed class RuntimePaths
             Caddyfile = Path.Combine(configDir, "Caddyfile"),
             CaddyStdoutLog = Path.Combine(logsDir, "caddy.stdout.log"),
             CaddyStderrLog = Path.Combine(logsDir, "caddy.stderr.log"),
+            CaddyAclLog = Path.Combine(logsDir, "caddy-acl.log"),
+            CaddyPkiDir = caddyPki,
+            CaddyRootCa = Path.Combine(caddyLocalCa, "root.crt"),
+            CaddyRootKey = Path.Combine(caddyLocalCa, "root.key"),
+            CertificatesDir = certificatesDir,
+            PublicCaExport = Path.Combine(certificatesDir, "VLUX_POS_Local_CA.crt"),
+            LanTlsMetadataFile = Path.Combine(configDir, "lan-tls.json"),
             SecretsFile = Path.Combine(configDir, "secrets.json"),
         };
     }
@@ -643,6 +834,7 @@ public sealed class RuntimePaths
             DataDir,
             Path.Combine(ProgramDataRoot, "filestore"),
             Path.Combine(ProgramDataRoot, "backups"),
+            CertificatesDir,
             LogsDir,
             Path.GetDirectoryName(PostgresDataDir)!,
         })
@@ -651,6 +843,13 @@ public sealed class RuntimePaths
         }
     }
 }
+
+public sealed record LanTlsIdentity(
+    string PrimaryName,
+    string[] SanList,
+    string[] LanIps,
+    string[] OptionalRemoteInterfaces
+);
 
 public sealed class SecretState
 {

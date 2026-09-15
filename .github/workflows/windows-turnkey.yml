@@ -6,7 +6,7 @@ on:
       version:
         description: "Turnkey lab version"
         required: true
-        default: "0.0.0-turnkey2"
+        default: "0.0.0-turnkey3"
   push:
     branches:
       - feature/production-distribution
@@ -24,7 +24,7 @@ env:
   ODOO_COMMIT: a2d73c5900d8886d115afe1ccb7f5c97c7e71a97
   ODOO_DIR: ${{ github.workspace }}/odoo
   ADDONS_DIR: ${{ github.workspace }}/vlux-addons
-  TURNKEY_VERSION: ${{ inputs.version || '0.0.0-turnkey2' }}
+  TURNKEY_VERSION: ${{ inputs.version || '0.0.0-turnkey3' }}
   PYTHON_VERSION: "3.12.10"
   WIX_VERSION: "4.0.5"
 
@@ -156,6 +156,9 @@ jobs:
               Out-File "$diagnosticsDir\program-data-tree.txt"
             Copy-IfExists "C:\ProgramData\VLUX\POS\logs" "$diagnosticsDir\programdata-logs"
             Copy-IfExists "C:\ProgramData\VLUX\POS\config\odoo.conf" "$diagnosticsDir\odoo.conf"
+            Copy-IfExists "C:\ProgramData\VLUX\POS\config\Caddyfile" "$diagnosticsDir\Caddyfile"
+            Copy-IfExists "C:\ProgramData\VLUX\POS\config\lan-tls.json" "$diagnosticsDir\lan-tls.json"
+            Copy-IfExists "C:\ProgramData\VLUX\POS\certificates" "$diagnosticsDir\certificates"
             if (Test-Path "$diagnosticsDir\odoo.conf") {
               (Get-Content "$diagnosticsDir\odoo.conf") `
                 -replace '(?im)^(admin_passwd\s*=\s*).+$', '$1[REDACTED]' `
@@ -211,6 +214,36 @@ jobs:
             }
           }
 
+          function Assert-CurlOk {
+            param([string]$Url)
+            $output = & curl.exe -sS -i $Url
+            if ($LASTEXITCODE -ne 0) { throw "curl failed for $Url with exit code $LASTEXITCODE. Output: $output" }
+            if ($output -notmatch "HTTP/\\S+\\s+200") { throw "curl did not receive HTTP 200 for $Url. Output: $output" }
+            return $output
+          }
+
+          function Get-VluxLanIp {
+            $candidates = Get-NetIPAddress -AddressFamily IPv4 |
+              Where-Object {
+                $_.IPAddress -notlike "127.*" -and
+                $_.IPAddress -notlike "169.254.*" -and
+                $_.IPAddress -notmatch "^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\." -and
+                (
+                  $_.IPAddress -like "192.168.*" -or
+                  $_.IPAddress -like "10.*" -or
+                  $_.IPAddress -match "^172\\.(1[6-9]|2[0-9]|3[0-1])\\."
+                )
+              } |
+              Sort-Object @{
+                Expression = {
+                  if ($_.IPAddress -like "192.168.*") { 0 }
+                  elseif ($_.IPAddress -like "10.*") { 1 }
+                  else { 2 }
+                }
+              }, IPAddress
+            return ($candidates | Select-Object -First 1).IPAddress
+          }
+
           $installLog = (Resolve-Path $diagnosticsDir).Path
           $install = Start-Process -FilePath $setup -ArgumentList "/quiet /norestart /log `"$installLog\setup-install.log`"" -Wait -NoNewWindow -PassThru
           if ($install.ExitCode -ne 0) { throw "Setup install failed with exit code $($install.ExitCode)" }
@@ -227,14 +260,34 @@ jobs:
           Wait-VluxHealth "http://127.0.0.1:8080/vlux/health?db=vlux_pos" | Out-Null
           Wait-VluxHealth "http://127.0.0.1:8069/vlux/health?db=vlux_pos" | Out-Null
           Wait-VluxHealth "https://localhost:8443/vlux/health?db=vlux_pos" | Out-Null
+          $publicCa = "C:\ProgramData\VLUX\POS\certificates\VLUX_POS_Local_CA.crt"
+          if (!(Test-Path $publicCa)) { throw "VLUX public CA export missing" }
+          $certDirKeys = Get-ChildItem "C:\ProgramData\VLUX\POS\certificates" -Recurse -File |
+            Where-Object { $_.Extension -in @(".key", ".pfx", ".p12", ".pem") }
+          if ($certDirKeys) { throw "Private key material exposed in public certificates directory: $($certDirKeys.FullName -join ', ')" }
+          Assert-CurlOk "https://localhost:8443/vlux/health?db=vlux_pos" | Out-Null
+          $lanIp = Get-VluxLanIp
+          if (!$lanIp) { throw "No RFC1918 LAN IP detected for LAN HTTPS test" }
+          Assert-CurlOk "https://$lanIp`:8443/vlux/health?db=vlux_pos" | Out-Null
+          $hostname = $env:COMPUTERNAME.ToLowerInvariant()
+          Assert-CurlOk "https://$hostname`:8443/vlux/health?db=vlux_pos" | Out-Null
+          $lanTls = Get-Content "C:\ProgramData\VLUX\POS\config\lan-tls.json" -Raw | ConvertFrom-Json
+          foreach ($expectedSan in @("localhost", "vlux-pos.local", $hostname, "$hostname.local", $lanIp)) {
+            if ($lanTls.san_list -notcontains $expectedSan) { throw "Missing TLS SAN identity: $expectedSan" }
+          }
           $pgPort = Test-NetConnection -ComputerName 127.0.0.1 -Port 55432 -InformationLevel Quiet
           if (!$pgPort) { throw "PostgreSQL local port is not reachable" }
+          if (!(Test-NetConnection -ComputerName $lanIp -Port 8443 -InformationLevel Quiet)) { throw "HTTPS 8443 is not reachable on LAN IP $lanIp" }
+          if (Test-NetConnection -ComputerName $lanIp -Port 8069 -InformationLevel Quiet) { throw "Odoo 8069 is exposed on LAN IP $lanIp" }
+          if (Test-NetConnection -ComputerName $lanIp -Port 55432 -InformationLevel Quiet) { throw "PostgreSQL 55432 is exposed on LAN IP $lanIp" }
+          if (!(Get-NetFirewallRule -DisplayName "VLUX POS HTTPS 8443" -ErrorAction SilentlyContinue)) { throw "VLUX HTTPS firewall rule missing" }
           Assert-HttpOk "http://127.0.0.1:8080/web/login?db=vlux_pos" | Out-Null
           Assert-HttpOk "http://127.0.0.1:8080/vlux-owner/manifest.webmanifest?db=vlux_pos" | Out-Null
           Assert-HttpOk "http://127.0.0.1:8080/vlux/scanner?db=vlux_pos" | Out-Null
 
           Restart-Service VLUXPOS -Force
           Wait-VluxHealth "http://127.0.0.1:8080/vlux/health?db=vlux_pos" | Out-Null
+          Assert-CurlOk "https://localhost:8443/vlux/health?db=vlux_pos" | Out-Null
 
           New-Item -ItemType Directory -Force -Path "C:\ProgramData\VLUX\POS\data" | Out-Null
           Set-Content -Path "C:\ProgramData\VLUX\POS\data\preserve.marker" -Value "preserve"
@@ -270,6 +323,7 @@ jobs:
           $service = Get-Service -Name VLUXPOS -ErrorAction Stop
           if ($service.Status -ne "Running") { Start-Service VLUXPOS }
           Wait-VluxHealth "http://127.0.0.1:8080/vlux/health?db=vlux_pos" | Out-Null
+          Assert-CurlOk "https://localhost:8443/vlux/health?db=vlux_pos" | Out-Null
 
           $manifestPath = "dist\windows\manifest.json"
           $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
@@ -285,6 +339,18 @@ jobs:
           $manifest.validation | Add-Member -Force -NotePropertyName odoo_smoke -NotePropertyValue "PASS"
           $manifest.validation | Add-Member -Force -NotePropertyName health_smoke -NotePropertyValue "PASS"
           $manifest.validation | Add-Member -Force -NotePropertyName https_runner_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName local_ca_trust -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName lan_https -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName hostname_https -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName tls_san_validation -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName firewall_8443 -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName odoo_lan_exposure -NotePropertyValue "PASS_NOT_EXPOSED"
+          $manifest.validation | Add-Member -Force -NotePropertyName postgres_lan_exposure -NotePropertyValue "PASS_NOT_EXPOSED"
+          $manifest.validation | Add-Member -Force -NotePropertyName private_key_exposure_scan -NotePropertyValue "PASS"
+          $manifest | Add-Member -Force -NotePropertyName lan_tls_primary_name -NotePropertyValue $lanTls.primary_name
+          $manifest | Add-Member -Force -NotePropertyName lan_tls_san_list -NotePropertyValue $lanTls.san_list
+          $manifest | Add-Member -Force -NotePropertyName lan_ip_detected -NotePropertyValue $lanIp
+          $manifest | Add-Member -Force -NotePropertyName ca_export_file -NotePropertyValue "C:\ProgramData\VLUX\POS\certificates\VLUX_POS_Local_CA.crt"
           $manifest.validation | Add-Member -Force -NotePropertyName web_smoke -NotePropertyValue "PASS"
           $manifest.validation | Add-Member -Force -NotePropertyName owner_smoke -NotePropertyValue "PASS"
           $manifest.validation | Add-Member -Force -NotePropertyName scanner_http_smoke -NotePropertyValue "PASS"
