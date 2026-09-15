@@ -75,6 +75,17 @@ jobs:
           python scripts/release/public_repo_scan.py
           python -m compileall scripts/release
 
+      - name: Build offline Windows runtime payload
+        shell: pwsh
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          python scripts/release/build_windows_runtime.py `
+            --out-dir dist/windows/extra-payload `
+            --odoo-home "$env:ODOO_DIR" `
+            --version "$env:TURNKEY_VERSION" `
+            --cache-dir "$env:RUNNER_TEMP\vlux-runtime-cache"
+          Copy-Item dist/windows/extra-payload/windows-turnkey/runtime-manifest.json dist/windows/runtime-manifest.json -Force
+
       - name: Publish VLUX service host
         shell: pwsh
         working-directory: ${{ env.ADDONS_DIR }}
@@ -87,18 +98,9 @@ jobs:
             -p:PublishTrimmed=false `
             -o dist/windows/extra-payload/bin/servicehost
           New-Item -ItemType Directory -Force -Path dist/windows/extra-payload/windows-turnkey | Out-Null
-          Copy-Item packaging/windows/turnkey/* dist/windows/extra-payload/windows-turnkey/ -Recurse -Force
-
-      - name: Build offline Windows runtime payload
-        shell: pwsh
-        working-directory: ${{ env.ADDONS_DIR }}
-        run: |
-          python scripts/release/build_windows_runtime.py `
-            --out-dir dist/windows/extra-payload `
-            --odoo-home "$env:ODOO_DIR" `
-            --version "$env:TURNKEY_VERSION" `
-            --cache-dir "$env:RUNNER_TEMP\vlux-runtime-cache"
-          Copy-Item dist/windows/extra-payload/windows-turnkey/runtime-manifest.json dist/windows/runtime-manifest.json -Force
+          Get-ChildItem packaging/windows/turnkey |
+            Where-Object { $_.Name -ne "runtime-manifest.json" } |
+            Copy-Item -Destination dist/windows/extra-payload/windows-turnkey -Recurse -Force
 
       - name: Build turnkey lab setup
         shell: pwsh
