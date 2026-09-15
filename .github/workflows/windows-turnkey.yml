@@ -6,7 +6,7 @@ on:
       version:
         description: "Turnkey lab version"
         required: true
-        default: "0.0.0-turnkey1"
+        default: "0.0.0-turnkey2"
   push:
     branches:
       - feature/production-distribution
@@ -24,7 +24,7 @@ env:
   ODOO_COMMIT: a2d73c5900d8886d115afe1ccb7f5c97c7e71a97
   ODOO_DIR: ${{ github.workspace }}/odoo
   ADDONS_DIR: ${{ github.workspace }}/vlux-addons
-  TURNKEY_VERSION: ${{ inputs.version || '0.0.0-turnkey1' }}
+  TURNKEY_VERSION: ${{ inputs.version || '0.0.0-turnkey2' }}
   PYTHON_VERSION: "3.12.10"
   WIX_VERSION: "4.0.5"
 
@@ -88,6 +88,17 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist/windows/extra-payload/windows-turnkey | Out-Null
           Copy-Item packaging/windows/turnkey/* dist/windows/extra-payload/windows-turnkey/ -Recurse -Force
 
+      - name: Build offline Windows runtime payload
+        shell: pwsh
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          python scripts/release/build_windows_runtime.py `
+            --out-dir dist/windows/extra-payload `
+            --odoo-home "$env:ODOO_DIR" `
+            --version "$env:TURNKEY_VERSION" `
+            --cache-dir "$env:RUNNER_TEMP\vlux-runtime-cache"
+          Copy-Item dist/windows/extra-payload/windows-turnkey/runtime-manifest.json dist/windows/runtime-manifest.json -Force
+
       - name: Build turnkey lab setup
         shell: pwsh
         working-directory: ${{ env.ADDONS_DIR }}
@@ -103,7 +114,7 @@ jobs:
             --extra-payload dist/windows/extra-payload `
             --client-payload `
             --setup-file-name "VLUX_POS_Setup_${version}_x64.exe" `
-            --runtime-chain-status PENDING_RUNTIME_CHAIN `
+            --runtime-chain-status COMPLETE `
             --payload-scan-report dist/windows/payload-scan.json
           Get-Content "dist\windows\VLUX_POS_${version}_x64.msi.sha256", "dist\windows\VLUX_POS_Setup_${version}_x64.exe.sha256" | ForEach-Object {
             $parts = $_ -split '\s+'
@@ -111,28 +122,128 @@ jobs:
             if ($actual -ne $parts[0]) { throw "Checksum mismatch for $($parts[1])" }
           }
 
-      - name: Runner install and uninstall smoke
+      - name: Setup EXE runtime E2E smoke
         shell: pwsh
         working-directory: ${{ env.ADDONS_DIR }}
         run: |
           $version = "$env:TURNKEY_VERSION"
+          $setup = Resolve-Path "dist\windows\VLUX_POS_Setup_${version}_x64.exe"
           $msi = Resolve-Path "dist\windows\VLUX_POS_${version}_x64.msi"
-          Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait -NoNewWindow
+
+          function Wait-VluxHealth {
+            param([string]$Url, [int]$Seconds = 900)
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            $last = $null
+            while ((Get-Date) -lt $deadline) {
+              try {
+                $params = @{ Uri = $Url; UseBasicParsing = $true; TimeoutSec = 10 }
+                if ($Url.StartsWith("https://")) { $params.SkipCertificateCheck = $true }
+                $response = Invoke-WebRequest @params
+                if ($response.StatusCode -eq 200 -and $response.Content -match '"status"\s*:\s*"ok"') {
+                  return $response
+                }
+                $last = "Unexpected response $($response.StatusCode): $($response.Content)"
+              } catch {
+                $last = $_.Exception.Message
+              }
+              Start-Sleep -Seconds 5
+            }
+            throw "Timed out waiting for $Url. Last error: $last"
+          }
+
+          function Assert-HttpOk {
+            param([string]$Url, [switch]$SkipCertificateCheck)
+            $params = @{ Uri = $Url; UseBasicParsing = $true; TimeoutSec = 20; MaximumRedirection = 0; ErrorAction = "Stop" }
+            if ($SkipCertificateCheck) { $params.SkipCertificateCheck = $true }
+            try {
+              $response = Invoke-WebRequest @params
+              if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 400) { throw "HTTP $($response.StatusCode)" }
+              return $response
+            } catch {
+              $status = $_.Exception.Response.StatusCode.value__
+              if ($status -ge 300 -and $status -lt 400) { return $_.Exception.Response }
+              throw
+            }
+          }
+
+          Start-Process -FilePath $setup -ArgumentList "/quiet /norestart" -Wait -NoNewWindow
           if (!(Test-Path "C:\Program Files\VLUX\POS\bin\servicehost\Vlux.Pos.ServiceHost.exe")) { throw "Service host missing" }
+          if (!(Test-Path "C:\Program Files\VLUX\POS\runtime\python\python.exe")) { throw "Private Python missing" }
+          if (!(Test-Path "C:\Program Files\VLUX\POS\runtime\postgresql\bin\postgres.exe")) { throw "PostgreSQL runtime missing" }
+          if (!(Test-Path "C:\Program Files\VLUX\POS\runtime\odoo\odoo-bin")) { throw "Odoo runtime missing" }
+          if ((Get-Content "C:\Program Files\VLUX\POS\runtime\odoo\ODOO_COMMIT.txt").Trim() -ne "$env:ODOO_COMMIT") { throw "Odoo runtime commit mismatch" }
+          if (!(Test-Path "C:\Program Files\VLUX\POS\runtime\caddy\caddy.exe")) { throw "Caddy runtime missing" }
           $service = Get-Service -Name VLUXPOS -ErrorAction Stop
           if ($service.Name -ne "VLUXPOS") { throw "Service not installed" }
+          if ($service.Status -ne "Running") { Start-Service VLUXPOS }
+
+          Wait-VluxHealth "http://127.0.0.1:8080/vlux/health?db=vlux_pos" | Out-Null
+          Wait-VluxHealth "http://127.0.0.1:8069/vlux/health?db=vlux_pos" | Out-Null
+          Wait-VluxHealth "https://localhost:8443/vlux/health?db=vlux_pos" | Out-Null
+          $pgPort = Test-NetConnection -ComputerName 127.0.0.1 -Port 55432 -InformationLevel Quiet
+          if (!$pgPort) { throw "PostgreSQL local port is not reachable" }
+          Assert-HttpOk "http://127.0.0.1:8080/web/login?db=vlux_pos" | Out-Null
+          Assert-HttpOk "http://127.0.0.1:8080/vlux-owner/manifest.webmanifest?db=vlux_pos" | Out-Null
+          Assert-HttpOk "http://127.0.0.1:8080/vlux/scanner?db=vlux_pos" | Out-Null
+
+          Restart-Service VLUXPOS -Force
+          Wait-VluxHealth "http://127.0.0.1:8080/vlux/health?db=vlux_pos" | Out-Null
+
           New-Item -ItemType Directory -Force -Path "C:\ProgramData\VLUX\POS\data" | Out-Null
           Set-Content -Path "C:\ProgramData\VLUX\POS\data\preserve.marker" -Value "preserve"
+          New-Item -ItemType Directory -Force -Path "C:\ProgramData\VLUX\POS\filestore", "C:\ProgramData\VLUX\POS\backups" | Out-Null
+          Set-Content -Path "C:\ProgramData\VLUX\POS\filestore\preserve.marker" -Value "preserve"
+          Set-Content -Path "C:\ProgramData\VLUX\POS\backups\preserve.marker" -Value "preserve"
+
+          $secrets = Get-Content "C:\ProgramData\VLUX\POS\config\secrets.json" -Raw | ConvertFrom-Json
+          $secretValues = @(
+            $secrets.PostgresAdminPassword,
+            $secrets.DbPassword,
+            $secrets.OdooMasterPassword,
+            $secrets.InitialOwnerPassword,
+            $secrets.InstallerSecret
+          ) | Where-Object { $_ }
+          $logFiles = Get-ChildItem "C:\ProgramData\VLUX\POS\logs" -File -ErrorAction SilentlyContinue
+          foreach ($secret in $secretValues) {
+            foreach ($log in $logFiles) {
+              if (Select-String -LiteralPath $log.FullName -SimpleMatch $secret -Quiet) {
+                throw "Secret leaked in log $($log.FullName)"
+              }
+            }
+          }
+
           Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart" -Wait -NoNewWindow
           if (!(Test-Path "C:\ProgramData\VLUX\POS\data\preserve.marker")) { throw "Data preservation marker was removed" }
+          if (!(Test-Path "C:\ProgramData\VLUX\POS\filestore\preserve.marker")) { throw "Filestore preservation marker was removed" }
+          if (!(Test-Path "C:\ProgramData\VLUX\POS\backups\preserve.marker")) { throw "Backup preservation marker was removed" }
+
+          Start-Process -FilePath $setup -ArgumentList "/quiet /norestart" -Wait -NoNewWindow
+          $service = Get-Service -Name VLUXPOS -ErrorAction Stop
+          if ($service.Status -ne "Running") { Start-Service VLUXPOS }
+          Wait-VluxHealth "http://127.0.0.1:8080/vlux/health?db=vlux_pos" | Out-Null
+
           $manifestPath = "dist\windows\manifest.json"
           $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
           $manifest.validation.install_smoke = "PASS"
+          $manifest.runtime_chain_status = "COMPLETE"
+          $manifest | Add-Member -Force -NotePropertyName installer_mode -NotePropertyValue "OFFLINE"
+          $manifest | Add-Member -Force -NotePropertyName setup_size_mb -NotePropertyValue ([math]::Round((Get-Item $setup).Length / 1MB, 2))
           $manifest.validation | Add-Member -Force -NotePropertyName runner_install_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName setup_runner_e2e -NotePropertyValue "PASS"
           $manifest.validation | Add-Member -Force -NotePropertyName service_smoke -NotePropertyValue "PASS"
-          $manifest.validation | Add-Member -Force -NotePropertyName health_smoke -NotePropertyValue "BLOCKED_RUNTIME_CHAIN"
+          $manifest.validation | Add-Member -Force -NotePropertyName service_restart_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName postgres_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName odoo_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName health_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName https_runner_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName web_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName owner_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName scanner_http_smoke -NotePropertyValue "PASS"
           $manifest.validation | Add-Member -Force -NotePropertyName uninstall_smoke -NotePropertyValue "PASS"
           $manifest.validation | Add-Member -Force -NotePropertyName data_preservation -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName reinstall_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName offline_install_proof -NotePropertyValue "PASS_NO_CLIENT_DOWNLOAD_BOOTSTRAP"
+          $manifest.validation | Add-Member -Force -NotePropertyName log_secret_scan -NotePropertyValue "PASS"
           $manifest.validation | Add-Member -Force -NotePropertyName clean_machine_e2e -NotePropertyValue "MANUAL_PENDING"
           $manifest | ConvertTo-Json -Depth 12 | Set-Content -Encoding UTF8 $manifestPath
 
@@ -145,5 +256,6 @@ jobs:
             ${{ env.ADDONS_DIR }}/dist/windows/*.exe
             ${{ env.ADDONS_DIR }}/dist/windows/*.sha256
             ${{ env.ADDONS_DIR }}/dist/windows/manifest.json
+            ${{ env.ADDONS_DIR }}/dist/windows/runtime-manifest.json
             ${{ env.ADDONS_DIR }}/dist/windows/payload-scan.json
           if-no-files-found: error

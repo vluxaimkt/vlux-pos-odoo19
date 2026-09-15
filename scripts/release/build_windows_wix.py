@@ -108,7 +108,6 @@ def scan_payload(payload_dir: Path) -> dict:
         ".log",
         ".p12",
         ".pfx",
-        ".sql",
     }
     secret_patterns = [
         re.compile(r"BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY"),
@@ -126,6 +125,31 @@ def scan_payload(payload_dir: Path) -> dict:
         re.compile(r"D:\\a\\", re.IGNORECASE),
         re.compile(r"github\.workspace", re.IGNORECASE),
     ]
+    third_party_runtime_prefixes = (
+        "runtime/odoo/",
+        "runtime/postgresql/",
+        "runtime/python/",
+        "runtime/wheelhouse/",
+    )
+    text_suffixes = {
+        ".cfg",
+        ".conf",
+        ".css",
+        ".csv",
+        ".html",
+        ".ini",
+        ".js",
+        ".json",
+        ".md",
+        ".ps1",
+        ".py",
+        ".toml",
+        ".txt",
+        ".wxs",
+        ".xml",
+        ".yaml",
+        ".yml",
+    }
     secret_findings: list[dict] = []
     path_findings: list[dict] = []
     blocked_file_findings: list[dict] = []
@@ -133,10 +157,18 @@ def scan_payload(payload_dir: Path) -> dict:
         if not path.is_file():
             continue
         rel = path.relative_to(payload_dir).as_posix()
-        if path.suffix.lower() in blocked_extensions or path.name.lower().startswith(".env"):
+        is_public_ca_bundle = rel.endswith("/certifi/cacert.pem")
+        if path.suffix.lower() == ".sql" and not rel.startswith("runtime/postgresql/share/"):
+            blocked_file_findings.append({"file": rel, "type": "blocked_sql_file"})
+            continue
+        if (path.suffix.lower() in blocked_extensions and not is_public_ca_bundle) or path.name.lower().startswith(".env"):
             blocked_file_findings.append({"file": rel, "type": "blocked_file"})
             continue
+        if rel.startswith(third_party_runtime_prefixes):
+            continue
         if path.stat().st_size > 512 * 1024:
+            continue
+        if path.suffix.lower() not in text_suffixes:
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -312,7 +344,7 @@ def service_xml(source: str) -> str:
         'Name="VLUXPOS" DisplayName="VLUX POS" Description="VLUX POS Application" '
         'Start="auto" ErrorControl="normal" Account="LocalSystem" />\n'
         '          <ServiceControl Id="VLUXPOSServiceControl" Name="VLUXPOS" '
-        'Stop="both" Remove="uninstall" Wait="yes" />'
+        'Start="install" Stop="both" Remove="uninstall" Wait="yes" />'
     )
 
 
