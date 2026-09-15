@@ -47,7 +47,6 @@ EXCLUDED_ODDO_DIRS = {
     ".pytest_cache",
     ".tox",
     "debian",
-    "demo",
     "doc",
     "docs",
     "test",
@@ -65,7 +64,6 @@ EXCLUDED_ODDO_SUFFIXES = {
     ".pfx",
     ".pyc",
     ".pyo",
-    ".sql",
 }
 
 
@@ -149,7 +147,7 @@ def normalize_python_embed(python_dir: Path) -> None:
         if line.strip() == "#import site":
             continue
         lines.append(line)
-    for required in (".", "Lib\\site-packages", "import site"):
+    for required in (".", "..\\odoo", "Lib\\site-packages", "import site"):
         if required not in lines:
             lines.append(required)
     pth.write_text("\n".join(lines) + "\n", encoding="utf-8")

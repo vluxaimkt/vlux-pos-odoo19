@@ -158,7 +158,8 @@ def scan_payload(payload_dir: Path) -> dict:
             continue
         rel = path.relative_to(payload_dir).as_posix()
         is_public_ca_bundle = rel.endswith("/certifi/cacert.pem")
-        if path.suffix.lower() == ".sql" and not rel.startswith("runtime/postgresql/share/"):
+        allowed_runtime_sql = rel.startswith("runtime/postgresql/share/") or rel.startswith("runtime/odoo/")
+        if path.suffix.lower() == ".sql" and not allowed_runtime_sql:
             blocked_file_findings.append({"file": rel, "type": "blocked_sql_file"})
             continue
         if (path.suffix.lower() in blocked_extensions and not is_public_ca_bundle) or path.name.lower().startswith(".env"):

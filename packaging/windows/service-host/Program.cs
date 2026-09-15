@@ -11,6 +11,7 @@ namespace Vlux.Pos.ServiceHost;
 
 public sealed class VluxPosWorker : BackgroundService
 {
+    private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
     private const string DatabaseName = "vlux_pos";
     private const string PostgresAdminUser = "vlux_pg_admin";
     private const string OdooDbUser = "vlux_app";
@@ -136,7 +137,7 @@ public sealed class VluxPosWorker : BackgroundService
             InstallerSecret = RandomSecret(),
         };
         var json = JsonSerializer.Serialize(secrets, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(paths.SecretsFile, json + Environment.NewLine, Encoding.UTF8);
+        File.WriteAllText(paths.SecretsFile, json + Environment.NewLine, Utf8NoBom);
         return secrets;
     }
 
@@ -179,27 +180,26 @@ public sealed class VluxPosWorker : BackgroundService
         workers = 0
         without_demo = True
         """;
-        File.WriteAllText(paths.OdooConf, config.Replace("\r\n", "\n"), Encoding.UTF8);
+        File.WriteAllText(paths.OdooConf, config.Replace("\r\n", "\n"), Utf8NoBom);
     }
 
     private static void WriteCaddyfile(RuntimePaths paths)
     {
         var caddyfile = $$"""
         {
-            auto_https off
             admin off
         }
 
-        http://127.0.0.1:{{CaddyHttpPort}}, http://localhost:{{CaddyHttpPort}} {
+        :{{CaddyHttpPort}} {
             reverse_proxy 127.0.0.1:{{OdooHttpPort}}
         }
 
-        https://localhost:{{CaddyHttpsPort}} {
+        localhost:{{CaddyHttpsPort}} {
             tls internal
             reverse_proxy 127.0.0.1:{{OdooHttpPort}}
         }
         """;
-        File.WriteAllText(paths.Caddyfile, caddyfile.Replace("\r\n", "\n"), Encoding.UTF8);
+        File.WriteAllText(paths.Caddyfile, caddyfile.Replace("\r\n", "\n"), Utf8NoBom);
     }
 
     private static async Task EnsurePostgresqlAsync(RuntimePaths paths, SecretState secrets, CancellationToken token)
@@ -259,7 +259,8 @@ public sealed class VluxPosWorker : BackgroundService
             paths.PostgresStartLog,
             token,
             sensitive: false,
-            ignoreExitCode: true
+            ignoreExitCode: true,
+            captureOutput: false
         );
     }
 
@@ -318,6 +319,7 @@ public sealed class VluxPosWorker : BackgroundService
             paths.OdooInitLog,
             token,
             sensitive: false,
+            environment: new Dictionary<string, string> { ["PYTHONPATH"] = paths.OdooDir },
             timeout: TimeSpan.FromMinutes(10)
         );
         await File.WriteAllTextAsync(paths.OdooInitializedMarker, DateTimeOffset.UtcNow.ToString("O") + Environment.NewLine, token);
@@ -330,7 +332,8 @@ public sealed class VluxPosWorker : BackgroundService
             new[] { paths.OdooBin, "-c", paths.OdooConf, "-d", DatabaseName },
             paths.Root,
             paths.OdooStdoutLog,
-            paths.OdooStderrLog
+            paths.OdooStderrLog,
+            new Dictionary<string, string> { ["PYTHONPATH"] = paths.OdooDir }
         );
         _logger.LogInformation("Odoo process started with PID {Pid}.", _odoo.Id);
     }
@@ -342,12 +345,26 @@ public sealed class VluxPosWorker : BackgroundService
             new[] { "run", "--config", paths.Caddyfile, "--adapter", "caddyfile" },
             paths.Root,
             paths.CaddyStdoutLog,
-            paths.CaddyStderrLog
+            paths.CaddyStderrLog,
+            new Dictionary<string, string>
+            {
+                ["APPDATA"] = Path.Combine(paths.ProgramDataRoot, "caddy"),
+                ["XDG_CONFIG_HOME"] = Path.Combine(paths.ProgramDataRoot, "caddy", "config"),
+                ["XDG_DATA_HOME"] = Path.Combine(paths.ProgramDataRoot, "caddy", "data"),
+                ["HOME"] = Path.Combine(paths.ProgramDataRoot, "caddy"),
+            }
         );
         _logger.LogInformation("Caddy process started with PID {Pid}.", _caddy.Id);
     }
 
-    private static Process StartManagedProcess(string fileName, string[] args, string workingDirectory, string stdoutPath, string stderrPath)
+    private static Process StartManagedProcess(
+        string fileName,
+        string[] args,
+        string workingDirectory,
+        string stdoutPath,
+        string stderrPath,
+        IDictionary<string, string>? environment = null
+    )
     {
         var startInfo = new ProcessStartInfo
         {
@@ -360,6 +377,13 @@ public sealed class VluxPosWorker : BackgroundService
         foreach (var arg in args)
         {
             startInfo.ArgumentList.Add(arg);
+        }
+        if (environment is not null)
+        {
+            foreach (var item in environment)
+            {
+                startInfo.Environment[item.Key] = item.Value;
+            }
         }
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, e) => AppendLine(stdoutPath, e.Data);
@@ -411,7 +435,8 @@ public sealed class VluxPosWorker : BackgroundService
         string? stdin = null,
         IDictionary<string, string>? environment = null,
         TimeSpan? timeout = null,
-        bool ignoreExitCode = false
+        bool ignoreExitCode = false,
+        bool captureOutput = true
     )
     {
         var startInfo = new ProcessStartInfo
@@ -419,8 +444,8 @@ public sealed class VluxPosWorker : BackgroundService
             FileName = fileName,
             WorkingDirectory = workingDirectory,
             UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            RedirectStandardOutput = captureOutput,
+            RedirectStandardError = captureOutput,
             RedirectStandardInput = stdin is not null,
         };
         foreach (var arg in args)
@@ -456,8 +481,8 @@ public sealed class VluxPosWorker : BackgroundService
             await process.StandardInput.WriteAsync(stdin.AsMemory(), linked.Token);
             process.StandardInput.Close();
         }
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(linked.Token);
-        var stderrTask = process.StandardError.ReadToEndAsync(linked.Token);
+        Task<string> stdoutTask = captureOutput ? process.StandardOutput.ReadToEndAsync(linked.Token) : Task.FromResult("");
+        Task<string> stderrTask = captureOutput ? process.StandardError.ReadToEndAsync(linked.Token) : Task.FromResult("");
         await process.WaitForExitAsync(linked.Token);
         await File.AppendAllTextAsync(logPath, await stdoutTask + await stderrTask, token);
         if (process.ExitCode != 0 && !ignoreExitCode)
@@ -545,7 +570,7 @@ public sealed class RuntimePaths
     {
         var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
         var root = Environment.GetEnvironmentVariable("VLUX_POS_ROOT") ?? @"C:\Program Files\VLUX\POS";
-        var programDataRoot = Path.Combine(programData, "VLUX", "POS");
+        var programDataRoot = Environment.GetEnvironmentVariable("VLUX_POS_DATA_ROOT") ?? Path.Combine(programData, "VLUX", "POS");
         var configDir = Environment.GetEnvironmentVariable("VLUX_POS_CONFIG") ?? Path.Combine(programDataRoot, "config");
         var dataDir = Path.Combine(programDataRoot, "data");
         var logsDir = Environment.GetEnvironmentVariable("VLUX_POS_LOGS") ?? Path.Combine(programDataRoot, "logs");
