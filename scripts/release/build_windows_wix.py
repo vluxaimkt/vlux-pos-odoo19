@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ODOO_COMMIT = "a2d73c5900d8886d115afe1ccb7f5c97c7e71a97"
 WIX_NAMESPACE = "http://wixtoolset.org/schemas/v4/wxs"
 BAL_NAMESPACE = "http://wixtoolset.org/schemas/v4/wxs/bal"
+UTIL_NAMESPACE = "http://wixtoolset.org/schemas/v4/wxs/util"
 PRODUCT_UPGRADE_CODE = "11111111-1111-4111-8111-111111111111"
 BUNDLE_UPGRADE_CODE = "22222222-2222-4222-8222-222222222222"
 
@@ -271,7 +272,7 @@ def generate_product_wxs(payload_dir: Path, product_wxs: Path, version: str) -> 
 
     product_wxs.write_text(
         f'''<?xml version="1.0" encoding="utf-8"?>
-<Wix xmlns="{WIX_NAMESPACE}">
+<Wix xmlns="{WIX_NAMESPACE}" xmlns:util="{UTIL_NAMESPACE}">
   <Package Name="VLUX POS" Manufacturer="VLUX" Version="{msi_version(version)}" UpgradeCode="{PRODUCT_UPGRADE_CODE}" Scope="perMachine">
     <MajorUpgrade DowngradeErrorMessage="A newer VLUX POS version is already installed." />
     <MediaTemplate EmbedCab="yes" />
@@ -306,11 +307,24 @@ def generate_product_wxs(payload_dir: Path, product_wxs: Path, version: str) -> 
     </ComponentGroup>
 
     <Component Id="VLUXProgramDataFolders" Directory="VLUXProgramDataPOS" Guid="33333333-3333-4333-8333-333333333333">
-      <CreateFolder Directory="VLUXConfigDir" />
-      <CreateFolder Directory="VLUXDataDir" />
-      <CreateFolder Directory="VLUXFilestoreDir" />
-      <CreateFolder Directory="VLUXBackupsDir" />
-      <CreateFolder Directory="VLUXLogsDir" />
+      <CreateFolder>
+        <util:PermissionEx User="LocalService" Domain="NT AUTHORITY" GenericAll="yes" />
+      </CreateFolder>
+      <CreateFolder Directory="VLUXConfigDir">
+        <util:PermissionEx User="LocalService" Domain="NT AUTHORITY" GenericAll="yes" />
+      </CreateFolder>
+      <CreateFolder Directory="VLUXDataDir">
+        <util:PermissionEx User="LocalService" Domain="NT AUTHORITY" GenericAll="yes" />
+      </CreateFolder>
+      <CreateFolder Directory="VLUXFilestoreDir">
+        <util:PermissionEx User="LocalService" Domain="NT AUTHORITY" GenericAll="yes" />
+      </CreateFolder>
+      <CreateFolder Directory="VLUXBackupsDir">
+        <util:PermissionEx User="LocalService" Domain="NT AUTHORITY" GenericAll="yes" />
+      </CreateFolder>
+      <CreateFolder Directory="VLUXLogsDir">
+        <util:PermissionEx User="LocalService" Domain="NT AUTHORITY" GenericAll="yes" />
+      </CreateFolder>
     </Component>
   </Package>
 </Wix>
@@ -343,7 +357,7 @@ def service_xml(source: str) -> str:
     return (
         '          <ServiceInstall Id="VLUXPOSServiceInstall" Type="ownProcess" '
         'Name="VLUXPOS" DisplayName="VLUX POS" Description="VLUX POS Application" '
-        'Start="auto" ErrorControl="normal" Account="LocalSystem" />\n'
+        'Start="auto" ErrorControl="normal" Account="NT AUTHORITY\\LocalService" />\n'
         '          <ServiceControl Id="VLUXPOSServiceControl" Name="VLUXPOS" '
         'Start="install" Stop="both" Remove="uninstall" Wait="yes" />'
     )
@@ -399,7 +413,10 @@ def build(
     bundle_wxs = work_dir / "VLUX_POS_Bundle.generated.wxs"
 
     generate_product_wxs(payload_dir, product_wxs, version)
-    run([wix, "build", str(product_wxs), "-arch", "x64", "-o", str(msi_file)], cwd=ROOT)
+    run(
+        [wix, "build", str(product_wxs), "-ext", "WixToolset.Util.wixext", "-arch", "x64", "-o", str(msi_file)],
+        cwd=ROOT,
+    )
     if not msi_file.exists() or msi_file.stat().st_size == 0:
         fail(f"MSI was not created: {msi_file}")
 

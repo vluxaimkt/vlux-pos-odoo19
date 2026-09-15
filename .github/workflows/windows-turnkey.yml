@@ -63,6 +63,7 @@ jobs:
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           dotnet tool install --global wix --version "$env:WIX_VERSION"
           wix extension add --global "WixToolset.Bal.wixext/$env:WIX_VERSION"
+          wix extension add --global "WixToolset.Util.wixext/$env:WIX_VERSION"
           wix --version
 
       - name: Precheck
