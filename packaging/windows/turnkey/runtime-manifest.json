@@ -1,0 +1,26 @@
+{
+  "product": "VLUX POS",
+  "mode": "windows_turnkey_lab",
+  "version": "0.0.0-turnkey1",
+  "odoo_commit": "a2d73c5900d8886d115afe1ccb7f5c97c7e71a97",
+  "python_runtime": {
+    "strategy": "private_vlux_controlled_runtime",
+    "target_version": "3.12.10",
+    "status": "not_embedded_yet"
+  },
+  "postgresql_runtime": {
+    "target_version": "16.14",
+    "status": "not_embedded_yet"
+  },
+  "service_host": {
+    "name": "VLUXPOS",
+    "display_name": "VLUX POS",
+    "status": "embedded"
+  },
+  "https": {
+    "strategy": "caddy_internal_ca_or_public_domain_pending",
+    "phone_ca_trust_required_for_lan": true
+  },
+  "installer_mode": "ONLINE_OR_INCOMPLETE_RUNTIME_CHAIN",
+  "runtime_chain_status": "PENDING_RUNTIME_CHAIN"
+}

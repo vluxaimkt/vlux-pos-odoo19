@@ -1,0 +1,139 @@
+name: Windows Turnkey Installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Turnkey lab version"
+        required: true
+        default: "0.0.0-turnkey1"
+  push:
+    branches:
+      - feature/production-distribution
+    paths:
+      - ".github/workflows/windows-turnkey.yml"
+      - "packaging/windows/**"
+      - "scripts/release/**"
+      - "scripts/distribution/**"
+      - "vlux_core/**"
+      - "vlux_mobile_scanner/**"
+      - "vlux_owner/**"
+      - "requirements-extra.txt"
+
+env:
+  ODOO_COMMIT: a2d73c5900d8886d115afe1ccb7f5c97c7e71a97
+  ODOO_DIR: ${{ github.workspace }}/odoo
+  ADDONS_DIR: ${{ github.workspace }}/vlux-addons
+  TURNKEY_VERSION: ${{ inputs.version || '0.0.0-turnkey1' }}
+  PYTHON_VERSION: "3.12.10"
+  WIX_VERSION: "4.0.5"
+
+jobs:
+  windows-turnkey:
+    name: Build Windows turnkey lab installer
+    runs-on: windows-latest
+    steps:
+      - name: Checkout VLUX addons
+        uses: actions/checkout@v4
+        with:
+          path: vlux-addons
+
+      - name: Checkout Odoo baseline
+        uses: actions/checkout@v4
+        with:
+          repository: odoo/odoo
+          ref: ${{ env.ODOO_COMMIT }}
+          path: odoo
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up .NET and WiX
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install pinned WiX Toolset
+        shell: pwsh
+        run: |
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          dotnet tool install --global wix --version "$env:WIX_VERSION"
+          wix extension add --global "WixToolset.Bal.wixext/$env:WIX_VERSION"
+          wix --version
+
+      - name: Precheck
+        shell: pwsh
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          if ((git -C "$env:ODOO_DIR" rev-parse HEAD) -ne "$env:ODOO_COMMIT") { throw "Wrong Odoo commit" }
+          python scripts/release/static_checks.py
+          python scripts/release/public_repo_scan.py
+          python -m compileall scripts/release
+
+      - name: Publish VLUX service host
+        shell: pwsh
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          dotnet publish packaging/windows/service-host/Vlux.Pos.ServiceHost.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:PublishTrimmed=false `
+            -o dist/windows/extra-payload/bin/servicehost
+          New-Item -ItemType Directory -Force -Path dist/windows/extra-payload/windows-turnkey | Out-Null
+          Copy-Item packaging/windows/turnkey/* dist/windows/extra-payload/windows-turnkey/ -Recurse -Force
+
+      - name: Build turnkey lab setup
+        shell: pwsh
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          $version = "$env:TURNKEY_VERSION"
+          python scripts/release/build_release.py $version --edition local_complete --odoo-home "$env:ODOO_DIR"
+          $canonical = Resolve-Path "..\vlux_release_output\$version\VLUX_POS_local_complete_$version.zip"
+          python scripts/release/build_windows_wix.py `
+            --version $version `
+            --canonical-zip $canonical `
+            --out-dir dist/windows `
+            --wix-version "$env:WIX_VERSION" `
+            --extra-payload dist/windows/extra-payload `
+            --client-payload `
+            --setup-file-name "VLUX_POS_Setup_${version}_x64.exe" `
+            --runtime-chain-status PENDING_RUNTIME_CHAIN `
+            --payload-scan-report dist/windows/payload-scan.json
+          Get-Content "dist\windows\VLUX_POS_${version}_x64.msi.sha256", "dist\windows\VLUX_POS_Setup_${version}_x64.exe.sha256" | ForEach-Object {
+            $parts = $_ -split '\s+'
+            $actual = (Get-FileHash "dist\windows\$($parts[1])" -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $parts[0]) { throw "Checksum mismatch for $($parts[1])" }
+          }
+
+      - name: Runner install and uninstall smoke
+        shell: pwsh
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          $version = "$env:TURNKEY_VERSION"
+          $msi = Resolve-Path "dist\windows\VLUX_POS_${version}_x64.msi"
+          Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait -NoNewWindow
+          if (!(Test-Path "C:\Program Files\VLUX\POS\bin\servicehost\Vlux.Pos.ServiceHost.exe")) { throw "Service host missing" }
+          $service = Get-Service -Name VLUXPOS -ErrorAction Stop
+          if ($service.Name -ne "VLUXPOS") { throw "Service not installed" }
+          New-Item -ItemType Directory -Force -Path "C:\ProgramData\VLUX\POS\data" | Out-Null
+          Set-Content -Path "C:\ProgramData\VLUX\POS\data\preserve.marker" -Value "preserve"
+          Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart" -Wait -NoNewWindow
+          if (!(Test-Path "C:\ProgramData\VLUX\POS\data\preserve.marker")) { throw "Data preservation marker was removed" }
+
+      - name: Upload turnkey artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vlux-pos-windows-turnkey-${{ env.TURNKEY_VERSION }}
+          path: |
+            ${{ env.ADDONS_DIR }}/dist/windows/*.msi
+            ${{ env.ADDONS_DIR }}/dist/windows/*.exe
+            ${{ env.ADDONS_DIR }}/dist/windows/*.sha256
+            ${{ env.ADDONS_DIR }}/dist/windows/manifest.json
+            ${{ env.ADDONS_DIR }}/dist/windows/payload-scan.json
+          if-no-files-found: error

@@ -24,6 +24,8 @@
 
 **/__pycache__/
 *.py[cod]
+**/bin/
+**/obj/
 *.log
 *.bak
 .env

@@ -76,12 +76,108 @@ def deterministic_guid(name: str) -> str:
     return str(uuid.uuid5(uuid.UUID("11111111-2222-4333-8444-555555555555"), name)).upper()
 
 
-def extract_payload(canonical_zip: Path, payload_dir: Path) -> dict:
+def copy_tree(src: Path, dst: Path) -> None:
+    if not src.exists():
+        fail(f"Extra payload path does not exist: {src}")
+    for path in src.rglob("*"):
+        rel = path.relative_to(src)
+        target = dst / rel
+        if path.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+        elif path.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, target)
+
+
+def sanitize_client_payload(payload_dir: Path) -> None:
+    for rel in ("docs", "packaging", "scripts/windows", "config/odoo.conf.example"):
+        target = payload_dir / rel
+        if target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
+
+
+def scan_payload(payload_dir: Path) -> dict:
+    blocked_extensions = {
+        ".bak",
+        ".backup",
+        ".dump",
+        ".env",
+        ".key",
+        ".log",
+        ".p12",
+        ".pfx",
+        ".sql",
+    }
+    secret_patterns = [
+        re.compile(r"BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY"),
+        re.compile(r"\bPGPASSWORD\s*=", re.IGNORECASE),
+        re.compile(r"\bPGPASS\b", re.IGNORECASE),
+        re.compile(r"Authorization:\s*Bearer\s+[A-Za-z0-9._~-]+", re.IGNORECASE),
+    ]
+    config_secret_patterns = [
+        re.compile(r"(?m)^\s*admin_passwd\s*=\s*(?!\s*(?:__|REEMPLAZAR))\S+", re.IGNORECASE),
+        re.compile(r"(?m)^\s*db_password\s*=\s*(?!\s*(?:__|REEMPLAZAR))\S+", re.IGNORECASE),
+    ]
+    path_patterns = [
+        re.compile(r"C:\\Odoo", re.IGNORECASE),
+        re.compile(r"C:\\Users", re.IGNORECASE),
+        re.compile(r"D:\\a\\", re.IGNORECASE),
+        re.compile(r"github\.workspace", re.IGNORECASE),
+    ]
+    secret_findings: list[dict] = []
+    path_findings: list[dict] = []
+    blocked_file_findings: list[dict] = []
+    for path in sorted(payload_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(payload_dir).as_posix()
+        if path.suffix.lower() in blocked_extensions or path.name.lower().startswith(".env"):
+            blocked_file_findings.append({"file": rel, "type": "blocked_file"})
+            continue
+        if path.stat().st_size > 512 * 1024:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for pattern in secret_patterns:
+            if pattern.search(text):
+                secret_findings.append({"file": rel, "type": "secret_pattern", "pattern": pattern.pattern})
+        if path.suffix.lower() in {".cfg", ".conf", ".ini", ".toml", ".txt"}:
+            for pattern in config_secret_patterns:
+                if pattern.search(text):
+                    secret_findings.append({"file": rel, "type": "secret_pattern", "pattern": pattern.pattern})
+        for pattern in path_patterns:
+            if pattern.search(text):
+                path_findings.append({"file": rel, "type": "path_leak", "pattern": pattern.pattern})
+    findings = blocked_file_findings + secret_findings + path_findings
+    return {
+        "status": "PASS" if not findings else "FAIL",
+        "blocked_file_scan": "PASS" if not blocked_file_findings else "FAIL",
+        "payload_secret_scan": "PASS" if not secret_findings else "FAIL",
+        "path_leak_scan": "PASS" if not path_findings else "FAIL",
+        "findings": findings,
+    }
+
+
+def extract_payload(
+    canonical_zip: Path,
+    payload_dir: Path,
+    *,
+    extra_payload: Path | None = None,
+    client_payload: bool = False,
+) -> dict:
     if payload_dir.exists():
         shutil.rmtree(payload_dir)
     payload_dir.mkdir(parents=True)
     with zipfile.ZipFile(canonical_zip) as archive:
         archive.extractall(payload_dir)
+    if client_payload:
+        sanitize_client_payload(payload_dir)
+    if extra_payload:
+        copy_tree(extra_payload, payload_dir)
     manifest_path = payload_dir / "release-manifest.json"
     if not manifest_path.exists():
         fail(f"Canonical payload is missing release-manifest.json: {canonical_zip}")
@@ -125,6 +221,7 @@ def generate_product_wxs(payload_dir: Path, product_wxs: Path, version: str) -> 
                 [
                     f'{pad}<Component Id="{file_entry["component_id"]}" Guid="{file_entry["guid"]}">',
                     f'{pad}  <File Id="{file_entry["file_id"]}" Source="{escape(file_entry["source"])}" KeyPath="yes" />',
+                    service_xml(file_entry["source"]),
                     f"{pad}</Component>",
                 ]
             )
@@ -207,7 +304,30 @@ def generate_bundle_wxs(bundle_wxs: Path, msi_path: Path, version: str) -> None:
     )
 
 
-def build(version: str, canonical_zip: Path, out_dir: Path, wix_version: str) -> dict:
+def service_xml(source: str) -> str:
+    if Path(source).name != "Vlux.Pos.ServiceHost.exe":
+        return ""
+    return (
+        '          <ServiceInstall Id="VLUXPOSServiceInstall" Type="ownProcess" '
+        'Name="VLUXPOS" DisplayName="VLUX POS" Description="VLUX POS Application" '
+        'Start="auto" ErrorControl="normal" Account="LocalSystem" />\n'
+        '          <ServiceControl Id="VLUXPOSServiceControl" Name="VLUXPOS" '
+        'Stop="both" Remove="uninstall" Wait="yes" />'
+    )
+
+
+def build(
+    version: str,
+    canonical_zip: Path,
+    out_dir: Path,
+    wix_version: str,
+    *,
+    extra_payload: Path | None = None,
+    client_payload: bool = False,
+    setup_file_name: str | None = None,
+    runtime_chain_status: str = "PENDING_RUNTIME_CHAIN",
+    payload_scan_report: Path | None = None,
+) -> dict:
     wix = shutil.which("wix")
     if not wix:
         fail("WiX CLI not found in PATH.")
@@ -216,11 +336,32 @@ def build(version: str, canonical_zip: Path, out_dir: Path, wix_version: str) ->
     work_dir = out_dir / "_wix_work"
     payload_dir = work_dir / "payload"
     work_dir.mkdir(parents=True, exist_ok=True)
-    release_manifest = extract_payload(canonical_zip, payload_dir)
+    release_manifest = extract_payload(
+        canonical_zip,
+        payload_dir,
+        extra_payload=extra_payload,
+        client_payload=client_payload,
+    )
+    enforce_payload_scan = client_payload or payload_scan_report is not None
+    payload_scan = (
+        scan_payload(payload_dir)
+        if enforce_payload_scan
+        else {
+            "status": "PASS",
+            "blocked_file_scan": "PASS",
+            "payload_secret_scan": "PASS",
+            "path_leak_scan": "PASS",
+            "findings": [],
+        }
+    )
+    if payload_scan_report:
+        write_json(payload_scan_report, payload_scan)
+    if enforce_payload_scan and payload_scan["status"] != "PASS":
+        fail(f"Windows payload scan failed: {payload_scan['findings']}")
 
     source_commit = release_manifest["source_commit"]
     msi_file = out_dir / f"VLUX_POS_{version}_x64.msi"
-    setup_file = out_dir / f"VLUX_POS_Setup_{version}.exe"
+    setup_file = out_dir / (setup_file_name or f"VLUX_POS_Setup_{version}.exe")
     product_wxs = work_dir / "VLUX_POS_Product.generated.wxs"
     bundle_wxs = work_dir / "VLUX_POS_Bundle.generated.wxs"
 
@@ -249,7 +390,10 @@ def build(version: str, canonical_zip: Path, out_dir: Path, wix_version: str) ->
         "setup_sha256": sha256_file(setup_file),
         "wix_version": wix_version,
         "signing_status": "PENDING",
-        "runtime_chain_status": "PENDING_RUNTIME_CHAIN",
+        "runtime_chain_status": runtime_chain_status,
+        "blocked_file_scan": payload_scan["blocked_file_scan"],
+        "payload_secret_scan": payload_scan["payload_secret_scan"],
+        "path_leak_scan": payload_scan["path_leak_scan"],
         "validation": {
             "wix_build": "PASS",
             "msi_exists": "PASS",
@@ -275,8 +419,23 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--canonical-zip", required=True, type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)
     parser.add_argument("--wix-version", required=True)
+    parser.add_argument("--extra-payload", type=Path)
+    parser.add_argument("--client-payload", action="store_true")
+    parser.add_argument("--setup-file-name")
+    parser.add_argument("--runtime-chain-status", default="PENDING_RUNTIME_CHAIN")
+    parser.add_argument("--payload-scan-report", type=Path)
     args = parser.parse_args(argv[1:])
-    manifest = build(args.version, args.canonical_zip.resolve(), args.out_dir.resolve(), args.wix_version)
+    manifest = build(
+        args.version,
+        args.canonical_zip.resolve(),
+        args.out_dir.resolve(),
+        args.wix_version,
+        extra_payload=args.extra_payload.resolve() if args.extra_payload else None,
+        client_payload=args.client_payload,
+        setup_file_name=args.setup_file_name,
+        runtime_chain_status=args.runtime_chain_status,
+        payload_scan_report=args.payload_scan_report.resolve() if args.payload_scan_report else None,
+    )
     print(json.dumps(manifest, indent=2, sort_keys=True))
     return 0
 
