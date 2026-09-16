@@ -142,22 +142,31 @@ Servicio:
 
 ## Cloud Managed
 
-El cliente no instala Cloud. VLUX provisiona cada tenant con:
+El cliente no instala Cloud. VLUX opera cada host Ubuntu 24.04 con un unico
+VLUX EDGE (Caddy) que publica 80/443 y un stack aislado por tenant:
 
-- database independiente
+- contenedor Odoo independiente
+- contenedor PostgreSQL 16 independiente
+- database y rol independientes
 - filestore independiente
 - secrets independientes
-- backup independiente
-- dominio independiente
+- logs y backups independientes
+- red privada `vlux-<tenant>-private` independiente
 
-PostgreSQL no va dentro del contenedor de aplicacion y no se expone
-publicamente. La exposicion publica esperada es Caddy en 80/443.
+PostgreSQL no va dentro del contenedor de aplicacion, no publica ningun puerto
+del host y no es alcanzable desde el edge ni desde otro tenant. La unica
+exposicion publica del host es el edge en 80/443.
 
-Comando conceptual:
+Operacion (como root en el host):
 
 ```sh
-python packaging/cloud/vlux_cloud.py provision cliente01 --domain pos.cliente.com --edition cloud_managed
+sudo vlux-cloud host-init --acme-email ops@vlux.example
+sudo vlux-cloud provision cliente01   --domain pos.cliente.com   --owner-email owner@cliente.com   --edition cloud_managed   --tls-mode public   --image ghcr.io/vluxaimkt/vlux-pos@sha256:<digest>
 ```
+
+El detalle operativo completo (backup, off-site S3, restore, upgrade, disable,
+entrega y borrado de la credencial inicial del Owner) esta en
+`packaging/cloud/README.md`.
 
 ## Scanner
 

@@ -1,0 +1,450 @@
+#!/usr/bin/env python3
+"""Offline checks for the VLUX POS Cloud Managed target.
+
+These run on any machine with a stdlib Python: no Docker, no PyYAML. They cover
+the static half of the cloud security contract, so a broken isolation or secret
+rule fails before a single container is built:
+
+* TEMPLATE_RENDER   - every tenant template renders with no placeholder left
+* TENANT_ISOLATION_SCAN - no published ports, PostgreSQL off the edge network,
+                      per-tenant private network, unique app alias
+* CONTAINER_SECRET_SCAN - no secret material baked into the image or templates,
+                      runtime stage free of build tooling, app runs non-root
+* EDGE_ARCHITECTURE - exactly one Caddy stack owns 80/443
+"""
+
+from __future__ import annotations
+
+import ast
+import contextlib
+import importlib.util
+import io
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+CLOUD = ROOT / "packaging" / "cloud"
+TEMPLATES = CLOUD / "templates"
+
+FAILURES: list[str] = []
+
+
+def check(condition: bool, message: str) -> None:
+    if not condition:
+        FAILURES.append(message)
+
+
+def load_cli():
+    spec = importlib.util.spec_from_file_location("vlux_cloud", CLOUD / "vlux_cloud.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+TENANT = "tenant-a"
+TENANT_ROOT = "/srv/vlux-pos/tenants/tenant-a"
+DB = "vlux_tenant_a"
+
+
+def render_all(cli) -> dict[str, str]:
+    read_only_block = "    read_only: true\n    tmpfs:\n      - /tmp:size=512m,mode=1777\n"
+    compose_text = cli.render(
+        TEMPLATES / "tenant-compose.yaml.tmpl",
+        {
+            "__TENANT__": TENANT,
+            "__TENANT_ROOT__": TENANT_ROOT,
+            "__READ_ONLY_BLOCK__": read_only_block,
+        },
+    )
+    caddy_text = cli.render(
+        TEMPLATES / "tenant.caddy.tmpl",
+        {
+            "__DOMAIN__": "pos.example.test",
+            "__TLS_LINE__": "\ttls internal\n",
+            "__APP_ALIAS__": TENANT + "-app",
+            "__TENANT__": TENANT,
+            "__HTTP_PORT__": "8069",
+            "__GEVENT_PORT__": "8072",
+        },
+    )
+    conf_text = cli.render(
+        TEMPLATES / "odoo.conf.tmpl",
+        {
+            "__VLUX_ADMIN_PASSWD__": "PLACEHOLDER-MASTER",
+            "__DB_HOST__": "postgres",
+            "__DB_PORT__": "5432",
+            "__DB_USER__": DB,
+            "__VLUX_DB_PASSWORD__": "PLACEHOLDER-DB",
+            "__DB_NAME__": DB,
+            "__DB_MAXCONN__": "24",
+            "__HTTP_PORT__": "8069",
+            "__GEVENT_PORT__": "8072",
+            "__WORKERS__": "2",
+            "__MAX_CRON_THREADS__": "1",
+            "__LIMIT_MEMORY_SOFT__": "2147483648",
+            "__LIMIT_MEMORY_HARD__": "2684354560",
+        },
+    )
+    edge_text = cli.render(
+        CLOUD / "edge" / "Caddyfile.tmpl",
+        {"__ACME_EMAIL_LINE__": "\temail ops@example.test\n", "__ACME_CA_LINE__": ""},
+    )
+    return {
+        "compose": compose_text,
+        "caddy": caddy_text,
+        "conf": conf_text,
+        "edge": edge_text,
+    }
+
+
+def check_validation(cli) -> None:
+    for good in ("tenant-a", "braille", "cliente-2"):
+        try:
+            cli.validate_tenant(good)
+        except SystemExit:
+            FAILURES.append("valid tenant slug rejected: " + good)
+    for bad in ("A", "-x", "x-", "ab", "edge", "tenant_a", "x" * 40):
+        try:
+            cli.validate_tenant(bad)
+        except SystemExit:
+            continue
+        FAILURES.append("invalid tenant slug accepted: " + bad)
+
+    for good in ("pos.cliente.com", "cloud-test.vlux.lab"):
+        try:
+            cli.validate_domain(good)
+        except SystemExit:
+            FAILURES.append("valid domain rejected: " + good)
+    for bad in ("localhost", "*.cliente.com", "-bad.com", "a..b.com"):
+        try:
+            cli.validate_domain(bad)
+        except SystemExit:
+            continue
+        FAILURES.append("invalid domain accepted: " + bad)
+
+    check(cli.db_identifier("tenant-a") == "vlux_tenant_a", "db identifier derivation changed")
+    check(cli.CLOUD_DB_TARGET == "16.15", "CLOUD_DB_TARGET must be 16.15")
+    check(cli.CLOUD_DB_MAJOR == "16", "CLOUD_DB_MAJOR must be 16")
+    check("postgres:16.15@sha256:" in cli.POSTGRES_IMAGE, "PostgreSQL image must be 16.15 pinned by digest")
+    check("latest" not in cli.POSTGRES_IMAGE, "PostgreSQL image must not use latest")
+    check(cli.GEVENT_PORT == 8072, "gevent port must be 8072")
+    check(cli.DEFAULT_WORKERS == 2, "default workers must be 2 for small tenants")
+
+
+def check_tenant_isolation(rendered: dict[str, str]) -> None:
+    compose_text = rendered["compose"]
+
+    check(
+        not re.search(r"(?m)^\s*ports:", compose_text),
+        "TENANT_ISOLATION: tenant compose must not publish any host port",
+    )
+    for port in ("5432:", "8069:", "8072:"):
+        check(
+            port not in compose_text,
+            "TENANT_ISOLATION: tenant compose must not map host port " + port,
+        )
+
+    services = {}
+    current = None
+    for line in compose_text.splitlines():
+        match = re.match(r"^  ([a-z0-9_-]+):\s*$", line)
+        if match and not line.startswith("    "):
+            current = match.group(1)
+            services[current] = []
+        elif current is not None and (line.startswith("    ") or not line.strip()):
+            services[current].append(line)
+        elif line and not line.startswith(" "):
+            current = None
+
+    check("postgres" in services and "app" in services, "TENANT_ISOLATION: expected postgres and app services")
+    postgres_block = "\n".join(services.get("postgres", []))
+    app_block = "\n".join(services.get("app", []))
+
+    check(
+        "edge" not in postgres_block,
+        "TENANT_ISOLATION: PostgreSQL must never join the shared edge network",
+    )
+    check(
+        "tenant_private" in postgres_block,
+        "TENANT_ISOLATION: PostgreSQL must join the tenant private network",
+    )
+    check(
+        "tenant_private" in app_block and "edge" in app_block,
+        "TENANT_ISOLATION: app must join both the private and the edge network",
+    )
+    check(
+        TENANT + "-app" in app_block,
+        "TENANT_ISOLATION: app needs the unique per-tenant edge alias <tenant>-app",
+    )
+    check(
+        re.search(r"(?m)^\s*name: vlux-" + TENANT + r"-private\s*$", compose_text) is not None,
+        "TENANT_ISOLATION: private network must be named vlux-<tenant>-private",
+    )
+    check(
+        re.search(r"(?m)^\s*internal: true\s*$", compose_text) is not None,
+        "TENANT_ISOLATION: the tenant private network must be internal",
+    )
+    check(
+        re.search(r"(?m)^\s*name: vlux-edge\s*$", compose_text) is not None
+        and re.search(r"(?m)^\s*external: true\s*$", compose_text) is not None,
+        "TENANT_ISOLATION: the edge network must be referenced as an external network",
+    )
+    check(
+        "file: " + TENANT_ROOT + "/secrets/db_password" in compose_text,
+        "TENANT_ISOLATION: the database password must be a file-based Docker secret",
+    )
+
+    for needle, message in (
+        ("no-new-privileges:true", "app/postgres must set no-new-privileges"),
+        ("cap_drop", "app/postgres must drop capabilities"),
+        ("max-size", "docker log rotation limits must be configured"),
+        ("read_only: true", "read-only rootfs block must render when requested"),
+    ):
+        check(needle in compose_text, "CONTAINER_SECURITY: " + message)
+
+    check(
+        "privileged" not in compose_text,
+        "CONTAINER_SECURITY: privileged containers are forbidden",
+    )
+    check(
+        "/var/run/docker.sock" not in compose_text,
+        "CONTAINER_SECURITY: the Docker socket must never be mounted into a tenant",
+    )
+    check(
+        "network_mode: host" not in compose_text,
+        "CONTAINER_SECURITY: host networking is forbidden",
+    )
+
+
+def check_odoo_conf(rendered: dict[str, str]) -> None:
+    conf = rendered["conf"]
+    required = {
+        "db_host = postgres": "db_host must point at the tenant-private PostgreSQL alias",
+        "dbfilter = ^" + DB + "$": "dbfilter must pin the exact tenant database",
+        "list_db = False": "the database manager must be disabled",
+        "proxy_mode = True": "proxy_mode must be enabled behind the edge",
+        "http_port = 8069": "http_port must be 8069",
+        "gevent_port = 8072": "gevent_port must be 8072",
+        "workers = 2": "workers must be configurable and default to 2",
+        "max_cron_threads = 1": "max_cron_threads must be configurable",
+        "data_dir = /var/lib/vlux-pos": "data_dir must live on the tenant volume",
+        "/opt/vlux/pos/addons": "addons_path must include the VLUX addons",
+    }
+    for needle, message in required.items():
+        check(needle in conf, "ODOO_CONFIG: " + message)
+
+
+def check_edge(rendered: dict[str, str]) -> None:
+    edge_compose = (CLOUD / "edge" / "compose.yaml").read_text(encoding="utf-8")
+    check('"80:80"' in edge_compose, "EDGE: the edge must publish 80")
+    check('"443:443"' in edge_compose, "EDGE: the edge must publish 443")
+    check(
+        edge_compose.count('"') >= 4 and "5432" not in edge_compose,
+        "EDGE: the edge must not publish a database port",
+    )
+    check(
+        "external: true" in edge_compose and "name: vlux-edge" in edge_compose,
+        "EDGE: the edge must attach to the shared external vlux-edge network",
+    )
+    check(
+        "caddy:2.10@sha256:" in edge_compose,
+        "EDGE: the Caddy image must be pinned by digest",
+    )
+    check(
+        "import /etc/caddy/tenants/*.caddy" in rendered["edge"],
+        "EDGE: the global Caddyfile must import per-tenant route files",
+    )
+
+    caddy = rendered["caddy"]
+    check(
+        "reverse_proxy " + TENANT + "-app:8072" in caddy,
+        "WEBSOCKET: /websocket must proxy to the tenant gevent port",
+    )
+    check(
+        "reverse_proxy " + TENANT + "-app:8069" in caddy,
+        "EDGE_ROUTING: default traffic must proxy to the tenant HTTP port",
+    )
+    check("@websocket path /websocket" in caddy, "WEBSOCKET: missing websocket matcher")
+    check("app:8069" not in caddy.replace(TENANT + "-app:8069", ""),
+          "EDGE_ROUTING: routes must use the unique <tenant>-app alias, never a bare app alias")
+
+
+def check_dockerfile() -> None:
+    text = (CLOUD / "Dockerfile").read_text(encoding="utf-8")
+    stages = text.split("FROM ${PYTHON_BASE} AS runtime")
+    check(len(stages) == 2, "IMAGE: Dockerfile must be multi-stage with a runtime stage")
+    builder, runtime = stages[0], stages[1] if len(stages) == 2 else ""
+
+    check("AS builder" in builder, "IMAGE: missing builder stage")
+    check("build-essential" in builder, "IMAGE: the builder stage should carry build tooling")
+    for tool in ("build-essential", "libpq-dev", "libsasl2-dev", "libxslt1-dev"):
+        check(tool not in runtime, "IMAGE: runtime stage must not install " + tool)
+    check(
+        re.search(r"(?m)^\s*git\s*\\?\s*$", runtime) is None and " git " not in runtime,
+        "IMAGE: runtime stage must not contain git (images are immutable)",
+    )
+    check("USER vlux-pos" in runtime, "IMAGE: the app must run as the non-root vlux-pos user")
+    check(
+        runtime.rstrip().rfind("USER vlux-pos") < runtime.rstrip().rfind("ENTRYPOINT"),
+        "IMAGE: USER must be set before the entrypoint",
+    )
+    check("rm -rf \"$ODOO_HOME/.git\"" in builder, "IMAGE: the Odoo .git tree must be removed")
+    check(
+        "a2d73c5900d8886d115afe1ccb7f5c97c7e71a97" in text,
+        "IMAGE: the pinned Odoo commit must not change",
+    )
+    check("python:3.12.10-slim-bookworm@sha256:" in text, "IMAGE: the base image must be digest pinned")
+    check("HEALTHCHECK" in runtime, "IMAGE: a real healthcheck is required")
+    check("/vlux/health" in runtime, "IMAGE: the healthcheck must hit /vlux/health")
+    for label in (
+        "org.opencontainers.image.version",
+        "org.opencontainers.image.revision",
+        "org.opencontainers.image.created",
+        "vlux.odoo.commit",
+    ):
+        check(label in text, "OCI_METADATA: missing label " + label)
+
+
+def check_container_secrets(rendered: dict[str, str]) -> None:
+    """No credential material may live in the repo-tracked cloud payload."""
+    secret_like = re.compile(
+        r"(?i)(password|passwd|secret|token|api[_-]?key)\s*[:=]\s*['\"]?([A-Za-z0-9+/_=-]{12,})"
+    )
+    allow = (
+        "PASSWORD_FILE",
+        "PLACEHOLDER",
+        "__VLUX_",
+        "__VLUX_DB_PASSWORD__",
+        "__VLUX_ADMIN_PASSWD__",
+        "db_password",
+        "token_urlsafe",
+        "secret_access_key",
+        "access_key_id",
+        "session_token",
+        "VLUX_OFFSITE_",
+        "example",
+    )
+    for path in sorted(CLOUD.rglob("*")):
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for match in secret_like.finditer(text):
+            line = match.group(0)
+            if any(marker.lower() in line.lower() for marker in allow):
+                continue
+            FAILURES.append(
+                "CONTAINER_SECRET_SCAN: possible credential in "
+                + str(path.relative_to(ROOT))
+                + ": "
+                + match.group(1)
+            )
+        if "BEGIN RSA PRIVATE KEY" in text or "BEGIN PRIVATE KEY" in text:
+            FAILURES.append("PRIVATE_KEY_EXPOSURE: key material in " + str(path.relative_to(ROOT)))
+
+    dockerfile = (CLOUD / "Dockerfile").read_text(encoding="utf-8")
+    for forbidden in ("secrets/", "tenant.json", ".env", "filestore", "backups"):
+        check(
+            "COPY " + forbidden not in dockerfile,
+            "CONTAINER_SECRET_SCAN: the image must not COPY " + forbidden,
+        )
+    check(
+        "ghcr.io" not in rendered["compose"],
+        "IMMUTABLE_IMAGE: the tenant compose must take its image from .env, not a literal tag",
+    )
+
+
+SAMPLE_ARGV = {
+    "host_init": ["host-init"],
+    "provision": ["provision", "tenant-a", "--domain", "pos.example.test",
+                  "--owner-email", "owner@example.test"],
+    "status": ["status"],
+    "health": ["health"],
+    "list_tenants": ["list"],
+    "backup": ["backup", "tenant-a"],
+    "restore": ["restore", "tenant-a", "backup.tar.gz", "--confirm", "RESTORE_TENANT"],
+    "upgrade": ["upgrade", "tenant-a", "--image", "repo@sha256:" + "0" * 64],
+    "disable": ["disable", "tenant-a"],
+}
+
+
+def check_cli_surface(cli) -> None:
+    """Every args.<x> a handler reads must exist on its parsed namespace.
+
+    A subcommand that forgets an option only fails at runtime, halfway through
+    provisioning a live tenant, so it is caught here instead.
+    """
+    tree = ast.parse((CLOUD / "vlux_cloud.py").read_text(encoding="utf-8"))
+    reads: dict[str, set[str]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in SAMPLE_ARGV:
+            names = set()
+            for child in ast.walk(node):
+                if (
+                    isinstance(child, ast.Attribute)
+                    and isinstance(child.value, ast.Name)
+                    and child.value.id == "args"
+                ):
+                    names.add(child.attr)
+            reads[node.name] = names
+
+    missing_handlers = set(SAMPLE_ARGV) - set(reads)
+    check(not missing_handlers, "CLI: handlers not found in the module: " + ", ".join(sorted(missing_handlers)))
+
+    parser = cli.build_parser()
+    for handler, argv in SAMPLE_ARGV.items():
+        try:
+            namespace = parser.parse_args(argv)
+        except SystemExit:
+            FAILURES.append("CLI: cannot parse sample argv for " + handler + ": " + " ".join(argv))
+            continue
+        check(
+            getattr(namespace, "func", None) is not None,
+            "CLI: subcommand " + argv[0] + " has no handler bound",
+        )
+        for attr in sorted(reads.get(handler, set())):
+            check(
+                hasattr(namespace, attr),
+                "CLI: " + handler + " reads args." + attr + " but " + argv[0] + " does not define it",
+            )
+
+    for command in ("host-init", "provision", "status", "health", "list",
+                    "backup", "restore", "upgrade", "disable"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                parser.parse_args([command, "--help"])
+            except SystemExit as exc:
+                check(exc.code == 0, "CLI: --help failed for " + command)
+
+
+def main() -> int:
+    cli = load_cli()
+    rendered = render_all(cli)
+    check_validation(cli)
+    check_tenant_isolation(rendered)
+    check_odoo_conf(rendered)
+    check_edge(rendered)
+    check_dockerfile()
+    check_container_secrets(rendered)
+    check_cli_surface(cli)
+
+    if FAILURES:
+        for failure in FAILURES:
+            print("ERROR: " + failure, file=sys.stderr)
+        print("CLOUD_STATIC_CHECKS=FAIL", file=sys.stderr)
+        return 1
+    print("TEMPLATE_RENDER=PASS")
+    print("TENANT_ISOLATION_SCAN=PASS")
+    print("CONTAINER_SECRET_SCAN=PASS")
+    print("EDGE_ARCHITECTURE=PASS")
+    print("CLI_SURFACE=PASS")
+    print("CLOUD_STATIC_CHECKS=PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

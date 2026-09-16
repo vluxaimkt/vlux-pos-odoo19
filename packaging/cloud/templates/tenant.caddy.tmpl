@@ -1,0 +1,43 @@
+# VLUX tenant route - rendered by `vlux-cloud provision`, imported by the
+# global edge Caddyfile. One file per tenant; reloaded atomically.
+__DOMAIN__ {
+__TLS_LINE__	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	# Odoo multiprocess serves the bus/websocket from the gevent port.
+	@websocket path /websocket /websocket/*
+	handle @websocket {
+		reverse_proxy __APP_ALIAS__:__GEVENT_PORT__ {
+			transport http {
+				read_timeout 3600s
+				write_timeout 3600s
+			}
+		}
+	}
+
+	handle /longpolling/* {
+		reverse_proxy __APP_ALIAS__:__GEVENT_PORT__
+	}
+
+	handle {
+		reverse_proxy __APP_ALIAS__:__HTTP_PORT__ {
+			transport http {
+				read_timeout 720s
+				write_timeout 720s
+			}
+		}
+	}
+
+	log {
+		output file /var/log/caddy/__TENANT__.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

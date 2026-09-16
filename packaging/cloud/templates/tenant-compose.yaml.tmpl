@@ -1,0 +1,102 @@
+# VLUX POS tenant stack - rendered by `vlux-cloud provision`.
+#
+# Isolation contract:
+#   * PostgreSQL is attached ONLY to the tenant private network and publishes
+#     no port, so it is unreachable from the edge, from the host and from any
+#     other tenant.
+#   * The app joins the tenant private network (to reach PostgreSQL) and the
+#     shared edge network under the unique alias __TENANT__-app.
+#   * Neither service maps a host port. Only VLUX EDGE binds 80/443.
+
+name: vlux-__TENANT__
+
+services:
+  postgres:
+    image: ${VLUX_POSTGRES_IMAGE}
+    container_name: vlux-__TENANT__-postgres
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      POSTGRES_DB: ${VLUX_DB_NAME}
+      POSTGRES_USER: ${VLUX_DB_USER}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - __TENANT_ROOT__/postgres:/var/lib/postgresql/data
+    secrets:
+      - db_password
+    networks:
+      tenant_private:
+        aliases:
+          - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  app:
+    image: ${VLUX_APP_IMAGE}
+    container_name: vlux-__TENANT__-app
+    restart: unless-stopped
+    stop_grace_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      VLUX_TENANT: __TENANT__
+      VLUX_HEALTH_URL: http://127.0.0.1:8069/vlux/health?db=${VLUX_DB_NAME}
+    volumes:
+      - __TENANT_ROOT__/config:/etc/vlux-pos:ro
+      - __TENANT_ROOT__/filestore:/var/lib/vlux-pos
+      - __TENANT_ROOT__/logs:/var/log/vlux-pos
+__READ_ONLY_BLOCK__    networks:
+      tenant_private:
+        aliases:
+          - app
+      edge:
+        aliases:
+          - __TENANT__-app
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS \"$$VLUX_HEALTH_URL\" | grep -q '\"status\": \"ok\"'"]
+      interval: 20s
+      timeout: 10s
+      retries: 9
+      start_period: 120s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  tenant_private:
+    name: vlux-__TENANT__-private
+    internal: true
+  edge:
+    name: vlux-edge
+    external: true
+
+secrets:
+  db_password:
+    file: __TENANT_ROOT__/secrets/db_password

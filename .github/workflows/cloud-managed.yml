@@ -1,0 +1,349 @@
+name: Cloud Managed
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Cloud lab version"
+        required: true
+        default: "0.0.0-cloud1"
+      publish_ghcr:
+        description: "Publish the image to ghcr.io (outward facing - opt in)"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+  push:
+    branches:
+      - feature/production-distribution
+    paths:
+      - ".github/workflows/cloud-managed.yml"
+      - "packaging/cloud/**"
+      - "scripts/release/cloud_checks.py"
+      - "scripts/release/cloud_e2e.sh"
+      - "scripts/release/build_cloud_bundle.py"
+      - "vlux_core/**"
+      - "vlux_mobile_scanner/**"
+      - "vlux_owner/**"
+      - "requirements-extra.txt"
+
+env:
+  ODOO_COMMIT: a2d73c5900d8886d115afe1ccb7f5c97c7e71a97
+  PYTHON_VERSION: "3.12.10"
+  CLOUD_VERSION: ${{ inputs.version || '0.0.0-cloud1' }}
+  CLOUD_EDITION: cloud_managed
+  GHCR_REPOSITORY: ghcr.io/vluxaimkt/vlux-pos
+  TRIVY_IMAGE: aquasec/trivy:0.58.1@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7
+  CLOUD_DB_ENGINE: PostgreSQL
+  CLOUD_DB_MAJOR: "16"
+  CLOUD_DB_TARGET: "16.15"
+
+jobs:
+  static:
+    name: Cloud static checks
+    runs-on: ubuntu-24.04
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+    steps:
+      - name: Checkout VLUX addons
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set source commit
+        id: source
+        run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Repository and cloud static checks
+        run: |
+          python scripts/release/static_checks.py
+          python scripts/release/public_repo_scan.py
+          python scripts/release/cloud_checks.py | tee cloud-static-checks.txt
+          python -m compileall -q packaging/cloud/vlux_cloud.py scripts/release
+          bash -n scripts/release/cloud_e2e.sh
+          sh -n packaging/cloud/entrypoint.sh
+
+      - name: Upload static check log
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-static-checks-${{ env.CLOUD_VERSION }}
+          path: cloud-static-checks.txt
+          if-no-files-found: error
+
+  cloud:
+    name: Cloud image, two-tenant E2E and bundle
+    runs-on: ubuntu-24.04
+    needs: static
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout VLUX addons
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Reclaim runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
+          df -h /
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the cloud OCI image
+        id: build
+        run: |
+          set -euo pipefail
+          version="${CLOUD_VERSION}"
+          source_sha="${{ needs.static.outputs.source_sha }}"
+          created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mkdir -p dist/cloud
+          common=(
+            --platform linux/amd64
+            --build-arg ODOO_COMMIT="$ODOO_COMMIT"
+            --build-arg VLUX_VERSION="$version"
+            --build-arg SOURCE_COMMIT="$source_sha"
+            --build-arg BUILD_CREATED="$created"
+            --build-arg VLUX_EDITION="$CLOUD_EDITION"
+            -f packaging/cloud/Dockerfile
+          )
+          docker buildx build "${common[@]}" \
+            --provenance=false \
+            --output "type=oci,dest=dist/cloud/vlux-pos_${version}_amd64.oci.tar" .
+          docker buildx build "${common[@]}" \
+            --load -t "vlux-pos:${version}" .
+          docker save "vlux-pos:${version}" -o dist/cloud/vlux-pos-docker-save.tar
+          echo "created=${created}" >> "$GITHUB_OUTPUT"
+
+      - name: Inspect OCI layout, labels and digest
+        id: oci
+        run: |
+          set -euo pipefail
+          version="${CLOUD_VERSION}"
+          source_sha="${{ needs.static.outputs.source_sha }}"
+          python scripts/release/inspect_oci.py \
+            --oci-tar "dist/cloud/vlux-pos_${version}_amd64.oci.tar" \
+            --version "$version" \
+            --source-commit "$source_sha" \
+            --edition "$CLOUD_EDITION" \
+            --out-dir dist/cloud
+          digest="$(python - <<'PY'
+          import json, tarfile, os
+          version = os.environ["CLOUD_VERSION"]
+          with tarfile.open("dist/cloud/vlux-pos_%s_amd64.oci.tar" % version) as tar:
+              index = json.loads(tar.extractfile("index.json").read())
+          manifests = [m for m in index["manifests"] if "vnd.oci.image.manifest" in m["mediaType"]]
+          print(manifests[0]["digest"])
+          PY
+          )"
+          echo "APP_IMAGE_DIGEST=${digest}"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          (cd dist/cloud && sha256sum -c "vlux-pos_${version}_amd64.oci.tar.sha256")
+
+      - name: Verify image runs non-root and is free of build tooling
+        id: imagecheck
+        run: |
+          set -euo pipefail
+          version="${CLOUD_VERSION}"
+          user="$(docker image inspect --format '{{.Config.User}}' "vlux-pos:${version}")"
+          echo "image user: ${user}"
+          test "$user" = "vlux-pos"
+          uid="$(docker run --rm --entrypoint id "vlux-pos:${version}" -u)"
+          echo "runtime uid: ${uid}"
+          test "$uid" = "10001"
+          if docker run --rm --entrypoint sh "vlux-pos:${version}" -c 'command -v gcc || command -v git || command -v make'; then
+            echo "runtime image still contains build tooling" >&2
+            exit 1
+          fi
+          docker run --rm --entrypoint sh "vlux-pos:${version}" -c 'test ! -e /opt/vlux/pos/odoo/.git'
+          docker image inspect --format '{{json .Config.Labels}}' "vlux-pos:${version}" \
+            | tee dist/cloud/image-labels.json
+          python - <<'PY'
+          import json, os
+          labels = json.load(open("dist/cloud/image-labels.json", encoding="utf-8"))
+          required = {
+              "org.opencontainers.image.version": os.environ["CLOUD_VERSION"],
+              "vlux.odoo.commit": os.environ["ODOO_COMMIT"],
+          }
+          for key, value in required.items():
+              assert labels.get(key) == value, (key, labels.get(key), value)
+          for key in ("org.opencontainers.image.revision", "org.opencontainers.image.created",
+                      "org.opencontainers.image.source", "vlux.python.version", "vlux.edition"):
+              assert labels.get(key), "missing label " + key
+          print("OCI labels OK")
+          PY
+          echo "app_runs_non_root=PASS" >> "$GITHUB_OUTPUT"
+
+      - name: Container vulnerability scan and SBOM
+        id: vulnscan
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p dist/cloud
+          docker run --rm -v "$PWD/dist/cloud:/work" "$TRIVY_IMAGE" \
+            image --input /work/vlux-pos-docker-save.tar \
+            --scanners vuln --format json --output /work/trivy-report.json \
+            --severity LOW,MEDIUM,HIGH,CRITICAL --quiet || true
+          docker run --rm -v "$PWD/dist/cloud:/work" "$TRIVY_IMAGE" \
+            image --input /work/vlux-pos-docker-save.tar \
+            --format cyclonedx --output /work/sbom.cyclonedx.json --quiet || true
+          python - <<'PY' | tee -a "$GITHUB_OUTPUT"
+          import json, pathlib
+          report = pathlib.Path("dist/cloud/trivy-report.json")
+          if not report.exists():
+              print("vuln_scan=TOOL_UNAVAILABLE")
+              raise SystemExit(0)
+          data = json.loads(report.read_text(encoding="utf-8"))
+          counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+          for result in data.get("Results") or []:
+              for vuln in result.get("Vulnerabilities") or []:
+                  severity = vuln.get("Severity", "UNKNOWN")
+                  if severity in counts:
+                      counts[severity] += 1
+          summary = "CRITICAL=%d,HIGH=%d,MEDIUM=%d,LOW=%d" % (
+              counts["CRITICAL"], counts["HIGH"], counts["MEDIUM"], counts["LOW"]
+          )
+          pathlib.Path("dist/cloud/vuln-summary.txt").write_text(summary + "\n", encoding="utf-8")
+          print("vuln_scan=REPORTED(" + summary + ")")
+          PY
+          test -s dist/cloud/sbom.cyclonedx.json && echo "sbom=PASS" >> "$GITHUB_OUTPUT" || echo "sbom=UNAVAILABLE" >> "$GITHUB_OUTPUT"
+
+      - name: Reclaim space taken by the exported image tarballs
+        run: |
+          rm -f dist/cloud/vlux-pos-docker-save.tar "dist/cloud/vlux-pos_${CLOUD_VERSION}_amd64.oci.tar"
+          docker buildx prune -af || true
+          df -h /
+
+      - name: Two-tenant cloud E2E
+        run: bash scripts/release/cloud_e2e.sh "${CLOUD_VERSION}" "vlux-pos:${CLOUD_VERSION}"
+
+      - name: Build the cloud operator bundle
+        run: |
+          python scripts/release/build_cloud_bundle.py \
+            --version "${CLOUD_VERSION}" \
+            --source-commit "${{ needs.static.outputs.source_sha }}" \
+            --app-image "${GHCR_REPOSITORY}:${CLOUD_VERSION}" \
+            --app-digest "${{ steps.oci.outputs.digest }}" \
+            --out-dir dist/cloud
+          (cd dist/cloud && sha256sum -c "vlux-pos-cloud-${CLOUD_VERSION}.tar.gz.sha256")
+
+      - name: Publish image to GHCR
+        id: ghcr
+        if: ${{ inputs.publish_ghcr == 'true' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker tag "vlux-pos:${CLOUD_VERSION}" "${GHCR_REPOSITORY}:${CLOUD_VERSION}"
+          docker push "${GHCR_REPOSITORY}:${CLOUD_VERSION}"
+          pushed="$(docker inspect --format '{{index .RepoDigests 0}}' "${GHCR_REPOSITORY}:${CLOUD_VERSION}")"
+          echo "GHCR_PUBLISH=PASS ${pushed}"
+          echo "result=PASS" >> "$GITHUB_OUTPUT"
+          echo "pushed=${pushed}" >> "$GITHUB_OUTPUT"
+
+      - name: Compose the cloud summary
+        if: always()
+        run: |
+          python - <<'PY' | tee dist/cloud/CLOUD_SUMMARY.txt
+          import json, os, pathlib
+
+          out = pathlib.Path("dist/cloud")
+          e2e = {}
+          summary_path = out / "cloud-e2e-summary.json"
+          if summary_path.exists():
+              e2e = json.loads(summary_path.read_text(encoding="utf-8"))
+
+          vuln = (out / "vuln-summary.txt").read_text(encoding="utf-8").strip() if (out / "vuln-summary.txt").exists() else "UNAVAILABLE"
+          bundle = {}
+          bundle_path = out / "bundle-manifest.json"
+          if bundle_path.exists():
+              bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+
+          rows = {
+              "CLOUD_VERSION": os.environ["CLOUD_VERSION"],
+              "CLOUD_TARGET": "Ubuntu 24.04 LTS amd64 multi-tenant containers",
+              "ODOO_COMMIT": os.environ["ODOO_COMMIT"],
+              "PYTHON_VERSION": os.environ["PYTHON_VERSION"],
+              "APP_IMAGE": os.environ["GHCR_REPOSITORY"] + ":" + os.environ["CLOUD_VERSION"],
+              "APP_IMAGE_DIGEST": os.environ.get("APP_IMAGE_DIGEST", "UNKNOWN"),
+              "APP_RUNS_NON_ROOT": e2e.get("APP_RUNS_NON_ROOT", "UNKNOWN"),
+              "POSTGRES_IMAGE": "postgres:16.15",
+              "CLOUD_DB_ENGINE": os.environ["CLOUD_DB_ENGINE"],
+              "CLOUD_DB_MAJOR": os.environ["CLOUD_DB_MAJOR"],
+              "CLOUD_DB_TARGET": os.environ["CLOUD_DB_TARGET"],
+              "CONTAINER_VULN_SCAN": vuln,
+              "CLOUD_BUNDLE": bundle.get("cloud_bundle", "UNKNOWN"),
+              "CLOUD_BUNDLE_SHA256": bundle.get("cloud_bundle_sha256", "UNKNOWN"),
+              "CLOUD_BUNDLE_SIZE_MB": bundle.get("cloud_bundle_size_mb", "UNKNOWN"),
+              "GHCR_PUBLISH": os.environ.get("GHCR_RESULT", "NOT_ATTEMPTED"),
+              "PUBLIC_DOMAIN_HTTPS": "MANUAL_PENDING",
+              "CLOUD_HOST_REBOOT": "MANUAL_PENDING",
+              "REAL_OFFSITE_BACKUP": "MANUAL_PENDING",
+              "PHONE_CAMERA": "MANUAL_PENDING",
+              "PHONE_REAL_SCAN": "MANUAL_PENDING",
+              "PRODUCTION_GO": "NOT_YET",
+          }
+          rows.update({key: value for key, value in e2e.items() if key not in rows})
+          for key in sorted(rows):
+              print(key + "=" + str(rows[key]))
+          (out / "cloud-summary.json").write_text(
+              json.dumps(rows, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+        env:
+          APP_IMAGE_DIGEST: ${{ steps.oci.outputs.digest }}
+          GHCR_RESULT: ${{ steps.ghcr.outcome == 'success' && 'PASS' || (inputs.publish_ghcr == 'true' && 'BLOCKED_PERMISSIONS' || 'NOT_ATTEMPTED_OPT_IN_DISABLED') }}
+
+      - name: Write the job summary
+        if: always()
+        run: |
+          {
+            echo '## VLUX CLOUD MANAGED'
+            echo '```'
+            cat dist/cloud/CLOUD_SUMMARY.txt 2>/dev/null || echo 'summary unavailable'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          mkdir -p dist/cloud/diagnostics
+          docker ps -a > dist/cloud/diagnostics/docker-ps.txt 2>&1 || true
+          docker network ls > dist/cloud/diagnostics/networks.txt 2>&1 || true
+          for c in $(docker ps -aq); do
+            name="$(docker inspect -f '{{.Name}}' "$c" | tr -d '/')"
+            docker logs --tail 400 "$c" > "dist/cloud/diagnostics/${name}.log" 2>&1 || true
+          done
+          sudo ls -laR /srv/vlux-pos > dist/cloud/diagnostics/srv-tree.txt 2>&1 || true
+
+      - name: Upload cloud artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vlux-pos-cloud-${{ env.CLOUD_VERSION }}
+          path: |
+            dist/cloud/vlux-pos-cloud-*.tar.gz
+            dist/cloud/vlux-pos-cloud-*.tar.gz.sha256
+            dist/cloud/*.oci.tar.sha256
+            dist/cloud/manifest.json
+            dist/cloud/bundle-manifest.json
+            dist/cloud/cloud-summary.json
+            dist/cloud/cloud-e2e-summary.json
+            dist/cloud/CLOUD_SUMMARY.txt
+            dist/cloud/image-labels.json
+            dist/cloud/sbom.cyclonedx.json
+            dist/cloud/vuln-summary.txt
+            dist/cloud/*.json
+            dist/cloud/listening-ports.txt
+            dist/cloud/diagnostics/**
+          if-no-files-found: warn
