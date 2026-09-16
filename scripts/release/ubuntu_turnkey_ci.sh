@@ -76,7 +76,7 @@ sudo systemctl restart caddy
 sudo vlux-pos health | grep -q '"status": "ok"'
 
 backup_path="$(sudo vlux-pos backup | tail -n 1)"
-require_file "$backup_path"
+sudo test -f "$backup_path"
 sudo vlux-pos restore "$backup_path" --confirm RESTORE_VLUX_POS
 sudo vlux-pos health | grep -q '"status": "ok"'
 
@@ -127,7 +127,7 @@ fi
 touch /var/lib/vlux-pos/filestore/.vlux-preserve-check
 sudo apt remove -y vlux-pos
 test -f /var/lib/vlux-pos/filestore/.vlux-preserve-check
-test -f "$backup_path"
+sudo test -f "$backup_path"
 
 sudo apt install -y "./${PACKAGE}"
 sudo vlux-pos setup \
