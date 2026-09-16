@@ -864,7 +864,7 @@ def create_owner(paths: TenantPaths, db_name: str, owner_email: str, company_nam
         "    'name': 'VLUX Owner',\n"
         "    'email': " + repr(owner_email) + ",\n"
         "    'password': " + repr(password) + ",\n"
-        "    'groups_id': [(4, group.id)],\n"
+        "    'group_ids': [(4, group.id)],\n"
         "})\n"
         + company_line
         + "assert user.sudo().has_group(" + repr(OWNER_GROUP_XMLID) + "), 'owner group not applied'\n"

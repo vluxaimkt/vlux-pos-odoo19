@@ -421,6 +421,50 @@ def check_cli_surface(cli) -> None:
                 check(exc.code == 0, "CLI: --help failed for " + command)
 
 
+def check_odoo_api_surface(cli) -> None:
+    """The Owner bootstrap runs inside Odoo 19, so its API names must be real.
+
+    Odoo 19 renamed res.users.groups_id to group_ids; the VLUX addon tests are
+    the living reference, so they are cross-checked here rather than trusted
+    from memory.
+    """
+    source = (CLOUD / "vlux_cloud.py").read_text(encoding="utf-8")
+    check(
+        "'groups_id'" not in source,
+        "ODOO_API: res.users uses 'group_ids' on Odoo 19, not 'groups_id'",
+    )
+    check("'group_ids'" in source, "ODOO_API: the Owner bootstrap must assign group_ids")
+
+    roles_test = ROOT / "vlux_core" / "tests" / "test_roles.py"
+    if roles_test.exists():
+        check(
+            "group_ids" in roles_test.read_text(encoding="utf-8"),
+            "ODOO_API: vlux_core tests no longer use group_ids; recheck the Owner bootstrap",
+        )
+
+    check(
+        cli.OWNER_GROUP_XMLID.startswith("vlux_core."),
+        "ODOO_API: the Owner group must come from vlux_core",
+    )
+    security = ROOT / "vlux_core" / "security" / "security.xml"
+    if security.exists():
+        group_id = cli.OWNER_GROUP_XMLID.split(".", 1)[1]
+        check(
+            'id="' + group_id + '"' in security.read_text(encoding="utf-8"),
+            "ODOO_API: " + cli.OWNER_GROUP_XMLID + " is not defined in vlux_core/security/security.xml",
+        )
+
+    for addon in cli.PRODUCTIVE_ADDONS:
+        check(
+            (ROOT / addon / "__manifest__.py").exists(),
+            "ODOO_API: productive addon " + addon + " is missing from the repository",
+        )
+    check(
+        "vlux_facturacion" not in cli.PRODUCTIVE_ADDONS,
+        "ODOO_API: vlux_facturacion must not be installed by cloud provisioning",
+    )
+
+
 def main() -> int:
     cli = load_cli()
     rendered = render_all(cli)
@@ -431,6 +475,7 @@ def main() -> int:
     check_dockerfile()
     check_container_secrets(rendered)
     check_cli_surface(cli)
+    check_odoo_api_surface(cli)
 
     if FAILURES:
         for failure in FAILURES:
@@ -442,6 +487,7 @@ def main() -> int:
     print("CONTAINER_SECRET_SCAN=PASS")
     print("EDGE_ARCHITECTURE=PASS")
     print("CLI_SURFACE=PASS")
+    print("ODOO_API_SURFACE=PASS")
     print("CLOUD_STATIC_CHECKS=PASS")
     return 0
 
