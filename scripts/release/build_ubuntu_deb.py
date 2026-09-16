@@ -66,6 +66,8 @@ def ignore_odoo_payload(_dir: str, names: list[str]) -> set[str]:
         ".pytest_cache",
         ".mypy_cache",
         ".ruff_cache",
+        "test",
+        "tests",
         "filestore",
         "backups",
         "logs",
@@ -75,9 +77,11 @@ def ignore_odoo_payload(_dir: str, names: list[str]) -> set[str]:
     ignored: set[str] = set()
     for name in names:
         lower = name.lower()
-        if name in blocked or lower.endswith((".pyc", ".pyo", ".log", ".tmp", ".dump", ".bak")):
+        if name in blocked or lower.endswith(
+            (".pyc", ".pyo", ".log", ".tmp", ".dump", ".bak", ".pem", ".key", ".pfx", ".p12")
+        ):
             ignored.add(name)
-        if lower in {".env", "pgpass"}:
+        if lower in {".env", "pgpass", "enc_key", "private_key.pem"}:
             ignored.add(name)
     return ignored
 

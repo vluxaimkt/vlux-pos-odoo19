@@ -110,11 +110,15 @@ if find "$payload_dir" -path '*/.git' -print -quit | grep -q .; then
   echo "payload contains .git" >&2
   exit 1
 fi
-if find "$payload_dir" -type f -print0 | xargs -0 grep -IEl 'BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY|github_pat_|ghp_' | grep -q .; then
+credential_matches="$(find "$payload_dir" -type f -print0 | xargs -0 grep -IEl 'BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY|github_pat_|ghp_' || true)"
+if [ -n "$credential_matches" ]; then
+  echo "$credential_matches" >&2
   echo "payload contains private key or credential marker" >&2
   exit 1
 fi
-if find "$payload_dir" -print | grep -E 'C:\\|/home/runner|/Users/Administrador|/workspace/'; then
+path_leaks="$(find "$payload_dir" -print | grep -E 'C:\\|/home/runner|/Users/Administrador|/workspace/' || true)"
+if [ -n "$path_leaks" ]; then
+  echo "$path_leaks" >&2
   echo "payload contains developer or runner path" >&2
   exit 1
 fi
