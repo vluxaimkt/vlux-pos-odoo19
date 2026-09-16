@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily VLUX POS backup for tenant %i
+Documentation=file:///opt/vlux/cloud/R2_BACKUPS.md
+
+[Timer]
+# Nightly, with jitter so several tenants on one host do not all dump at once.
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=45m
+Persistent=true
+Unit=vlux-pos-backup@%i.service
+
+[Install]
+WantedBy=timers.target

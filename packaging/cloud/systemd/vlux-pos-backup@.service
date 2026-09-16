@@ -1,0 +1,26 @@
+[Unit]
+Description=VLUX POS daily backup for tenant %i
+Documentation=file:///opt/vlux/cloud/R2_BACKUPS.md
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Credentials are read from root-only files inside /srv/vlux-pos/secrets, so no
+# secret is ever passed on the command line or exported into the environment.
+ExecStart=/opt/vlux/cloud/vlux-cloud backup %i --tier daily --offsite --retention
+TimeoutStartSec=7200
+User=root
+Group=root
+Nice=10
+IOSchedulingClass=idle
+# The tool only needs its own tree and the Docker socket.
+ProtectHome=yes
+ProtectSystem=full
+ReadWritePaths=/srv/vlux-pos
+NoNewPrivileges=yes
+PrivateTmp=yes
+SyslogIdentifier=vlux-pos-backup
+
+[Install]
+WantedBy=multi-user.target

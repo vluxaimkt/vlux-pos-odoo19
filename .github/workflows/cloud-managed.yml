@@ -23,6 +23,7 @@ on:
       - "packaging/cloud/**"
       - "scripts/release/cloud_checks.py"
       - "scripts/release/cloud_e2e.sh"
+      - "scripts/release/cloud_staging_e2e.sh"
       - "scripts/release/build_cloud_bundle.py"
       - "vlux_core/**"
       - "vlux_mobile_scanner/**"
@@ -75,6 +76,103 @@ jobs:
           path: cloud-static-checks.txt
           if-no-files-found: error
 
+
+  staging:
+    name: Cloudflare staging and migration drill
+    runs-on: ubuntu-24.04
+    needs: static
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout VLUX addons
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Reclaim runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
+          df -h /
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the cloud image
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg ODOO_COMMIT="$ODOO_COMMIT" \
+            --build-arg VLUX_VERSION="${CLOUD_VERSION}" \
+            --build-arg SOURCE_COMMIT="${{ needs.static.outputs.source_sha }}" \
+            --build-arg BUILD_CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --build-arg VLUX_EDITION="$CLOUD_EDITION" \
+            --cache-from "type=gha,scope=vlux-cloud" \
+            --cache-to "type=gha,scope=vlux-cloud,mode=max" \
+            --load -t "vlux-pos:${CLOUD_VERSION}" \
+            -f packaging/cloud/Dockerfile .
+          docker buildx prune -af || true
+          df -h /
+
+      - name: Cloudflare staging and two-host migration E2E
+        run: bash scripts/release/cloud_staging_e2e.sh "${CLOUD_VERSION}" "vlux-pos:${CLOUD_VERSION}"
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          mkdir -p dist/cloud/staging-diagnostics
+          docker ps -a > dist/cloud/staging-diagnostics/docker-ps.txt 2>&1 || true
+          docker network ls > dist/cloud/staging-diagnostics/networks.txt 2>&1 || true
+          for c in $(docker ps -aq); do
+            name="$(docker inspect -f '{{.Name}}' "$c" | tr -d '/')"
+            docker logs --tail 400 "$c" > "dist/cloud/staging-diagnostics/${name}.log" 2>&1 || true
+          done
+          sudo ls -laR /srv/vlux-pos /srv/vlux-pos-b > dist/cloud/staging-diagnostics/srv-tree.txt 2>&1 || true
+
+      - name: Redact any token-shaped value from the artifacts
+        if: always()
+        run: |
+          python - <<'PYEOF'
+          import pathlib, re
+          root = pathlib.Path("dist/cloud")
+          if not root.exists():
+              raise SystemExit(0)
+          token = re.compile(r"eyJ[A-Za-z0-9_-]{40,}")
+          for path in root.rglob("*"):
+              if not path.is_file() or path.suffix not in {".json", ".txt", ".log", ".env"}:
+                  continue
+              try:
+                  text = path.read_text(encoding="utf-8", errors="ignore")
+              except OSError:
+                  continue
+              redacted = token.sub("REDACTED-TOKEN", text)
+              if redacted != text:
+                  path.write_text(redacted, encoding="utf-8")
+                  print("redacted", path)
+          PYEOF
+
+      - name: Upload staging artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vlux-pos-cloud-staging-${{ env.CLOUD_VERSION }}
+          path: |
+            dist/cloud/staging-e2e-summary.json
+            dist/cloud/staging-results.env
+            dist/cloud/staging-*.json
+            dist/cloud/migration-*.json
+            dist/cloud/migration-bundle-contents.txt
+            dist/cloud/r2-*.json
+            dist/cloud/maintenance-*.json
+            dist/cloud/tunnel-status.json
+            dist/cloud/hostb-init.json
+            dist/cloud/staging-diagnostics/**
+          if-no-files-found: warn
+
   cloud:
     name: Cloud image, two-tenant E2E and bundle
     runs-on: ubuntu-24.04
@@ -121,6 +219,8 @@ jobs:
             --provenance=false \
             --output "type=oci,dest=dist/cloud/vlux-pos_${version}_amd64.oci.tar" .
           docker buildx build "${common[@]}" \
+            --cache-from "type=gha,scope=vlux-cloud" \
+            --cache-to "type=gha,scope=vlux-cloud,mode=max" \
             --load -t "vlux-pos:${version}" .
           docker save "vlux-pos:${version}" -o dist/cloud/vlux-pos-docker-save.tar
           echo "created=${created}" >> "$GITHUB_OUTPUT"

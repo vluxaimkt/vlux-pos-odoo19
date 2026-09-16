@@ -53,15 +53,21 @@ def render_all(cli) -> dict[str, str]:
     compose_text = cli.render(
         TEMPLATES / "tenant-compose.yaml.tmpl",
         {
-            "__TENANT__": TENANT,
             "__TENANT_ROOT__": TENANT_ROOT,
+            "__PROJECT__": "vlux-" + TENANT,
+            "__PG_CONTAINER__": "vlux-" + TENANT + "-postgres",
+            "__APP_CONTAINER__": "vlux-" + TENANT + "-app",
+            "__APP_ALIAS__": TENANT + "-app",
+            "__PRIVATE_NETWORK__": "vlux-" + TENANT + "-private",
+            "__EDGE_NETWORK__": "vlux-edge",
+            "__TENANT__": TENANT,
             "__READ_ONLY_BLOCK__": read_only_block,
         },
     )
     caddy_text = cli.render(
         TEMPLATES / "tenant.caddy.tmpl",
         {
-            "__DOMAIN__": "pos.example.test",
+            "__SITE_ADDRESS__": "pos.example.test",
             "__TLS_LINE__": "\ttls internal\n",
             "__APP_ALIAS__": TENANT + "-app",
             "__TENANT__": TENANT,
@@ -91,11 +97,33 @@ def render_all(cli) -> dict[str, str]:
         CLOUD / "edge" / "Caddyfile.tmpl",
         {"__ACME_EMAIL_LINE__": "\temail ops@example.test\n", "__ACME_CA_LINE__": ""},
     )
+    maintenance_text = cli.render(
+        TEMPLATES / "tenant-maintenance.caddy.tmpl",
+        {
+            "__SITE_ADDRESS__": "http://pos-demo.example.com",
+            "__TLS_LINE__": "",
+            "__TENANT__": TENANT,
+        },
+    )
+    cloudflared_text = cli.render(
+        TEMPLATES / "cloudflared-compose.yaml.tmpl",
+        {
+            "__PROJECT__": "vlux-tunnel",
+            "__TUNNEL_CONTAINER__": "vlux-cloudflared",
+            "__EDGE_NETWORK__": "vlux-edge",
+            "__METRICS_PORT__": "2000",
+            "__TOKEN_FILE__": "/srv/vlux-pos/secrets/cloudflare_tunnel_token",
+        },
+    )
     return {
         "compose": compose_text,
         "caddy": caddy_text,
         "conf": conf_text,
         "edge": edge_text,
+        "maintenance": maintenance_text,
+        "cloudflared": cloudflared_text,
+        "edge_compose_public": render_edge_compose(cli, "public_acme"),
+        "edge_compose_tunnel": render_edge_compose(cli, "cloudflare_tunnel"),
     }
 
 
@@ -236,8 +264,32 @@ def check_odoo_conf(rendered: dict[str, str]) -> None:
         check(needle in conf, "ODOO_CONFIG: " + message)
 
 
+def render_edge_compose(cli, edge_mode: str) -> str:
+    ports_block = ""
+    if edge_mode == "public_acme":
+        ports_block = "".join(
+            [
+                "    ports:\n",
+                '      - "80:80"\n',
+                '      - "443:443"\n',
+                '      - "443:443/udp"\n',
+            ]
+        )
+    return cli.render(
+        CLOUD / "edge" / "compose.yaml.tmpl",
+        {
+            "__PROJECT__": "vlux-edge",
+            "__EDGE_CONTAINER__": "vlux-edge-caddy",
+            "__EDGE_NETWORK__": "vlux-edge",
+            "__EDGE_ROOT__": "/srv/vlux-pos/edge",
+            "__EDGE_MODE__": edge_mode,
+            "__PORTS_BLOCK__": ports_block,
+        },
+    )
+
+
 def check_edge(rendered: dict[str, str]) -> None:
-    edge_compose = (CLOUD / "edge" / "compose.yaml").read_text(encoding="utf-8")
+    edge_compose = rendered["edge_compose_public"]
     check('"80:80"' in edge_compose, "EDGE: the edge must publish 80")
     check('"443:443"' in edge_compose, "EDGE: the edge must publish 443")
     check(
@@ -369,6 +421,18 @@ SAMPLE_ARGV = {
     "restore": ["restore", "tenant-a", "backup.tar.gz", "--confirm", "RESTORE_TENANT"],
     "upgrade": ["upgrade", "tenant-a", "--image", "repo@sha256:" + "0" * 64],
     "disable": ["disable", "tenant-a"],
+    "staging_init": ["staging-init", "--tunnel-token-file", "/srv/vlux-pos/secrets/tok"],
+    "tunnel_command": ["tunnel", "status"],
+    "r2_configure": ["r2", "configure", "--bucket", "vlux-pos-backups", "--account-id", "acct"],
+    "r2_test": ["r2", "test"],
+    "maintenance_command": ["maintenance", "enable", "tenant-a"],
+    "migration_export": ["migration", "export", "tenant-a"],
+    "migration_precheck": ["migration", "precheck", "tenant-a", "b.tar.gz"],
+    "migration_import": [
+        "migration", "import", "tenant-a", "b.tar.gz", "--confirm", "IMPORT_TENANT",
+    ],
+    "migration_verify": ["migration", "verify", "tenant-a", "b.tar.gz"],
+    "retention_command": ["retention", "tenant-a"],
 }
 
 
@@ -465,9 +529,140 @@ def check_odoo_api_surface(cli) -> None:
     )
 
 
+def check_tunnel(cli, rendered: dict[str, str]) -> None:
+    """The tunnel must be outbound-only, edge-scoped and token-file based."""
+    cf = rendered["cloudflared"]
+
+    check(
+        not re.search(r"(?m)^\s*ports:", cf),
+        "TUNNEL: the cloudflared stack must publish no host port",
+    )
+    check(
+        "--token-file" in cf and "/run/secrets/cloudflare_tunnel_token" in cf,
+        "TUNNEL: the tunnel token must be supplied as a file, not inline",
+    )
+    check(
+        "TUNNEL_TOKEN=" not in cf and "--token " not in cf,
+        "TUNNEL_TOKEN_LEAK: the token must never be an environment variable or argv value",
+    )
+    check(
+        "-private" not in cf,
+        "TUNNEL: cloudflared must not be attached to any tenant private network",
+    )
+    check(
+        cf.count("networks:") >= 1 and "__" not in cf,
+        "TUNNEL: the cloudflared template must render completely",
+    )
+    network_names = re.findall(r"(?m)^\s{4}name: (\S+)$", cf)
+    check(
+        network_names == ["vlux-edge"],
+        "TUNNEL: cloudflared must join only the shared edge network, found " + str(network_names),
+    )
+    for needle, message in (
+        ("read_only: true", "cloudflared must run on a read-only root filesystem"),
+        ("no-new-privileges:true", "cloudflared must set no-new-privileges"),
+        ("cap_drop", "cloudflared must drop capabilities"),
+        ("max-size", "cloudflared logs must be rotated"),
+        ("--no-autoupdate", "cloudflared must not self-update inside the container"),
+    ):
+        check(needle in cf, "TUNNEL: " + message)
+    check(
+        "loglevel" in cf and "debug" not in cf,
+        "TUNNEL: the default log level must be info, never debug",
+    )
+
+    check(
+        "cloudflare/cloudflared:" in cli.CLOUDFLARED_IMAGE
+        and "@sha256:" in cli.CLOUDFLARED_IMAGE,
+        "TUNNEL: the cloudflared image must be pinned by version and digest",
+    )
+    check("latest" not in cli.CLOUDFLARED_IMAGE, "TUNNEL: cloudflared must not use latest")
+    check(
+        cli.CLOUDFLARED_UID != 0,
+        "TUNNEL: cloudflared must not be expected to run as root",
+    )
+
+    edge_tunnel = rendered["edge_compose_tunnel"]
+    check(
+        not re.search(r"(?m)^\s*ports:", edge_tunnel),
+        "TUNNEL: in cloudflare_tunnel mode the edge must publish no host port",
+    )
+    for port in ("80:80", "443:443", "5432", "8069", "8072"):
+        check(
+            port not in edge_tunnel,
+            "TUNNEL: tunnel-mode edge must not map " + port,
+        )
+
+    site, tls = cli.route_site_address("pos-demo.example.com", "cloudflare_tunnel", "public")
+    check(
+        site == "http://pos-demo.example.com" and tls == "",
+        "TUNNEL: tunnel-mode routes must be plain http:// with no ACME",
+    )
+    maintenance = rendered["maintenance"]
+    check(
+        "503" in maintenance and "reverse_proxy" not in maintenance,
+        "MAINTENANCE: the maintenance route must answer 503 and proxy nothing",
+    )
+
+
+def check_staging_secret_scans() -> None:
+    """CLOUDFLARE_TOKEN_LEAK_SCAN and R2_SECRET_LEAK_SCAN over the repository."""
+    # Cloudflare tunnel tokens are long base64 JSON blobs and always start eyJ.
+    token_like = re.compile(r"eyJ[A-Za-z0-9_\-]{60,}")
+    forbidden_names = {
+        "cloudflare_tunnel_token",
+        "r2_access_key_id",
+        "r2_secret_access_key",
+    }
+    assignment = re.compile(
+        r"(?i)(r2[_-]?(access[_-]?key[_-]?id|secret[_-]?access[_-]?key)|tunnel[_-]?token)"
+        r"\s*[:=]\s*['\"]?([A-Za-z0-9+/_=-]{20,})"
+    )
+    allow = ("REEMPLAZAR", "PLACEHOLDER", "__VLUX", "<", "example", "ACCOUNT_ID",
+             "ACCESS_KEY", "SECRET_KEY", "your-", "file", "path")
+
+    for path in sorted(ROOT.rglob("*")):
+        if not path.is_file():
+            continue
+        parts = set(path.relative_to(ROOT).parts)
+        if parts & {".git", "__pycache__", "dist", "node_modules"}:
+            continue
+        if path.name in forbidden_names:
+            FAILURES.append(
+                "CLOUDFLARE_TOKEN_LEAK/R2_SECRET_LEAK: credential file committed: "
+                + str(path.relative_to(ROOT))
+            )
+        if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".ico", ".pyc", ".zip"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for match in token_like.finditer(text):
+            FAILURES.append(
+                "CLOUDFLARE_TOKEN_LEAK_SCAN: tunnel-token-shaped value in "
+                + str(path.relative_to(ROOT)) + ": " + match.group(0)[:12] + "..."
+            )
+        for match in assignment.finditer(text):
+            line = match.group(0)
+            if any(marker.lower() in line.lower() for marker in allow):
+                continue
+            FAILURES.append(
+                "R2_SECRET_LEAK_SCAN: credential-shaped assignment in "
+                + str(path.relative_to(ROOT)) + ": " + match.group(1)
+            )
+
+
 def main() -> int:
     cli = load_cli()
-    rendered = render_all(cli)
+    # vlux_cloud.fail() raises a SystemExit carrying an int code, which Python
+    # exits on silently. Surface the message instead of dying with no output.
+    try:
+        rendered = render_all(cli)
+    except SystemExit as exc:
+        print("ERROR: " + str(getattr(exc, "message", exc)), file=sys.stderr)
+        print("CLOUD_STATIC_CHECKS=FAIL", file=sys.stderr)
+        return 1
     check_validation(cli)
     check_tenant_isolation(rendered)
     check_odoo_conf(rendered)
@@ -476,6 +671,8 @@ def main() -> int:
     check_container_secrets(rendered)
     check_cli_surface(cli)
     check_odoo_api_surface(cli)
+    check_tunnel(cli, rendered)
+    check_staging_secret_scans()
 
     if FAILURES:
         for failure in FAILURES:
@@ -488,6 +685,9 @@ def main() -> int:
     print("EDGE_ARCHITECTURE=PASS")
     print("CLI_SURFACE=PASS")
     print("ODOO_API_SURFACE=PASS")
+    print("CLOUDFLARE_TUNNEL_STATIC_CHECK=PASS")
+    print("CLOUDFLARE_TOKEN_LEAK_SCAN=PASS")
+    print("R2_SECRET_LEAK_SCAN=PASS")
     print("CLOUD_STATIC_CHECKS=PASS")
     return 0
 

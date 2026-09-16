@@ -5,15 +5,15 @@
 #     no port, so it is unreachable from the edge, from the host and from any
 #     other tenant.
 #   * The app joins the tenant private network (to reach PostgreSQL) and the
-#     shared edge network under the unique alias __TENANT__-app.
+#     shared edge network under the unique alias __APP_ALIAS__.
 #   * Neither service maps a host port. Only VLUX EDGE binds 80/443.
 
-name: vlux-__TENANT__
+name: __PROJECT__
 
 services:
   postgres:
     image: ${VLUX_POSTGRES_IMAGE}
-    container_name: vlux-__TENANT__-postgres
+    container_name: __PG_CONTAINER__
     restart: unless-stopped
     stop_grace_period: 60s
     environment:
@@ -53,7 +53,7 @@ services:
 
   app:
     image: ${VLUX_APP_IMAGE}
-    container_name: vlux-__TENANT__-app
+    container_name: __APP_CONTAINER__
     restart: unless-stopped
     stop_grace_period: 60s
     depends_on:
@@ -72,7 +72,7 @@ __READ_ONLY_BLOCK__    networks:
           - app
       edge:
         aliases:
-          - __TENANT__-app
+          - __APP_ALIAS__
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS \"$$VLUX_HEALTH_URL\" | grep -q '\"status\": \"ok\"'"]
       interval: 20s
@@ -91,10 +91,10 @@ __READ_ONLY_BLOCK__    networks:
 
 networks:
   tenant_private:
-    name: vlux-__TENANT__-private
+    name: __PRIVATE_NETWORK__
     internal: true
   edge:
-    name: vlux-edge
+    name: __EDGE_NETWORK__
     external: true
 
 secrets:

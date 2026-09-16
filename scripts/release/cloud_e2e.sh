@@ -142,9 +142,9 @@ record VLUX_CLOUD_PROVISION PASS
 # PGDATA parent silently crash-loops the database. Assert the ownership matches.
 for tenant in "$TENANT_A" "$TENANT_B"; do
   dir_uid="$(sudo stat -c '%u' "${BASE}/tenants/${tenant}/postgres")"
-  run_uid="$(docker exec "vlux-${tenant}-postgres" id -u)"
-  echo "${tenant}: PGDATA parent uid=${dir_uid}, postgres runs as uid=${run_uid}"
-  [ "$dir_uid" = "$run_uid" ]     || die "${tenant} PGDATA parent is owned by ${dir_uid} but postgres runs as ${run_uid}"
+  run_uid="$(docker exec "vlux-${tenant}-postgres" id -u postgres)"
+  echo "${tenant}: PGDATA parent uid=${dir_uid}, postgres account uid=${run_uid}"
+  [ "$dir_uid" = "$run_uid" ]     || die "${tenant} PGDATA parent is owned by ${dir_uid} but the postgres account is ${run_uid}"
 done
 # The app dirs belong to the app account for the same reason.
 [ "$(sudo stat -c '%u' "${BASE}/tenants/${TENANT_A}/filestore")" = "$(docker exec "vlux-${TENANT_A}-app" id -u)" ]   || die "tenant A filestore is not owned by the app account"

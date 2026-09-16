@@ -1,6 +1,10 @@
 # VLUX tenant route - rendered by `vlux-cloud provision`, imported by the
 # global edge Caddyfile. One file per tenant; reloaded atomically.
-__DOMAIN__ {
+#
+# In cloudflare_tunnel mode the site address carries an explicit http://
+# scheme so Caddy serves plain HTTP inside the Docker network and never
+# tries to obtain a certificate: Cloudflare terminates the public TLS.
+__SITE_ADDRESS__ {
 __TLS_LINE__	encode zstd gzip
 
 	header {

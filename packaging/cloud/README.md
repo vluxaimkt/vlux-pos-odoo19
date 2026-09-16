@@ -42,7 +42,12 @@ Lab version: `0.0.0-cloud1`. Not production-approved - see
 ```
 /srv/vlux-pos/
     host.json                     host state written by host-init
-    offsite.json                  S3-compatible credentials, root-only 0600
+    offsite.json                  S3-compatible settings, root-only 0600
+    secrets/                      host-level secrets, 0700
+        cloudflare_tunnel_token   0600, staging only
+        r2_access_key_id          0600
+        r2_secret_access_key      0600
+    tunnel/                       cloudflared stack, staging only
     edge/
         Caddyfile compose.yaml .env
         tenants/<tenant>.caddy    one route file per tenant
@@ -236,6 +241,15 @@ no destructive delete command in this tool.
 `scripts/release/cloud_checks.py` enforces the static half of this contract
 offline; `scripts/release/cloud_e2e.sh` proves the runtime half on two live
 tenants with positive and negative controls.
+
+## Related technical documents
+
+* [CLOUDFLARE_STAGING.md](CLOUDFLARE_STAGING.md) - run a tenant on your own
+  machine behind a Cloudflare Tunnel, with no public IP and no open ports.
+* [R2_BACKUPS.md](R2_BACKUPS.md) - S3-compatible off-site backups (Cloudflare
+  R2, AWS S3, Backblaze B2, MinIO), retention and the systemd daily timer.
+* [MIGRATION_TO_VPS.md](MIGRATION_TO_VPS.md) - move a live tenant to the final
+  VPS without losing a sale and without the client recapturing anything.
 
 ## Manual gates before production
 
