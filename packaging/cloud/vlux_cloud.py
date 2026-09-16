@@ -70,6 +70,10 @@ DEFAULT_APP_IMAGE = "ghcr.io/vluxaimkt/vlux-pos:" + CLOUD_VERSION
 EDGE_NETWORK = "vlux-edge"
 APP_UID = 10001
 APP_GID = 10001
+# The postgres entrypoint re-execs itself as the postgres account via gosu, so
+# the bind-mounted PGDATA parent must be owned by that account rather than root.
+POSTGRES_UID = 999
+POSTGRES_GID = 999
 
 HTTP_PORT = 8069
 GEVENT_PORT = 8072
@@ -494,6 +498,21 @@ def image_digest(reference: str) -> str:
     return "UNKNOWN"
 
 
+def postgres_account(image: str) -> tuple[int, int]:
+    """Resolve the uid/gid the postgres server will actually run as."""
+    result = docker(
+        ["run", "--rm", "--entrypoint", "sh", image, "-c", "id -u postgres; id -g postgres"],
+        check=False,
+        capture=True,
+    )
+    if result.returncode == 0:
+        values = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+        if len(values) >= 2 and values[0].isdigit() and values[1].isdigit():
+            return int(values[0]), int(values[1])
+    info("Could not resolve the postgres account from the image; using the pinned default.")
+    return POSTGRES_UID, POSTGRES_GID
+
+
 def network_exists(name: str) -> bool:
     result = docker(
         ["network", "inspect", name, "--format", "{{.Name}}"], check=False, capture=True
@@ -519,12 +538,55 @@ def wait_for(
     fail("Timed out waiting for " + description + " after " + str(timeout) + "s. " + last)
 
 
-def wait_container_healthy(container: str, timeout: int) -> None:
-    def check():
-        status = container_health(container)
-        return status in {"healthy", "running-no-healthcheck"}, "last status: " + status
+def container_runtime_state(name: str) -> tuple[str, str, int, int]:
+    """Return (status, health, restart_count, exit_code) for one container."""
+    fmt = (
+        "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}"
+        "|{{.RestartCount}}|{{.State.ExitCode}}"
+    )
+    result = docker(["inspect", "--format", fmt, name], check=False, capture=True)
+    if result.returncode != 0:
+        return "absent", "none", 0, 0
+    parts = (result.stdout or "").strip().split("|")
+    if len(parts) != 4:
+        return "unknown", "none", 0, 0
+    restarts = int(parts[2]) if parts[2].isdigit() else 0
+    exit_code = int(parts[3]) if parts[3].lstrip("-").isdigit() else 0
+    return parts[0], parts[1], restarts, exit_code
 
-    wait_for(check, timeout=timeout, description="container " + container + " to become healthy")
+
+def wait_container_healthy(container: str, timeout: int, *, max_restarts: int = 3) -> None:
+    """Wait for health, but give up early when the container is crash-looping.
+
+    Without this a misconfigured container burns the whole timeout reporting
+    "unhealthy" while it restarts in the background.
+    """
+    deadline = time.monotonic() + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        status, health, restarts, exit_code = container_runtime_state(container)
+        if health == "healthy" or (health == "none" and status == "running"):
+            return
+        if restarts >= max_restarts:
+            fail(
+                "Container " + container + " is crash-looping: " + str(restarts)
+                + " restarts, last exit code " + str(exit_code)
+                + ". Inspect it with: docker logs " + container
+            )
+        if status == "exited" and exit_code != 0:
+            fail(
+                "Container " + container + " exited with code " + str(exit_code)
+                + ". Inspect it with: docker logs " + container
+            )
+        last = (
+            "status=" + status + " health=" + health
+            + " restarts=" + str(restarts) + " exit=" + str(exit_code)
+        )
+        time.sleep(3)
+    fail(
+        "Timed out waiting for container " + container + " to become healthy after "
+        + str(timeout) + "s. " + last
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1009,10 +1071,11 @@ def provision(args: argparse.Namespace) -> int:
 
     dns = dns_preflight(domain, args.tls_mode, args.skip_dns_check)
 
+    pg_uid, pg_gid = postgres_account(args.postgres_image or POSTGRES_IMAGE)
     ensure_dir(paths.root, 0o750)
     ensure_dir(paths.secrets, 0o700)
     ensure_dir(paths.backups, 0o700)
-    ensure_dir(paths.postgres, 0o700)
+    ensure_dir(paths.postgres, 0o700, uid=pg_uid, gid=pg_gid)
     ensure_dir(paths.config, 0o750, uid=APP_UID, gid=APP_GID)
     ensure_dir(paths.filestore, 0o750, uid=APP_UID, gid=APP_GID)
     ensure_dir(paths.logs, 0o750, uid=APP_UID, gid=APP_GID)
