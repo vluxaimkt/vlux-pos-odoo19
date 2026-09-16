@@ -122,15 +122,15 @@ if [ -n "$path_leaks" ]; then
   echo "payload contains developer or runner path" >&2
   exit 1
 fi
-test -f /var/lib/vlux-pos/certificates/VLUX_POS_Local_CA.crt
-if find /var/lib/vlux-pos/certificates -type f ! -name '*.crt' -print | grep -q .; then
+sudo test -f /var/lib/vlux-pos/certificates/VLUX_POS_Local_CA.crt
+if sudo find /var/lib/vlux-pos/certificates -type f ! -name '*.crt' -print | grep -q .; then
   echo "exported certificate directory contains non-public key material" >&2
   exit 1
 fi
 
-touch /var/lib/vlux-pos/filestore/.vlux-preserve-check
+sudo touch /var/lib/vlux-pos/filestore/.vlux-preserve-check
 sudo apt remove -y vlux-pos
-test -f /var/lib/vlux-pos/filestore/.vlux-preserve-check
+sudo test -f /var/lib/vlux-pos/filestore/.vlux-preserve-check
 sudo test -f "$backup_path"
 
 sudo apt install -y "./${PACKAGE}"
