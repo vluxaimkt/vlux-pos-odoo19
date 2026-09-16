@@ -272,32 +272,32 @@ partners = env['res.partner'].sudo().create([
     {'name': 'VLUX Drill Customer 3'},
 ])
 products = env['product.product'].sudo().create([
-    {'name': 'VLUX Drill Product A'},
-    {'name': 'VLUX Drill Product B'},
+    {'name': 'VLUX-E2E-STOCK-A', 'default_code': 'VLUX-E2E-STOCK-A', 'is_storable': True},
+    {'name': 'VLUX Drill Product B', 'default_code': 'VLUX-DRILL-B', 'is_storable': True},
 ])
 attachment = env['ir.attachment'].sudo().create({
     'name': 'vlux-migration-drill.bin',
     'raw': b'VLUX-MIGRATION-DRILL-PAYLOAD' * 128,
 })
-try:
-    location = env.ref('stock.stock_location_stock')
-    quant = env['stock.quant'].sudo().create({
-        'product_id': products[0].id,
-        'location_id': location.id,
-        'inventory_quantity': 7,
-    })
-    quant.action_apply_inventory()
-    print('STOCK_SEEDED')
-except Exception as exc:
-    print('STOCK_SEED_SKIPPED', exc)
+location = env.ref('stock.stock_location_stock')
+quant = env['stock.quant'].sudo().create({
+    'product_id': products[0].id,
+    'location_id': location.id,
+    'inventory_quantity': 37,
+})
+quant.action_apply_inventory()
+print('STOCK_SEEDED qty=37')
 env.cr.commit()
 print('SEEDED partners=%s products=%s attachment=%s' % (len(partners), len(products), attachment.id))
 PY
 
 SRC_PARTNERS="$(pg_query "vlux-${TENANT}-postgres" "$DB" "SELECT count(*) FROM res_partner")"
 SRC_ATTACH="$(pg_query "vlux-${TENANT}-postgres" "$DB" "SELECT count(*) FROM ir_attachment")"
+SOURCE_STOCK_QTY="$(pg_query "vlux-${TENANT}-postgres" "$DB" "SELECT to_char(coalesce(sum(q.quantity), 0), 'FM999999999.####') FROM stock_quant q JOIN product_product pp ON pp.id = q.product_id WHERE pp.default_code = 'VLUX-E2E-STOCK-A'")"
 echo "source partners=${SRC_PARTNERS} attachments=${SRC_ATTACH}"
 [ "$SRC_PARTNERS" -ge 3 ] || die "seed data missing"
+[ "$SOURCE_STOCK_QTY" = "37" ] || die "source stock quantity is ${SOURCE_STOCK_QTY}, expected 37"
+record SOURCE_STOCK_QTY "$SOURCE_STOCK_QTY"
 
 # ---------------------------------------------------------------------------
 step "Backup with off-site upload, then restore from S3"
@@ -404,9 +404,13 @@ B_APP="vlux-${HOST_B_ID}-${TENANT}-app"
 B_PG="vlux-${HOST_B_ID}-${TENANT}-postgres"
 DST_PARTNERS="$(pg_query "$B_PG" "$DB" "SELECT count(*) FROM res_partner")"
 DST_ATTACH="$(pg_query "$B_PG" "$DB" "SELECT count(*) FROM ir_attachment")"
+DST_STOCK_QTY="$(pg_query "$B_PG" "$DB" "SELECT to_char(coalesce(sum(q.quantity), 0), 'FM999999999.####') FROM stock_quant q JOIN product_product pp ON pp.id = q.product_id WHERE pp.default_code = 'VLUX-E2E-STOCK-A'")"
 echo "destination partners=${DST_PARTNERS} attachments=${DST_ATTACH}"
 [ "$DST_PARTNERS" = "$SRC_PARTNERS" ] || die "partner count diverged: ${SRC_PARTNERS} -> ${DST_PARTNERS}"
 [ "$DST_ATTACH" = "$SRC_ATTACH" ] || die "attachment count diverged: ${SRC_ATTACH} -> ${DST_ATTACH}"
+[ "$DST_STOCK_QTY" = "$SOURCE_STOCK_QTY" ] || die "stock quantity diverged: ${SOURCE_STOCK_QTY} -> ${DST_STOCK_QTY}"
+record DESTINATION_STOCK_QTY "$DST_STOCK_QTY"
+record INVENTORY_MIGRATION PASS
 record TENANT_DB_PRESERVED PASS
 
 SRC_FS="$(sudo find "${BASE_A}/tenants/${TENANT}/filestore/filestore/${DB}" -type f 2>/dev/null | wc -l)"
@@ -436,7 +440,7 @@ for name, pair in list(inventory.items()) + list(pos.items()):
 print("INVENTORY_AND_POS_METRICS_MATCH")
 PY
 record TENANT_INVENTORY_VALIDATION PASS
-record TENANT_POS_DATA_VALIDATION PASS
+record POS_DATA_MIGRATION NOT_COVERED
 
 # New host must mint its own infrastructure secrets.
 A_DB_SECRET="$(sudo sha256sum "${BASE_A}/tenants/${TENANT}/secrets/db_password" | awk '{print $1}')"
@@ -465,7 +469,8 @@ CLOUDFLARED_DIGEST_REF="$(sudo python3 -c "import json;print(json.load(open('${B
 record CLOUDFLARED_IMAGE "$CLOUDFLARED_IMAGE_REF"
 record CLOUDFLARED_DIGEST "$CLOUDFLARED_DIGEST_REF"
 
-vlux_a status > "${OUT_DIR}/staging-status.json" 2>&1 || true
+# stdout only: stderr carries progress lines that would break json parsing.
+vlux_a status > "${OUT_DIR}/staging-status.json" || true
 if grep -q '"backup_protection"' "${OUT_DIR}/staging-status.json"; then
   record BACKUP_PROTECTION_STATUS "$(python3 -c "import json;print(json.load(open('${OUT_DIR}/staging-status.json'))['backup_protection'])")"
 else

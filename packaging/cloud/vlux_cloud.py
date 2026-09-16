@@ -148,7 +148,8 @@ def fail(message: str, code: int = 1) -> None:
 
 
 def info(message: str) -> None:
-    print("[vlux-cloud] " + message, flush=True)
+    """Progress goes to stderr so stdout stays parseable JSON."""
+    print("[vlux-cloud] " + message, file=sys.stderr, flush=True)
 
 
 def run(
@@ -875,6 +876,7 @@ def edge_reload(layout: Layout) -> None:
             "exec", "-T", "caddy",
             "caddy", "validate", "--adapter", "caddyfile", "--config", "/etc/caddy/Caddyfile",
         ],
+        capture=True,
     )
     compose(
         layout.edge,
@@ -882,6 +884,7 @@ def edge_reload(layout: Layout) -> None:
             "exec", "-T", "caddy",
             "caddy", "reload", "--adapter", "caddyfile", "--config", "/etc/caddy/Caddyfile",
         ],
+        capture=True,
     )
 
 
@@ -2720,11 +2723,14 @@ def staging_init(args: argparse.Namespace) -> int:
     if "@sha256:" not in image and not args.allow_unpinned:
         fail("The cloudflared image must be pinned by digest (use --allow-unpinned on a lab host).")
 
+    # The token must be owned by the account cloudflared actually runs as, so
+    # the image has to be present before the token is written.
+    present = docker(["image", "inspect", image], check=False, capture=True).returncode == 0
+    if args.pull or not present:
+        docker(["pull", image], timeout=1800)
+
     token_info = install_tunnel_token(layout, Path(args.tunnel_token_file), image)
     render_tunnel_stack(layout, image)
-
-    if args.pull:
-        docker(["pull", image])
     compose(layout.tunnel, ["up", "-d", "--remove-orphans"])
 
     def ready():

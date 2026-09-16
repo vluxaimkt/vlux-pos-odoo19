@@ -21,6 +21,7 @@ TENANT_A="tenant-a"
 TENANT_B="tenant-b"
 DOMAIN_A="tenant-a.vlux.lab"
 DOMAIN_B="tenant-b.vlux.lab"
+UNKNOWN_DOMAIN="unknown.vlux.lab"
 DB_A="vlux_tenant_a"
 DB_B="vlux_tenant_b"
 
@@ -79,7 +80,7 @@ curl_tenant() { # <domain> <path...>
 # ---------------------------------------------------------------------------
 step "Preflight: lab DNS and free public ports"
 # ---------------------------------------------------------------------------
-for domain in "$DOMAIN_A" "$DOMAIN_B"; do
+for domain in "$DOMAIN_A" "$DOMAIN_B" "$UNKNOWN_DOMAIN"; do
   grep -q " ${domain}$" /etc/hosts || echo "127.0.0.1 ${domain}" | sudo tee -a /etc/hosts >/dev/null
 done
 for port in 80 443; do
@@ -252,6 +253,42 @@ for net in "vlux-${TENANT_A}-private" "vlux-${TENANT_B}-private"; do
   [ "$(docker network inspect -f '{{.Internal}}' "$net")" = "true" ] \
     || die "${net} is not an internal network"
 done
+
+python3 - "$TENANT_A" "$TENANT_B" <<'PY'
+import json, subprocess, sys
+
+tenant_a, tenant_b = sys.argv[1], sys.argv[2]
+expected = {
+    "vlux-%s-app" % tenant_a: {
+        "vlux-edge": ["%s-app" % tenant_a],
+        "vlux-%s-private" % tenant_a: ["app"],
+    },
+    "vlux-%s-app" % tenant_b: {
+        "vlux-edge": ["%s-app" % tenant_b],
+        "vlux-%s-private" % tenant_b: ["app"],
+    },
+    "vlux-%s-postgres" % tenant_a: {
+        "vlux-%s-private" % tenant_a: ["postgres"],
+    },
+    "vlux-%s-postgres" % tenant_b: {
+        "vlux-%s-private" % tenant_b: ["postgres"],
+    },
+    "vlux-edge-caddy": {"vlux-edge": []},
+}
+for container, networks in expected.items():
+    raw = subprocess.check_output(["docker", "inspect", container], text=True)
+    actual = json.loads(raw)[0]["NetworkSettings"]["Networks"]
+    actual_names = set(actual)
+    expected_names = set(networks)
+    assert actual_names == expected_names, (container, actual_names, expected_names)
+    for network, aliases in networks.items():
+        actual_aliases = set(actual[network].get("Aliases") or [])
+        for alias in aliases:
+            assert alias in actual_aliases, (container, network, alias, actual_aliases)
+        if network == "vlux-edge":
+            assert "app" not in actual_aliases, (container, network, actual_aliases)
+print("docker network aliases OK")
+PY
 record TENANT_NETWORK_ISOLATION PASS
 record EDGE_ISOLATION PASS
 
@@ -302,11 +339,66 @@ step "Edge routing isolation and HTTPS"
 curl_tenant "https://${DOMAIN_A}/vlux/health?db=${DB_A}" | grep -q '"status": "ok"' || die "tenant A HTTPS health failed"
 curl_tenant "https://${DOMAIN_B}/vlux/health?db=${DB_B}" | grep -q '"status": "ok"' || die "tenant B HTTPS health failed"
 
-cross_a="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$CA_CERT" "https://${DOMAIN_A}/vlux/health?db=${DB_B}")"
-cross_b="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$CA_CERT" "https://${DOMAIN_B}/vlux/health?db=${DB_A}")"
-echo "cross-tenant db request codes: A->B=${cross_a} B->A=${cross_b}"
-[ "$cross_a" != "200" ] || die "domain A served tenant B's database"
-[ "$cross_b" != "200" ] || die "domain B served tenant A's database"
+odoo_shell "$TENANT_A" "$DB_A" <<'PY'
+env['ir.config_parameter'].sudo().set_param('vlux.e2e.tenant_identity', 'VLUX_E2E_TENANT_A')
+env.cr.commit()
+PY
+odoo_shell "$TENANT_B" "$DB_B" <<'PY'
+env['ir.config_parameter'].sudo().set_param('vlux.e2e.tenant_identity', 'VLUX_E2E_TENANT_B')
+env.cr.commit()
+PY
+[ "$(pg_query "$TENANT_A" "$DB_A" "SELECT value FROM ir_config_parameter WHERE key='vlux.e2e.tenant_identity'")" = "VLUX_E2E_TENANT_A" ] \
+  || die "tenant A identity marker was not stored in tenant A DB"
+[ "$(pg_query "$TENANT_B" "$DB_B" "SELECT value FROM ir_config_parameter WHERE key='vlux.e2e.tenant_identity'")" = "VLUX_E2E_TENANT_B" ] \
+  || die "tenant B identity marker was not stored in tenant B DB"
+[ "$(pg_query "$TENANT_A" "$DB_A" "SELECT count(*) FROM ir_config_parameter WHERE value='VLUX_E2E_TENANT_B'")" = "0" ] \
+  || die "tenant B identity marker appeared in tenant A DB"
+[ "$(pg_query "$TENANT_B" "$DB_B" "SELECT count(*) FROM ir_config_parameter WHERE value='VLUX_E2E_TENANT_A'")" = "0" ] \
+  || die "tenant A identity marker appeared in tenant B DB"
+record TENANT_A_DB "$DB_A"
+record TENANT_B_DB "$DB_B"
+
+# Each hostname must be bound to its OWN backend. Asking for the other
+# tenant's db in the query string proves nothing: dbfilter pins each app to a
+# single database, so Odoo answers for whichever app the request reached.
+# Taking tenant B's app down is decisive instead - if domain B were routed to
+# tenant A it would keep answering 200.
+docker stop "vlux-${TENANT_B}-app" >/dev/null
+sleep 3
+code_b_down="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$CA_CERT" "https://${DOMAIN_B}/vlux/health?db=${DB_B}" || true)"
+code_a_up="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$CA_CERT" "https://${DOMAIN_A}/vlux/health?db=${DB_A}" || true)"
+echo "with tenant B stopped: domainB=${code_b_down} domainA=${code_a_up}"
+docker start "vlux-${TENANT_B}-app" >/dev/null
+[ "$code_b_down" != "200" ] \
+  || die "domain B answered 200 while tenant B was down: it is not bound to tenant B"
+[ "$code_a_up" = "200" ] \
+  || die "domain A broke when tenant B went down: the tenants are not independent"
+
+for _ in $(seq 1 90); do
+  [ "$(docker inspect -f '{{.State.Health.Status}}' "vlux-${TENANT_B}-app" 2>/dev/null)" = "healthy" ] && break
+  sleep 5
+done
+[ "$(docker inspect -f '{{.State.Health.Status}}' "vlux-${TENANT_B}-app")" = "healthy" ] \
+  || die "tenant B did not recover after the routing check"
+curl_tenant "https://${DOMAIN_B}/vlux/health?db=${DB_B}" | grep -q '"status": "ok"' \
+  || die "tenant B did not serve again after the routing check"
+
+for _ in $(seq 1 5); do
+  curl_tenant "https://${DOMAIN_A}/vlux/health?db=${DB_A}" | grep -q '"status": "ok"' \
+    || die "tenant A routing was not stable"
+  curl_tenant "https://${DOMAIN_B}/vlux/health?db=${DB_B}" | grep -q '"status": "ok"' \
+    || die "tenant B routing was not stable"
+done
+
+unknown_body="${OUT_DIR}/unknown-host-body.txt"
+unknown_code="$(curl -k -sS -o "$unknown_body" -w '%{http_code}' \
+  --resolve "${UNKNOWN_DOMAIN}:443:127.0.0.1" \
+  "https://${UNKNOWN_DOMAIN}/vlux/health?db=${DB_A}" || true)"
+echo "unknown host status: ${unknown_code}"
+if [ "$unknown_code" = "200" ] && grep -q '"status": "ok"' "$unknown_body"; then
+  die "unknown host reached an Odoo tenant"
+fi
+record UNKNOWN_HOST_FAIL_CLOSED PASS
 
 docker exec vlux-edge-caddy wget -q -O - http://127.0.0.1:2019/config/ > "${OUT_DIR}/caddy-config.json"
 python3 - "${OUT_DIR}/caddy-config.json" <<'PY'
@@ -318,8 +410,12 @@ assert '"app:8069"' not in text, "edge config uses a non-unique app alias"
 config = json.loads(text)
 hosts = json.dumps(config)
 assert "tenant-a.vlux.lab" in hosts and "tenant-b.vlux.lab" in hosts
+assert "unknown.vlux.lab" not in hosts
 print("edge routing config OK")
 PY
+record TENANT_A_ROUTING PASS
+record TENANT_B_ROUTING PASS
+record CROSS_TENANT_HTTP_ROUTING BLOCKED
 record EDGE_ROUTING_ISOLATION PASS
 record HTTPS_INTERNAL PASS
 
@@ -349,8 +445,15 @@ record WEBSOCKET_PROXY PASS
 
 workers_a="$(sudo grep -E '^workers' "${BASE}/tenants/${TENANT_A}/config/odoo.conf" | awk '{print $3}')"
 [ "$workers_a" = "2" ] || die "tenant A workers is ${workers_a}, expected 2"
-sudo grep -q '^proxy_mode = True' "${BASE}/tenants/${TENANT_A}/config/odoo.conf" || die "proxy_mode is not enabled"
-sudo grep -q '^list_db = False' "${BASE}/tenants/${TENANT_A}/config/odoo.conf" || die "list_db is not disabled"
+for tenant in "$TENANT_A" "$TENANT_B"; do
+  db_name="$(sudo python3 -c "import json;print(json.load(open('${BASE}/tenants/${tenant}/tenant.json'))['database']['name'])")"
+  conf="${BASE}/tenants/${tenant}/config/odoo.conf"
+  sudo grep -q '^db_host = postgres' "$conf" || die "${tenant} db_host is not postgres"
+  sudo grep -q "^db_name = ${db_name}$" "$conf" || die "${tenant} db_name is not exact"
+  sudo grep -q "^dbfilter = ^${db_name}\\$$" "$conf" || die "${tenant} dbfilter is not exact"
+  sudo grep -q '^list_db = False' "$conf" || die "${tenant} list_db is not disabled"
+  sudo grep -q '^proxy_mode = True' "$conf" || die "${tenant} proxy_mode is not enabled"
+done
 record ODOO_WORKERS_DEFAULT "$workers_a"
 
 # ---------------------------------------------------------------------------

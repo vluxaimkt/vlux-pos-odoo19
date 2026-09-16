@@ -605,6 +605,57 @@ def check_tunnel(cli, rendered: dict[str, str]) -> None:
     )
 
 
+def check_machine_json_contract() -> None:
+    """Commands consumed by CI must keep stdout as a single JSON object."""
+    source = (CLOUD / "vlux_cloud.py").read_text(encoding="utf-8")
+    check(
+        'print("[vlux-cloud] " + message, file=sys.stderr' in source,
+        "MACHINE_JSON_OUTPUT: vlux-cloud progress logs must go to stderr",
+    )
+    check(
+        source.count('"caddy", "validate"') == 1 and source.count('"caddy", "reload"') == 1,
+        "MACHINE_JSON_OUTPUT: edge validation/reload should stay centralized",
+    )
+
+    tree = ast.parse(source)
+    edge_reload = next(
+        (node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "edge_reload"),
+        None,
+    )
+    check(edge_reload is not None, "MACHINE_JSON_OUTPUT: edge_reload is missing")
+    if edge_reload is not None:
+        compose_calls = [
+            node for node in ast.walk(edge_reload)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "compose"
+        ]
+        check(len(compose_calls) == 2, "MACHINE_JSON_OUTPUT: edge_reload must validate and reload")
+        for call in compose_calls:
+            has_capture = any(
+                kw.arg == "capture" and isinstance(kw.value, ast.Constant) and kw.value.value is True
+                for kw in call.keywords
+            )
+            check(
+                has_capture,
+                "MACHINE_JSON_OUTPUT: caddy validate/reload stdout must be captured, not mixed into JSON",
+            )
+
+    staging = (ROOT / "scripts" / "release" / "cloud_staging_e2e.sh").read_text(encoding="utf-8")
+    check(
+        'vlux_a status > "${OUT_DIR}/staging-status.json" || true' in staging,
+        "MACHINE_JSON_OUTPUT: staging status JSON must capture stdout only",
+    )
+    check(
+        "STOCK_SEED_SKIPPED" not in staging and "'is_storable': True" in staging,
+        "INVENTORY_E2E: staging must seed a real storable product, not skip inventory",
+    )
+    check(
+        "INVENTORY_MIGRATION PASS" in staging and "SOURCE_STOCK_QTY" in staging,
+        "INVENTORY_E2E: staging must compare source and destination stock quantities",
+    )
+
+
 def check_staging_secret_scans() -> None:
     """CLOUDFLARE_TOKEN_LEAK_SCAN and R2_SECRET_LEAK_SCAN over the repository."""
     # Cloudflare tunnel tokens are long base64 JSON blobs and always start eyJ.
@@ -672,6 +723,7 @@ def main() -> int:
     check_cli_surface(cli)
     check_odoo_api_surface(cli)
     check_tunnel(cli, rendered)
+    check_machine_json_contract()
     check_staging_secret_scans()
 
     if FAILURES:
@@ -686,6 +738,8 @@ def main() -> int:
     print("CLI_SURFACE=PASS")
     print("ODOO_API_SURFACE=PASS")
     print("CLOUDFLARE_TUNNEL_STATIC_CHECK=PASS")
+    print("MACHINE_JSON_OUTPUT=PASS")
+    print("INVENTORY_E2E_STATIC_CHECK=PASS")
     print("CLOUDFLARE_TOKEN_LEAK_SCAN=PASS")
     print("R2_SECRET_LEAK_SCAN=PASS")
     print("CLOUD_STATIC_CHECKS=PASS")
