@@ -450,7 +450,7 @@ for tenant in "$TENANT_A" "$TENANT_B"; do
   conf="${BASE}/tenants/${tenant}/config/odoo.conf"
   sudo grep -q '^db_host = postgres' "$conf" || die "${tenant} db_host is not postgres"
   sudo grep -q "^db_name = ${db_name}$" "$conf" || die "${tenant} db_name is not exact"
-  sudo grep -q "^dbfilter = ^${db_name}\\$$" "$conf" || die "${tenant} dbfilter is not exact"
+  sudo grep -Fxq "dbfilter = ^${db_name}$" "$conf" || die "${tenant} dbfilter is not exact"
   sudo grep -q '^list_db = False' "$conf" || die "${tenant} list_db is not disabled"
   sudo grep -q '^proxy_mode = True' "$conf" || die "${tenant} proxy_mode is not enabled"
 done

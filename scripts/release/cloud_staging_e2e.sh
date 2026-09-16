@@ -280,12 +280,18 @@ attachment = env['ir.attachment'].sudo().create({
     'raw': b'VLUX-MIGRATION-DRILL-PAYLOAD' * 128,
 })
 location = env.ref('stock.stock_location_stock')
-quant = env['stock.quant'].sudo().create({
+quant = env['stock.quant'].sudo().with_context(inventory_mode=True).create({
     'product_id': products[0].id,
     'location_id': location.id,
     'inventory_quantity': 37,
 })
 quant.action_apply_inventory()
+env.cr.commit()
+actual_qty = sum(env['stock.quant'].sudo().search([
+    ('product_id', '=', products[0].id),
+    ('location_id', '=', location.id),
+]).mapped('quantity'))
+assert actual_qty == 37, 'stock seed quantity is %s, expected 37' % actual_qty
 env['ir.config_parameter'].sudo().set_param('vlux.e2e.stock_product_id', str(products[0].id))
 print('STOCK_SEEDED qty=37')
 env.cr.commit()
