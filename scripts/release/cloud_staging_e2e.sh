@@ -286,6 +286,7 @@ quant = env['stock.quant'].sudo().create({
     'inventory_quantity': 37,
 })
 quant.action_apply_inventory()
+env['ir.config_parameter'].sudo().set_param('vlux.e2e.stock_product_id', str(products[0].id))
 print('STOCK_SEEDED qty=37')
 env.cr.commit()
 print('SEEDED partners=%s products=%s attachment=%s' % (len(partners), len(products), attachment.id))
@@ -293,7 +294,8 @@ PY
 
 SRC_PARTNERS="$(pg_query "vlux-${TENANT}-postgres" "$DB" "SELECT count(*) FROM res_partner")"
 SRC_ATTACH="$(pg_query "vlux-${TENANT}-postgres" "$DB" "SELECT count(*) FROM ir_attachment")"
-SOURCE_STOCK_QTY="$(pg_query "vlux-${TENANT}-postgres" "$DB" "SELECT to_char(coalesce(sum(q.quantity), 0), 'FM999999999.####') FROM stock_quant q JOIN product_product pp ON pp.id = q.product_id WHERE pp.default_code = 'VLUX-E2E-STOCK-A'")"
+SOURCE_STOCK_PRODUCT_ID="$(pg_query "vlux-${TENANT}-postgres" "$DB" "SELECT value FROM ir_config_parameter WHERE key = 'vlux.e2e.stock_product_id'")"
+SOURCE_STOCK_QTY="$(pg_query "vlux-${TENANT}-postgres" "$DB" "SELECT to_char(coalesce(sum(quantity), 0), 'FM999999999.####') FROM stock_quant WHERE product_id = ${SOURCE_STOCK_PRODUCT_ID}")"
 echo "source partners=${SRC_PARTNERS} attachments=${SRC_ATTACH}"
 [ "$SRC_PARTNERS" -ge 3 ] || die "seed data missing"
 [ "$SOURCE_STOCK_QTY" = "37" ] || die "source stock quantity is ${SOURCE_STOCK_QTY}, expected 37"
@@ -404,7 +406,8 @@ B_APP="vlux-${HOST_B_ID}-${TENANT}-app"
 B_PG="vlux-${HOST_B_ID}-${TENANT}-postgres"
 DST_PARTNERS="$(pg_query "$B_PG" "$DB" "SELECT count(*) FROM res_partner")"
 DST_ATTACH="$(pg_query "$B_PG" "$DB" "SELECT count(*) FROM ir_attachment")"
-DST_STOCK_QTY="$(pg_query "$B_PG" "$DB" "SELECT to_char(coalesce(sum(q.quantity), 0), 'FM999999999.####') FROM stock_quant q JOIN product_product pp ON pp.id = q.product_id WHERE pp.default_code = 'VLUX-E2E-STOCK-A'")"
+DST_STOCK_PRODUCT_ID="$(pg_query "$B_PG" "$DB" "SELECT value FROM ir_config_parameter WHERE key = 'vlux.e2e.stock_product_id'")"
+DST_STOCK_QTY="$(pg_query "$B_PG" "$DB" "SELECT to_char(coalesce(sum(quantity), 0), 'FM999999999.####') FROM stock_quant WHERE product_id = ${DST_STOCK_PRODUCT_ID}")"
 echo "destination partners=${DST_PARTNERS} attachments=${DST_ATTACH}"
 [ "$DST_PARTNERS" = "$SRC_PARTNERS" ] || die "partner count diverged: ${SRC_PARTNERS} -> ${DST_PARTNERS}"
 [ "$DST_ATTACH" = "$SRC_ATTACH" ] || die "attachment count diverged: ${SRC_ATTACH} -> ${DST_ATTACH}"
