@@ -1,6 +1,6 @@
 [Unit]
 Description=VLUX POS Application
-After=network-online.target postgresql.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -13,11 +13,16 @@ Environment=VLUX_POS_CONFIG=/etc/vlux-pos
 Environment=VLUX_POS_DATA=/var/lib/vlux-pos
 Environment=VLUX_POS_BACKUPS=/var/backups/vlux-pos
 Environment=VLUX_POS_LOGS=/var/log/vlux-pos
+ExecStartPre=/usr/bin/vlux-pos wait-db --quiet
 ExecStart=/opt/vlux/pos/venv/bin/python /opt/vlux/pos/odoo/odoo-bin -c /etc/vlux-pos/odoo.conf
 Restart=on-failure
 RestartSec=5
 PrivateTmp=true
 NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+CapabilityBoundingSet=
 ReadWritePaths=/etc/vlux-pos /var/lib/vlux-pos /var/backups/vlux-pos /var/log/vlux-pos
 
 [Install]

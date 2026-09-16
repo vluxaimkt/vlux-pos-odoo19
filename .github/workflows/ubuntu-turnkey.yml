@@ -1,0 +1,103 @@
+name: Ubuntu Turnkey
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Ubuntu lab version"
+        required: true
+        default: "0.0.0-ubuntu1"
+      edition:
+        description: "Distribution edition"
+        required: true
+        default: "local_complete"
+        type: choice
+        options:
+          - local_core
+          - local_complete
+  push:
+    branches:
+      - feature/production-distribution
+    paths:
+      - ".github/workflows/ubuntu-turnkey.yml"
+      - "packaging/ubuntu/**"
+      - "packaging/cloud/**"
+      - "scripts/distribution/**"
+      - "scripts/release/**"
+      - "vlux_core/**"
+      - "vlux_mobile_scanner/**"
+      - "vlux_owner/**"
+      - "requirements-extra.txt"
+
+env:
+  ODOO_COMMIT: a2d73c5900d8886d115afe1ccb7f5c97c7e71a97
+  ODOO_DIR: ${{ github.workspace }}/odoo
+  ADDONS_DIR: ${{ github.workspace }}/vlux-addons
+  UBUNTU_VERSION: ${{ inputs.version || '0.0.0-ubuntu1' }}
+  UBUNTU_EDITION: ${{ inputs.edition || 'local_complete' }}
+  PYTHON_VERSION: "3.12.10"
+  SUPPORTED_POSTGRESQL: "16"
+
+jobs:
+  ubuntu-turnkey:
+    name: Ubuntu 24.04 turnkey E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout VLUX addons
+        uses: actions/checkout@v4
+        with:
+          path: vlux-addons
+
+      - name: Checkout Odoo baseline
+        uses: actions/checkout@v4
+        with:
+          repository: odoo/odoo
+          ref: ${{ env.ODOO_COMMIT }}
+          path: odoo
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Validate source prechecks
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          test "$(git -C "$ODOO_DIR" rev-parse HEAD)" = "$ODOO_COMMIT"
+          python scripts/release/static_checks.py
+          python scripts/release/public_repo_scan.py
+          python scripts/release/test_build_release.py
+          python -m compileall scripts/release scripts/distribution
+
+      - name: Build Ubuntu package
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          version="${{ env.UBUNTU_VERSION }}"
+          python scripts/release/build_release.py "$version" --edition "${{ env.UBUNTU_EDITION }}" --odoo-home "$ODOO_DIR"
+          canonical="../vlux_release_output/$version/VLUX_POS_${{ env.UBUNTU_EDITION }}_$version.zip"
+          python scripts/release/build_ubuntu_deb.py \
+            --version "$version" \
+            --canonical-zip "$canonical" \
+            --out-dir dist/ubuntu \
+            --odoo-home "$ODOO_DIR"
+          (cd dist/ubuntu && sha256sum -c "vlux-pos_${version}_amd64.deb.sha256")
+          dpkg-deb --info "dist/ubuntu/vlux-pos_${version}_amd64.deb"
+          dpkg-deb --contents "dist/ubuntu/vlux-pos_${version}_amd64.deb" | tee dist/ubuntu/dpkg-contents.txt
+
+      - name: Run Ubuntu turnkey E2E
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: bash scripts/release/ubuntu_turnkey_ci.sh "${{ env.UBUNTU_VERSION }}"
+
+      - name: Upload Ubuntu turnkey artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vlux-pos-ubuntu-turnkey-${{ env.UBUNTU_VERSION }}
+          path: |
+            ${{ env.ADDONS_DIR }}/dist/ubuntu/*.deb
+            ${{ env.ADDONS_DIR }}/dist/ubuntu/*.sha256
+            ${{ env.ADDONS_DIR }}/dist/ubuntu/manifest.json
+            ${{ env.ADDONS_DIR }}/dist/ubuntu/turnkey-summary.json
+            ${{ env.ADDONS_DIR }}/dist/ubuntu/dpkg-contents.txt
+          if-no-files-found: error

@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 ODOO_COMMIT = "a2d73c5900d8886d115afe1ccb7f5c97c7e71a97"
+INSTALLER_MODE = "ONLINE_APT_DEPENDENCIES"
 
 
 def fail(message: str) -> None:
@@ -44,6 +45,53 @@ def copy_executable(src: Path, dst: Path) -> None:
     dst.chmod(0o755)
 
 
+def validate_odoo_home(odoo_home: Path) -> Path:
+    resolved = odoo_home.expanduser().resolve()
+    if not resolved.exists():
+        fail(f"Odoo checkout does not exist: {resolved}")
+    if not (resolved / ".git").exists():
+        fail(f"Odoo checkout is missing .git: {resolved}")
+    commit = run(["git", "rev-parse", "HEAD"], cwd=resolved)
+    if commit != ODOO_COMMIT:
+        fail(f"Unexpected Odoo commit {commit}; expected {ODOO_COMMIT}")
+    if not (resolved / "odoo-bin").exists():
+        fail(f"Odoo checkout is missing odoo-bin: {resolved}")
+    return resolved
+
+
+def ignore_odoo_payload(_dir: str, names: list[str]) -> set[str]:
+    blocked = {
+        ".git",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "filestore",
+        "backups",
+        "logs",
+        "dump",
+        "dumps",
+    }
+    ignored: set[str] = set()
+    for name in names:
+        lower = name.lower()
+        if name in blocked or lower.endswith((".pyc", ".pyo", ".log", ".tmp", ".dump", ".bak")):
+            ignored.add(name)
+        if lower in {".env", "pgpass"}:
+            ignored.add(name)
+    return ignored
+
+
+def embed_odoo_payload(odoo_home: Path, payload_dir: Path) -> None:
+    target = payload_dir / "odoo"
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(odoo_home, target, ignore=ignore_odoo_payload)
+    (target / "ODOO_COMMIT.txt").write_text(ODOO_COMMIT + "\n", encoding="ascii")
+    if (target / ".git").exists():
+        fail("Odoo payload still contains .git after packaging.")
+
+
 def extract_payload(canonical_zip: Path, target: Path) -> dict:
     if target.exists():
         shutil.rmtree(target)
@@ -68,9 +116,10 @@ def write_control(version: str, target: Path) -> None:
     target.write_text("\n".join(replaced) + "\n", encoding="utf-8")
 
 
-def build(version: str, canonical_zip: Path, out_dir: Path) -> dict:
+def build(version: str, canonical_zip: Path, out_dir: Path, odoo_home: Path) -> dict:
     if not shutil.which("dpkg-deb"):
         fail("dpkg-deb is required to build the Ubuntu package.")
+    odoo_home = validate_odoo_home(odoo_home)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     work_dir = out_dir / "_deb_work"
@@ -83,6 +132,7 @@ def build(version: str, canonical_zip: Path, out_dir: Path) -> dict:
 
     release_manifest = extract_payload(canonical_zip, payload_dir)
     source_commit = release_manifest["source_commit"]
+    embed_odoo_payload(odoo_home, payload_dir)
 
     write_control(version, debian_dir / "control")
     for script_name in ("preinst", "postinst", "prerm", "postrm"):
@@ -116,6 +166,8 @@ def build(version: str, canonical_zip: Path, out_dir: Path) -> dict:
     contents = run(["dpkg-deb", "--contents", str(deb_file)])
     required_paths = (
         "./opt/vlux/pos/",
+        "./opt/vlux/pos/odoo/odoo-bin",
+        "./opt/vlux/pos/odoo/ODOO_COMMIT.txt",
         "./usr/bin/vlux-pos",
         "./lib/systemd/system/vlux-pos.service",
         "./etc/vlux-pos/Caddyfile.example",
@@ -132,14 +184,22 @@ def build(version: str, canonical_zip: Path, out_dir: Path) -> dict:
         "version": version,
         "source_commit": source_commit,
         "odoo_commit": ODOO_COMMIT,
+        "odoo_embedded": "PASS",
         "edition": release_manifest["edition"],
         "deb_file": deb_file.name,
         "deb_sha256": sha256_file(deb_file),
+        "deb_size_mb": round(deb_file.stat().st_size / (1024 * 1024), 2),
         "architecture": "amd64",
+        "installer_mode": INSTALLER_MODE,
+        "python_version": "3.12",
+        "postgresql_major": "16",
+        "postgres_role": "vlux_app",
+        "postgres_db": "vlux_pos",
         "validation": {
             "dpkg_build": "PASS",
             "dpkg_info": "PASS" if "Package: vlux-pos" in info else "FAIL",
             "dpkg_contents": "PASS",
+            "odoo_payload": "PASS",
             "install_smoke": "PENDING_WORKFLOW",
         },
         "build_timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
@@ -159,8 +219,14 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--version", required=True)
     parser.add_argument("--canonical-zip", required=True, type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)
+    parser.add_argument("--odoo-home", required=True, type=Path)
     args = parser.parse_args(argv[1:])
-    manifest = build(args.version, args.canonical_zip.resolve(), args.out_dir.resolve())
+    manifest = build(
+        args.version,
+        args.canonical_zip.resolve(),
+        args.out_dir.resolve(),
+        args.odoo_home,
+    )
     print(json.dumps(manifest, indent=2, sort_keys=True))
     return 0
 

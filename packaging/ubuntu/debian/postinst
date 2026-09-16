@@ -15,8 +15,7 @@ case "${1:-configure}" in
     install -d -o vlux-pos -g vlux-pos -m 0750 /var/backups/vlux-pos /var/log/vlux-pos
     install -d -o root -g root -m 0755 /opt/vlux/pos
 
-    if [ -f /opt/vlux/pos/packaging/ubuntu/systemd/vlux-pos.service ]; then
-      install -m 0644 /opt/vlux/pos/packaging/ubuntu/systemd/vlux-pos.service /etc/systemd/system/vlux-pos.service
+    if [ -f /lib/systemd/system/vlux-pos.service ]; then
       systemctl daemon-reload || true
       systemctl enable vlux-pos.service || true
     fi
