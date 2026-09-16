@@ -501,6 +501,14 @@ class TenantPaths:
         return self.project + "-postgres"
 
     @property
+    def app_service(self) -> str:
+        return self.name + "-app"
+
+    @property
+    def pg_service(self) -> str:
+        return self.name + "-postgres"
+
+    @property
     def private_network(self) -> str:
         return self.project + "-private"
 
@@ -1070,7 +1078,7 @@ def psql(paths: TenantPaths, sql: str, *, database: str | None = None, check: bo
     return compose(
         paths.root,
         [
-            "exec", "-T", "postgres",
+            "exec", "-T", paths.pg_service,
             "psql", "-v", "ON_ERROR_STOP=1", "-U", db_user, "-d", target, "-tAc", sql,
         ],
         check=check,
@@ -1087,7 +1095,7 @@ def odoo_run(paths: TenantPaths, args: list[str], *, input_text: str | None = No
     one_off = paths.project + "-oneoff-" + utc_stamp()
     compose(
         paths.root,
-        ["run", "--rm", "--name", one_off, "-T", "app", *args],
+        ["run", "--rm", "--name", one_off, "-T", paths.app_service, *args],
         input_text=input_text,
         timeout=timeout,
     )
@@ -1200,6 +1208,8 @@ def render_tenant_files(
             {
                 "__TENANT_ROOT__": str(paths.root),
                 "__PROJECT__": paths.project,
+                "__PG_SERVICE__": paths.pg_service,
+                "__APP_SERVICE__": paths.app_service,
                 "__PG_CONTAINER__": paths.pg_container,
                 "__APP_CONTAINER__": paths.app_container,
                 "__APP_ALIAS__": paths.app_alias,
@@ -1366,7 +1376,7 @@ def provision(args: argparse.Namespace) -> int:
         docker(["pull", postgres_image])
 
     info("Starting isolated PostgreSQL for " + tenant)
-    compose(paths.root, ["up", "-d", "postgres"])
+    compose(paths.root, ["up", "-d", paths.pg_service])
     wait_container_healthy(paths.pg_container, timeout=args.timeout)
 
     first_init = not database_initialised(paths)
@@ -1377,7 +1387,7 @@ def provision(args: argparse.Namespace) -> int:
         info("Database already initialised: skipping module install and Owner creation.")
 
     info("Starting Odoo application container")
-    compose(paths.root, ["up", "-d", "app"])
+    compose(paths.root, ["up", "-d", paths.app_service])
     wait_container_healthy(paths.app_container, timeout=args.timeout)
 
     edge_mode = layout.edge_mode()
@@ -1519,7 +1529,7 @@ def tenant_health_report(layout: Layout, paths: TenantPaths) -> dict:
 
     pg = compose(
         paths.root,
-        ["exec", "-T", "postgres", "pg_isready", "-h", "127.0.0.1", "-U", metadata["database"]["role"], "-d", db_name],
+        ["exec", "-T", paths.pg_service, "pg_isready", "-h", "127.0.0.1", "-U", metadata["database"]["role"], "-d", db_name],
         check=False,
         capture=True,
     )
@@ -1528,7 +1538,7 @@ def tenant_health_report(layout: Layout, paths: TenantPaths) -> dict:
     app_probe = compose(
         paths.root,
         [
-            "exec", "-T", "app",
+            "exec", "-T", paths.app_service,
             "curl", "-fsS", "http://127.0.0.1:" + str(HTTP_PORT) + "/vlux/health?db=" + db_name,
         ],
         check=False,
@@ -1960,11 +1970,11 @@ def app_is_running(paths: "TenantPaths") -> bool:
 
 
 def stop_app(paths: TenantPaths) -> None:
-    compose(paths.root, ["stop", "app"], timeout=300)
+    compose(paths.root, ["stop", paths.app_service], timeout=300)
 
 
 def start_app(paths: TenantPaths, timeout: int) -> None:
-    compose(paths.root, ["up", "-d", "app"])
+    compose(paths.root, ["up", "-d", paths.app_service])
     wait_container_healthy(paths.app_container, timeout=timeout)
 
 
@@ -2420,7 +2430,7 @@ def upgrade(args: argparse.Namespace) -> int:
     try:
         stop_app(paths)
         upgrade_addons(paths, metadata["database"]["name"])
-        compose(paths.root, ["up", "-d", "app"])
+        compose(paths.root, ["up", "-d", paths.app_service])
         wait_container_healthy(paths.app_container, timeout=args.timeout)
         report = tenant_health_report(layout, paths)
         if report["status"] != "ok":
@@ -2500,10 +2510,10 @@ def disable(args: argparse.Namespace) -> int:
         edge_reload(layout)
         removed_route = True
 
-    compose(paths.root, ["stop", "app"], timeout=300)
+    compose(paths.root, ["stop", paths.app_service], timeout=300)
     stopped = ["app"]
     if args.stop_database:
-        compose(paths.root, ["stop", "postgres"], timeout=300)
+        compose(paths.root, ["stop", paths.pg_service], timeout=300)
         stopped.append("postgres")
 
     metadata["state"] = "DISABLED"
@@ -3438,7 +3448,7 @@ def migration_import(args: argparse.Namespace) -> int:
         )
 
         info("Starting isolated PostgreSQL for the imported tenant")
-        compose(paths.root, ["up", "-d", "postgres"])
+        compose(paths.root, ["up", "-d", paths.pg_service])
         wait_container_healthy(paths.pg_container, timeout=args.timeout)
 
         run(
@@ -3554,13 +3564,13 @@ def migration_import(args: argparse.Namespace) -> int:
         write_json(paths.metadata, metadata, mode=0o640)
 
         info("Starting Odoo (no edge route: the tenant receives no traffic yet)")
-        compose(paths.root, ["up", "-d", "app"])
+        compose(paths.root, ["up", "-d", paths.app_service])
         wait_container_healthy(paths.app_container, timeout=args.timeout)
 
         app_probe = compose(
             paths.root,
             [
-                "exec", "-T", "app", "curl", "-fsS",
+                "exec", "-T", paths.app_service, "curl", "-fsS",
                 "http://127.0.0.1:" + str(HTTP_PORT) + "/vlux/health?db=" + db_name,
             ],
             check=False,

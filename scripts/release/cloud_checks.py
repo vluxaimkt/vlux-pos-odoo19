@@ -55,6 +55,8 @@ def render_all(cli) -> dict[str, str]:
         {
             "__TENANT_ROOT__": TENANT_ROOT,
             "__PROJECT__": "vlux-" + TENANT,
+            "__PG_SERVICE__": TENANT + "-postgres",
+            "__APP_SERVICE__": TENANT + "-app",
             "__PG_CONTAINER__": "vlux-" + TENANT + "-postgres",
             "__APP_CONTAINER__": "vlux-" + TENANT + "-app",
             "__APP_ALIAS__": TENANT + "-app",
@@ -186,9 +188,18 @@ def check_tenant_isolation(rendered: dict[str, str]) -> None:
         elif line and not line.startswith(" "):
             current = None
 
-    check("postgres" in services and "app" in services, "TENANT_ISOLATION: expected postgres and app services")
-    postgres_block = "\n".join(services.get("postgres", []))
-    app_block = "\n".join(services.get("app", []))
+    check(
+        "postgres" not in services and "app" not in services,
+        "TENANT_ISOLATION: service keys must be unique per tenant; bare app/postgres create shared DNS aliases",
+    )
+    pg_service = TENANT + "-postgres"
+    app_service = TENANT + "-app"
+    check(
+        pg_service in services and app_service in services,
+        "TENANT_ISOLATION: expected unique <tenant>-postgres and <tenant>-app services",
+    )
+    postgres_block = "\n".join(services.get(pg_service, []))
+    app_block = "\n".join(services.get(app_service, []))
 
     check(
         "edge" not in postgres_block,
