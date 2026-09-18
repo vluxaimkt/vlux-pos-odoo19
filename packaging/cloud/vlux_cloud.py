@@ -3693,6 +3693,294 @@ def migration_verify(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------
+# doctor: one machine-readable diagnosis per tenant
+# --------------------------------------------------------------------------
+
+DOCTOR_SECTIONS = (
+    "ODOO", "POSTGRES", "DB_CONNECTIONS", "FILESTORE", "DISK", "EDGE",
+    "BACKUP_AGE", "OFFSITE", "WORKERS", "ADDONS", "VERSION",
+)
+DOCTOR_RANK = {"OK": 0, "WARN": 1, "FAIL": 2}
+DOCTOR_DISK_WARN_PCT = 15.0
+DOCTOR_DISK_FAIL_PCT = 5.0
+DOCTOR_CONNECTIONS_WARN_RATIO = 0.8
+DOCTOR_LONG_TRANSACTION_S = 600
+DOCTOR_HEALTHY_CONTAINER = ("healthy", "running-no-healthcheck")
+PENDING_MODULE_STATES = ("to install", "to upgrade", "to remove")
+
+
+def _psql_rows(paths: TenantPaths, sql: str) -> list[list[str]] | None:
+    result = psql(paths, sql, check=False)
+    if result.returncode != 0:
+        return None
+    return [line.split("|") for line in (result.stdout or "").splitlines() if line.strip()]
+
+
+def _psql_int(paths: TenantPaths, sql: str) -> int | None:
+    rows = _psql_rows(paths, sql)
+    try:
+        return int(float(rows[0][0])) if rows else None
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _app_http(paths: TenantPaths, path: str) -> dict:
+    """GET a local Odoo route from inside the app container: status code and JSON body."""
+    result = compose(
+        paths.root,
+        [
+            "exec", "-T", paths.app_service, "curl", "-sS", "-m", "15",
+            "-w", "\n%{http_code}", "http://127.0.0.1:" + str(HTTP_PORT) + path,
+        ],
+        check=False,
+        capture=True,
+    )
+    body, _sep, code = (result.stdout or "").rpartition("\n")
+    try:
+        status_code = int(code.strip())
+    except ValueError:
+        status_code = 0
+    try:
+        payload = json.loads(body) if body.strip() else None
+    except json.JSONDecodeError:
+        payload = None
+    return {"exit": result.returncode, "status_code": status_code, "json": payload}
+
+
+def _host_memory_bytes() -> int | None:
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            if line.startswith("MemTotal:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def doctor_collect(layout: Layout, paths: TenantPaths) -> dict:
+    """Gather raw facts. Everything that touches Docker or PostgreSQL lives here."""
+    metadata = paths.require()
+    db_name = metadata["database"]["name"]
+    query = "?db=" + urllib.parse.quote(db_name)
+    pg_ready = compose(
+        paths.root,
+        ["exec", "-T", paths.pg_service, "pg_isready", "-h", "127.0.0.1",
+         "-U", metadata["database"]["role"], "-d", db_name],
+        check=False,
+        capture=True,
+    )
+    connections = {}
+    for row in _psql_rows(
+        paths,
+        "SELECT coalesce(state, 'unknown'), count(*) FROM pg_stat_activity "
+        "WHERE datname = current_database() GROUP BY 1",
+    ) or []:
+        if len(row) == 2 and row[1].isdigit():
+            connections[row[0]] = int(row[1])
+    modules = {}
+    for row in _psql_rows(
+        paths,
+        "SELECT name, state FROM ir_module_module WHERE name LIKE 'vlux\\_%' "
+        "OR state IN ('to install', 'to upgrade', 'to remove') ORDER BY name",
+    ) or []:
+        if len(row) == 2:
+            modules[row[0]] = row[1]
+    edge_mode = layout.edge_mode()
+    try:
+        usage = shutil.disk_usage(paths.root)
+        disk = {"total_bytes": usage.total, "free_bytes": usage.free}
+    except OSError:
+        disk = {"total_bytes": None, "free_bytes": None}
+    filestore = filestore_metrics(paths, db_name)
+    return {
+        "tenant": paths.name,
+        "metadata": {
+            "edition": metadata.get("edition"),
+            "cloud_version": metadata.get("cloud_version"),
+            "data_class": metadata.get("data_class", DEFAULT_DATA_CLASS),
+            "image": {
+                key: metadata.get("image", {}).get(key)
+                for key in ("reference", "digest", "odoo_commit")
+            },
+            "odoo": {
+                key: metadata.get("odoo", {}).get(key)
+                for key in ("workers", "max_cron_threads")
+            },
+            "maintenance": bool(metadata.get("maintenance", {}).get("enabled")),
+        },
+        "containers": {
+            "app": container_health(paths.app_container),
+            "postgres": container_health(paths.pg_container),
+            "edge": container_health(layout.edge_container),
+        },
+        "odoo_health": _app_http(paths, "/vlux/health" + query),
+        "odoo_ready": _app_http(paths, "/vlux/ready" + query),
+        "pg_isready_exit": pg_ready.returncode,
+        "postgres": {
+            "server_version": ((_psql_rows(paths, "SHOW server_version") or [[None]])[0] or [None])[0],
+            "max_connections": _psql_int(paths, "SHOW max_connections"),
+            "instance_connections": _psql_int(paths, "SELECT count(*) FROM pg_stat_activity"),
+            "database_connections": connections,
+            "longest_transaction_s": _psql_int(
+                paths,
+                "SELECT coalesce(max(extract(epoch FROM now() - xact_start)), 0)::int "
+                "FROM pg_stat_activity WHERE datname = current_database() "
+                "AND state <> 'idle' AND xact_start IS NOT NULL",
+            ),
+            "database_bytes": _psql_int(paths, "SELECT pg_database_size(current_database())"),
+        },
+        "modules": modules,
+        "filestore": {"files": filestore["files"], "bytes": filestore["bytes"]},
+        "disk": disk,
+        "edge": {
+            "mode": edge_mode,
+            "route_present": paths.caddy_route.exists(),
+            "tunnel": tunnel_state(layout) if edge_mode == "cloudflare_tunnel" else None,
+        },
+        "backup": backup_protection(layout, paths, metadata),
+        "host": {"cpus": os.cpu_count(), "memory_bytes": _host_memory_bytes()},
+    }
+
+
+def _section(status: str, **details) -> dict:
+    return {"status": status, **details}
+
+
+def doctor_evaluate(raw: dict) -> dict:
+    """Turn collected facts into OK/WARN/FAIL sections. Pure: no I/O, unit tested."""
+    meta = raw["metadata"]
+    sections: dict[str, dict] = {}
+
+    health = raw["odoo_health"]
+    ready = raw["odoo_ready"]
+    health_ok = health["status_code"] == 200 and (health["json"] or {}).get("status") == "ok"
+    ready_checks = ready["json"].get("checks") if isinstance(ready["json"], dict) else None
+    if not health_ok or raw["containers"]["app"] not in DOCTOR_HEALTHY_CONTAINER:
+        odoo_status, reason = "FAIL", "odoo is not answering /vlux/health"
+    elif ready["status_code"] == 200:
+        odoo_status, reason = "OK", "ready"
+    elif ready["status_code"] == 503:
+        odoo_status, reason = "FAIL", "odoo is up but not ready to sell"
+    else:
+        odoo_status, reason = "WARN", "/vlux/ready unavailable (vlux_core not upgraded?)"
+    sections["ODOO"] = _section(
+        odoo_status, reason=reason, container=raw["containers"]["app"],
+        ready_status_code=ready["status_code"], ready_checks=ready_checks,
+        maintenance=meta["maintenance"],
+    )
+
+    pg = raw["postgres"]
+    pg_ok = raw["pg_isready_exit"] == 0 and raw["containers"]["postgres"] in DOCTOR_HEALTHY_CONTAINER
+    long_tx = pg["longest_transaction_s"] or 0
+    if not pg_ok:
+        pg_status = "FAIL"
+    elif long_tx > DOCTOR_LONG_TRANSACTION_S:
+        pg_status = "WARN"
+    else:
+        pg_status = "OK"
+    sections["POSTGRES"] = _section(
+        pg_status, container=raw["containers"]["postgres"], server_version=pg["server_version"],
+        database_bytes=pg["database_bytes"], longest_transaction_s=long_tx,
+    )
+
+    used, limit = pg["instance_connections"], pg["max_connections"]
+    if used is None or not limit or used >= limit * DOCTOR_CONNECTIONS_WARN_RATIO:
+        conn_status = "WARN"
+    else:
+        conn_status = "OK"
+    sections["DB_CONNECTIONS"] = _section(
+        conn_status, in_use=used, max_connections=limit, by_state=pg["database_connections"],
+    )
+
+    sections["FILESTORE"] = _section("OK", **raw["filestore"])
+
+    total, free = raw["disk"]["total_bytes"], raw["disk"]["free_bytes"]
+    if not total:
+        disk_status, free_pct = "WARN", None
+    else:
+        free_pct = round(free * 100.0 / total, 1)
+        disk_status = (
+            "FAIL" if free_pct < DOCTOR_DISK_FAIL_PCT
+            else "WARN" if free_pct < DOCTOR_DISK_WARN_PCT
+            else "OK"
+        )
+    sections["DISK"] = _section(disk_status, free_pct=free_pct, free_bytes=free, total_bytes=total)
+
+    edge = raw["edge"]
+    tunnel = edge.get("tunnel")
+    edge_ok = edge["route_present"] and raw["containers"]["edge"] in DOCTOR_HEALTHY_CONTAINER
+    if tunnel is not None and tunnel.get("tunnel") != "CONNECTED":
+        edge_ok = False
+    sections["EDGE"] = _section(
+        "OK" if edge_ok else "FAIL", mode=edge["mode"], route_present=edge["route_present"],
+        container=raw["containers"]["edge"],
+        tunnel=None if tunnel is None else {k: tunnel.get(k) for k in ("tunnel", "connections", "restarts")},
+    )
+
+    backup = raw["backup"]
+    local_reasons = [reason for reason in backup["reasons"] if "off-site" not in reason]
+    if not local_reasons:
+        backup_status = "OK"
+    elif backup["data_class"] == "REAL_CLIENT_DATA":
+        backup_status = "FAIL"
+    else:
+        backup_status = "WARN"
+    sections["BACKUP_AGE"] = _section(
+        backup_status, last_backup=backup["last_backup"], local_archives=backup["local_archives"],
+        data_class=backup["data_class"], reasons=local_reasons,
+    )
+    offsite_reasons = [reason for reason in backup["reasons"] if "off-site" in reason]
+    sections["OFFSITE"] = _section(
+        "OK" if not offsite_reasons else "WARN",
+        configured=backup["offsite_configured"], last_offsite_backup=backup["last_offsite_backup"],
+        reasons=offsite_reasons,
+    )
+
+    workers = meta["odoo"].get("workers")
+    cpus = raw["host"]["cpus"]
+    recommended_max = (2 * cpus + 1) if cpus else None
+    if workers is None or (recommended_max and workers > recommended_max):
+        workers_status = "WARN"
+    else:
+        workers_status = "OK"
+    sections["WORKERS"] = _section(
+        workers_status, workers=workers, max_cron_threads=meta["odoo"].get("max_cron_threads"),
+        host_cpus=cpus, host_memory_bytes=raw["host"]["memory_bytes"],
+        recommended_max_workers=recommended_max,
+    )
+
+    modules = raw["modules"]
+    missing = [name for name in PRODUCTIVE_ADDONS if modules.get(name) != "installed"]
+    pending = sorted(name for name, state in modules.items() if state in PENDING_MODULE_STATES)
+    sections["ADDONS"] = _section(
+        "FAIL" if missing or pending else "OK",
+        installed=sorted(name for name, state in modules.items() if state == "installed"),
+        missing=missing, pending=pending,
+    )
+
+    sections["VERSION"] = _section(
+        "OK", cloud_version=meta["cloud_version"], cli_version=CLOUD_VERSION,
+        edition=meta["edition"], **meta["image"],
+    )
+
+    overall = max((section["status"] for section in sections.values()), key=DOCTOR_RANK.__getitem__)
+    return {"tenant": raw["tenant"], "status": overall, "sections": sections}
+
+
+def doctor(args: argparse.Namespace) -> int:
+    """Read-only diagnosis of one tenant. Local CLI only; never exposed over HTTP.
+
+    stdout is a single JSON object; exit code 0 = OK, 1 = WARN, 2 = FAIL.
+    """
+    layout = Layout.load(Path(args.base_dir), args.host_id)
+    paths = layout.tenant(validate_tenant(args.tenant))
+    report = doctor_evaluate(doctor_collect(layout, paths))
+    report["checked_at"] = utc_iso()
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return DOCTOR_RANK[report["status"]]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vlux-cloud",
@@ -3750,6 +4038,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("health", help="Verify PostgreSQL, Odoo, edge route and HTTPS.")
     p.add_argument("tenant", nargs="?")
     p.set_defaults(func=health)
+
+    p = sub.add_parser(
+        "doctor",
+        help="Read-only diagnosis of one tenant as JSON (exit 0 OK, 1 WARN, 2 FAIL).",
+    )
+    p.add_argument("tenant")
+    p.set_defaults(func=doctor)
 
     p = sub.add_parser("list", help="List tenants provisioned on this host.")
     p.set_defaults(func=list_tenants)

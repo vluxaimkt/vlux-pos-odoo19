@@ -127,6 +127,7 @@ data and never rotates existing secrets (`provision_mode: RECONCILED`).
 | `vlux-cloud list` | tenants on this host |
 | `vlux-cloud status [tenant]` | domain, version, image digest, Odoo/PostgreSQL/HTTPS state, last backup, disk usage. Never prints secrets. |
 | `vlux-cloud health [tenant]` | PostgreSQL, Odoo `/vlux/health`, edge route, HTTPS. Exit code != 0 when a critical check fails. |
+| `vlux-cloud doctor <tenant>` | Read-only diagnosis as one JSON object with sections ODOO (`/vlux/health` + `/vlux/ready`), POSTGRES, DB_CONNECTIONS (`pg_stat_activity` vs `max_connections`), FILESTORE, DISK, EDGE (Caddy route or tunnel), BACKUP_AGE, OFFSITE, WORKERS (vs host CPUs), ADDONS, VERSION. Each section is OK/WARN/FAIL; exit code 0 OK, 1 WARN, 2 FAIL. Never prints secrets. |
 | `vlux-cloud backup <tenant> [--offsite]` | consistent dump + filestore + manifest + checksums |
 | `vlux-cloud restore <tenant> <archive> --confirm RESTORE_TENANT` | verified restore |
 | `vlux-cloud upgrade <tenant> --image <ref@sha256:...>` | backup, swap digest, migrate targeted modules, health, smoke |

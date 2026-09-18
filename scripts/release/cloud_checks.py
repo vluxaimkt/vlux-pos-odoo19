@@ -19,6 +19,7 @@ import ast
 import contextlib
 import importlib.util
 import io
+import json
 import re
 import sys
 from pathlib import Path
@@ -444,6 +445,7 @@ SAMPLE_ARGV = {
     ],
     "migration_verify": ["migration", "verify", "tenant-a", "b.tar.gz"],
     "retention_command": ["retention", "tenant-a"],
+    "doctor": ["doctor", "tenant-a"],
 }
 
 
@@ -667,6 +669,126 @@ def check_machine_json_contract() -> None:
     )
 
 
+def _doctor_raw(**overrides) -> dict:
+    """Synthetic facts for a healthy tenant; overrides replace whole top-level keys."""
+    raw = {
+        "tenant": TENANT,
+        "metadata": {
+            "edition": "cloud_managed",
+            "cloud_version": "0.0.0-cloud1",
+            "data_class": "DEMO",
+            "image": {"reference": "repo/vlux-pos:tag", "digest": "sha256:" + "0" * 64, "odoo_commit": "a2d73c5"},
+            "odoo": {"workers": 2, "max_cron_threads": 1},
+            "maintenance": False,
+        },
+        "containers": {"app": "healthy", "postgres": "healthy", "edge": "healthy"},
+        "odoo_health": {"exit": 0, "status_code": 200, "json": {"status": "ok"}},
+        "odoo_ready": {"exit": 0, "status_code": 200, "json": {"status": "ready", "checks": {"database": "ok"}}},
+        "pg_isready_exit": 0,
+        "postgres": {
+            "server_version": "16.4",
+            "max_connections": 100,
+            "instance_connections": 12,
+            "database_connections": {"idle": 10, "active": 2},
+            "longest_transaction_s": 3,
+            "database_bytes": 50_000_000,
+        },
+        "modules": {"vlux_core": "installed", "vlux_mobile_scanner": "installed", "vlux_owner": "installed"},
+        "filestore": {"files": 10, "bytes": 1000},
+        "disk": {"total_bytes": 100 * 1024 ** 3, "free_bytes": 60 * 1024 ** 3},
+        "edge": {"mode": "caddy_public", "route_present": True, "tunnel": None},
+        "backup": {
+            "status": "OK", "data_class": "DEMO", "offsite_configured": True, "local_archives": 3,
+            "last_backup": "2026-09-18T00:00:00+00:00", "last_offsite_backup": "2026-09-18T00:05:00+00:00",
+            "reasons": [],
+        },
+        "host": {"cpus": 2, "memory_bytes": 4 * 1024 ** 3},
+    }
+    raw.update(overrides)
+    return raw
+
+
+def check_doctor(cli) -> None:
+    """`vlux-cloud doctor` evaluation is pure, so its rules are tested without Docker."""
+    evaluate = cli.doctor_evaluate
+
+    healthy = evaluate(_doctor_raw())
+    check(healthy["status"] == "OK", "DOCTOR: a healthy tenant must be OK, got " + str(healthy))
+    check(
+        tuple(healthy["sections"]) == cli.DOCTOR_SECTIONS,
+        "DOCTOR: sections must be exactly " + ", ".join(cli.DOCTOR_SECTIONS),
+    )
+    check(
+        all(section["status"] in cli.DOCTOR_RANK for section in healthy["sections"].values()),
+        "DOCTOR: every section needs an OK/WARN/FAIL status",
+    )
+
+    def status_of(section: str, **overrides) -> str:
+        return evaluate(_doctor_raw(**overrides))["sections"][section]["status"]
+
+    not_ready = {"exit": 0, "status_code": 503, "json": {"status": "not_ready", "checks": {"addons": "missing"}}}
+    check(status_of("ODOO", odoo_ready=not_ready) == "FAIL", "DOCTOR: /vlux/ready 503 must be FAIL")
+    old_addon = {"exit": 0, "status_code": 404, "json": None}
+    check(status_of("ODOO", odoo_ready=old_addon) == "WARN", "DOCTOR: missing /vlux/ready must be WARN")
+    down = {"exit": 7, "status_code": 0, "json": None}
+    check(status_of("ODOO", odoo_health=down) == "FAIL", "DOCTOR: odoo down must be FAIL")
+
+    check(status_of("POSTGRES", pg_isready_exit=2) == "FAIL", "DOCTOR: pg_isready failure must be FAIL")
+    busy = dict(_doctor_raw()["postgres"], instance_connections=90)
+    check(status_of("DB_CONNECTIONS", postgres=busy) == "WARN", "DOCTOR: 90/100 connections must WARN")
+
+    low = {"total_bytes": 100, "free_bytes": 10}
+    critical = {"total_bytes": 100, "free_bytes": 3}
+    check(status_of("DISK", disk=low) == "WARN", "DOCTOR: 10 % free disk must WARN")
+    check(status_of("DISK", disk=critical) == "FAIL", "DOCTOR: 3 % free disk must FAIL")
+
+    tunnel_down = {"mode": "cloudflare_tunnel", "route_present": True,
+                   "tunnel": {"tunnel": "UNREACHABLE", "connections": 0, "restarts": 4}}
+    check(status_of("EDGE", edge=tunnel_down) == "FAIL", "DOCTOR: a disconnected tunnel must FAIL")
+
+    stale = dict(_doctor_raw()["backup"], reasons=["last backup is 72h old"])
+    check(status_of("BACKUP_AGE", backup=stale) == "WARN", "DOCTOR: stale demo backup must WARN")
+    real = dict(stale, data_class="REAL_CLIENT_DATA")
+    check(status_of("BACKUP_AGE", backup=real) == "FAIL", "DOCTOR: stale real-data backup must FAIL")
+    no_offsite = dict(_doctor_raw()["backup"], reasons=["no off-site storage is configured"])
+    check(
+        status_of("OFFSITE", backup=no_offsite) == "WARN" and status_of("BACKUP_AGE", backup=no_offsite) == "OK",
+        "DOCTOR: missing off-site must WARN under OFFSITE only",
+    )
+
+    too_many = dict(_doctor_raw()["metadata"], odoo={"workers": 9, "max_cron_threads": 1})
+    check(status_of("WORKERS", metadata=too_many) == "WARN", "DOCTOR: workers > 2*CPU+1 must WARN")
+
+    pending = {"vlux_core": "installed", "vlux_mobile_scanner": "to upgrade", "vlux_owner": "installed"}
+    check(status_of("ADDONS", modules=pending) == "FAIL", "DOCTOR: pending module upgrade must FAIL")
+    missing = {"vlux_core": "installed"}
+    check(status_of("ADDONS", modules=missing) == "FAIL", "DOCTOR: missing productive addon must FAIL")
+
+    worst = evaluate(_doctor_raw(disk=low, pg_isready_exit=2))
+    check(worst["status"] == "FAIL", "DOCTOR: overall status must be the worst section")
+
+    text = json.dumps(healthy).lower()
+    for marker in ("password", "secret", "access_key", "token", "passwd"):
+        check(marker not in text, "DOCTOR: report must not mention " + marker)
+
+    source = (CLOUD / "vlux_cloud.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    collect = next(
+        (node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "doctor_collect"),
+        None,
+    )
+    check(collect is not None, "DOCTOR: doctor_collect is missing")
+    if collect is not None:
+        called = {
+            node.func.id for node in ast.walk(collect)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        check(
+            not called & {"offsite_config", "secret", "read_secret"},
+            "DOCTOR: doctor_collect must not read credentials",
+        )
+
+
 def check_staging_secret_scans() -> None:
     """CLOUDFLARE_TOKEN_LEAK_SCAN and R2_SECRET_LEAK_SCAN over the repository."""
     # Cloudflare tunnel tokens are long base64 JSON blobs and always start eyJ.
@@ -735,6 +857,7 @@ def main() -> int:
     check_odoo_api_surface(cli)
     check_tunnel(cli, rendered)
     check_machine_json_contract()
+    check_doctor(cli)
     check_staging_secret_scans()
 
     if FAILURES:
@@ -750,6 +873,7 @@ def main() -> int:
     print("ODOO_API_SURFACE=PASS")
     print("CLOUDFLARE_TUNNEL_STATIC_CHECK=PASS")
     print("MACHINE_JSON_OUTPUT=PASS")
+    print("DOCTOR_CONTRACT=PASS")
     print("INVENTORY_E2E_STATIC_CHECK=PASS")
     print("CLOUDFLARE_TOKEN_LEAK_SCAN=PASS")
     print("R2_SECRET_LEAK_SCAN=PASS")
