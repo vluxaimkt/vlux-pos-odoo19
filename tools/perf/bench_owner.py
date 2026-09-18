@@ -37,6 +37,13 @@ def main() -> int:
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--json", default="", help="Write the report to this file")
     parser.add_argument("--label", default="owner_dashboard")
+    parser.add_argument(
+        "--cache",
+        choices=("cold", "warm"),
+        default="cold",
+        help="cold: clear the dashboard's in-process cache before every call (measures the "
+        "real computation); warm: leave it enabled (measures cache hits)",
+    )
     args = parser.parse_args()
     odoo = bootstrap(args)
 
@@ -59,6 +66,8 @@ def main() -> int:
         }
         for index in range(args.warmup + args.iterations):
             env.invalidate_all()
+            if args.cache == "cold" and hasattr(service, "_clear_dashboard_cache"):
+                service._clear_dashboard_cache()
             before_queries = env.cr.sql_log_count
             started = time.perf_counter()
             payload = service.get_dashboard()
@@ -74,6 +83,7 @@ def main() -> int:
         "db": args.db,
         "context": context,
         "iterations": args.iterations,
+        "cache": args.cache,
         "latency_ms": {
             "p50": round(percentile(timings, 0.50), 1),
             "p95": round(percentile(timings, 0.95), 1),

@@ -30,7 +30,7 @@ dashboard has "today" data. Approximate cost on a 2 vCPU host: ~55 products/s,
 
 | Tool | Measures | Needs HTTP server |
 | --- | --- | --- |
-| `bench_owner.py` | Owner dashboard latency p50/p95, SQL queries per call, ORM records materialised | no |
+| `bench_owner.py` | Owner dashboard latency p50/p95, SQL queries per call, ORM records materialised | no (`--cache cold` default clears the dashboard cache per call; `warm` measures hits) |
 | `bench_pos_load.py` | `pos.session.load_data` latency, query count, payload bytes, product rows | no |
 | `bench_scanner.py` | HTTP requests per scan, scan→result latency, lost/duplicated scans, throughput | yes |
 | `bench_startup.py` | Time to `/vlux/health`, idle RSS, idle PostgreSQL connections | spawns one |
