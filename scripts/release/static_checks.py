@@ -15,6 +15,27 @@ SECRET_RE = re.compile(
     r"(?m)^\s*[A-Za-z0-9_.-]*(password|passwd|secret|token|api[_-]?key)"
     r"\s*=\s*(['\"][^'\"]{12,}|[A-Z0-9_./+=-]{12,})"
 )
+# The addons every productive edition except local_core ships. The same list is
+# repeated in files that cannot import each other (Python for Odoo, the cloud
+# CLI, the release builder, C#, batch, shell, Dockerfile). This check is the
+# single source of truth: adding an addon here fails until every copy agrees.
+PRODUCT_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog")
+PRODUCT_ADDON_COPIES = {
+    "packaging/cloud/vlux_cloud.py": r"PRODUCTIVE_ADDONS = \(([^)]*)\)",
+    "scripts/release/build_release.py": r"PRODUCT_ADDONS = \(([^)]*)\)",
+    "scripts/distribution/vlux_pos.py": r'"local_complete": \(([^)]*)\)',
+    "vlux_core/models/system_info.py": r'"local_complete": \(([^)]*)\)',
+    "packaging/windows/service-host/Program.cs": r'"-i", "([^"]*)"',
+    "scripts/windows/smoke_check.py": r"^mods = \[([^\]]*)\]",
+    "scripts/release/cloud_e2e.sh": r'data\["modules_upgraded"\] == \[([^\]]*)\]',
+}
+PRODUCT_ADDON_MENTIONS = (
+    "packaging/cloud/Dockerfile",
+    "scripts/windows/02_stage_release.bat",
+    "scripts/windows/03_verify_release.bat",
+    "scripts/windows/04_upgrade_modules.bat",
+    "docs/DISTRIBUCION_PRODUCCION.md",
+)
 FORBIDDEN_NAMES = {
     ".env",
     "odoo.conf",
@@ -131,6 +152,25 @@ def check_obvious_secrets() -> None:
             fail(f"Possible hardcoded secret in {path}")
 
 
+def check_product_addon_lists() -> None:
+    expected = set(PRODUCT_ADDONS)
+    for rel, pattern in PRODUCT_ADDON_COPIES.items():
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        match = re.search(pattern, text, re.MULTILINE)
+        if not match:
+            fail(f"Product addon list not found in {rel}")
+        found = set(re.findall(r"vlux_[a-z_]+", match.group(1)))
+        if found != expected:
+            fail(
+                f"Product addon list in {rel} is {sorted(found)}, expected {sorted(expected)}"
+            )
+    for rel in PRODUCT_ADDON_MENTIONS:
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        missing = [addon for addon in PRODUCT_ADDONS if addon != "vlux_core" and addon not in text]
+        if missing:
+            fail(f"{rel} does not mention product addons: {', '.join(missing)}")
+
+
 def main() -> int:
     for addon_path in addon_files():
         check_manifest(addon_path)
@@ -139,6 +179,7 @@ def main() -> int:
         check_csv(addon_path)
     check_conflicting_files()
     check_obvious_secrets()
+    check_product_addon_lists()
     print("Static checks passed.")
     return 0
 

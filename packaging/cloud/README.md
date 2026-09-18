@@ -88,7 +88,8 @@ runtime image has no compiler and no git, so it cannot be mutated in place with
 version, source revision, Odoo commit, build date and edition.
 
 Only the approved products are installed: `vlux_core`, `vlux_mobile_scanner`,
-`vlux_owner`. `vlux_facturacion` is **not** enabled as real CFDI. Module
+`vlux_owner`, `vlux_pos_catalog`. `upgrade` runs `-i` and `-u` on that list, so
+an addon added by a newer release is installed on existing tenants. `vlux_facturacion` is **not** enabled as real CFDI. Module
 operations are always targeted - never `-u all`.
 
 ## Operating

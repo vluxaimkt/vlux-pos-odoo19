@@ -161,7 +161,7 @@ LEGACY_PROFILE = "legacy"
 DEFAULT_PROFILE = "small"
 PROFILE_CHOICES = tuple(CAPACITY_PROFILES) + (LEGACY_PROFILE,)
 
-PRODUCTIVE_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner")
+PRODUCTIVE_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog")
 OWNER_GROUP_XMLID = "vlux_core.group_vlux_owner"
 
 TENANT_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
@@ -1163,11 +1163,17 @@ def install_addons(paths: TenantPaths, db_name: str) -> None:
 
 
 def upgrade_addons(paths: TenantPaths, db_name: str) -> None:
+    """Update the productive addons and install any that a newer release added.
+
+    ``-u`` alone only touches installed modules, so a tenant created before an
+    addon joined PRODUCTIVE_ADDONS (e.g. vlux_pos_catalog) would never get it.
+    ``-i`` installs the missing ones and is a no-op for installed modules.
+    """
     modules = ",".join(PRODUCTIVE_ADDONS)
     info("Upgrading targeted modules only: " + modules)
     odoo_run(
         paths,
-        ["-d", db_name, "-u", modules, "--stop-after-init", "--no-http"],
+        ["-d", db_name, "-i", modules, "-u", modules, "--stop-after-init", "--no-http"],
     )
 
 

@@ -625,7 +625,7 @@ grep -q '"upgrade": "PASS"' "${OUT_DIR}/upgrade-a.json" || die "upgrade did not 
 python3 - "${OUT_DIR}/upgrade-a.json" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1]))
-assert data["modules_upgraded"] == ["vlux_core", "vlux_mobile_scanner", "vlux_owner"], data["modules_upgraded"]
+assert data["modules_upgraded"] == ["vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog"], data["modules_upgraded"]
 assert data["pre_upgrade_backup_id"], "no pre-upgrade backup recorded"
 assert data["previous_image"], "previous image not preserved"
 print("upgrade metadata OK")

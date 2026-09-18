@@ -12,6 +12,7 @@ VLUX RELEASE
   -> vlux_core
   -> vlux_mobile_scanner
   -> vlux_owner
+  -> vlux_pos_catalog
   -> release-manifest.json
   -> Windows Setup / Ubuntu deb / Cloud OCI
 ```
@@ -41,8 +42,8 @@ Ediciones soportadas:
 | Edicion | Addons incluidos |
 | --- | --- |
 | `local_core` | `vlux_core` |
-| `local_complete` | `vlux_core`, `vlux_mobile_scanner`, `vlux_owner` |
-| `cloud_managed` | `vlux_core`, `vlux_mobile_scanner`, `vlux_owner` |
+| `local_complete` | `vlux_core`, `vlux_mobile_scanner`, `vlux_owner`, `vlux_pos_catalog` |
+| `cloud_managed` | `vlux_core`, `vlux_mobile_scanner`, `vlux_owner`, `vlux_pos_catalog` |
 
 Campos obligatorios del manifest:
 

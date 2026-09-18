@@ -44,7 +44,7 @@ En una instalación que ya tenga Odoo 19 y PostgreSQL configurados:
   C:\Odoo\src\odoo\odoo-bin `
   -c C:\Odoo\config\odoo.conf `
   -d vlux_pos_dev `
-  -i vlux_core,vlux_mobile_scanner,vlux_owner,vlux_facturacion `
+  -i vlux_core,vlux_mobile_scanner,vlux_owner,vlux_pos_catalog,vlux_facturacion `
   --without-demo `
   --stop-after-init
 ```

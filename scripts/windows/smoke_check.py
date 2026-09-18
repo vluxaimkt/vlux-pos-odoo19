@@ -1,6 +1,6 @@
 import os
 
-mods = ["vlux_core", "vlux_mobile_scanner", "vlux_owner"]
+mods = ["vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog"]
 profile = (os.environ.get("VLUX_PROFILE") or "local_complete").lower()
 if profile == "local_core":
     mods = ["vlux_core"]
@@ -8,6 +8,8 @@ elif profile == "scanner":
     mods = ["vlux_mobile_scanner"]
 elif profile == "owner":
     mods = ["vlux_owner"]
+elif profile == "catalog":
+    mods = ["vlux_pos_catalog"]
 elif profile == "facturacion_internal":
     mods = ["vlux_facturacion"]
 elif profile == "custom":

@@ -45,7 +45,8 @@ destructiva automáticamente.
 
 - `scanner`: actualiza `vlux_mobile_scanner`
 - `owner`: actualiza `vlux_owner`
-- `scanner_owner`: actualiza ambos
+- `scanner_owner`: actualiza escáner, Owner y `vlux_pos_catalog` (instala este último si falta)
+- `catalog`: instala o actualiza `vlux_pos_catalog`
 - `facturacion_internal`: actualiza sólo `vlux_facturacion`
 - `custom`: usa `VLUX_MODULES`
 

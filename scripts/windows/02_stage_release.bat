@@ -35,6 +35,7 @@ if not exist "%STAGED%\release-manifest.json" (
 if not exist "%STAGED%\addons\vlux_mobile_scanner\__manifest__.py" exit /b 47
 if not exist "%STAGED%\addons\vlux_owner\__manifest__.py" exit /b 48
 if not exist "%STAGED%\addons\vlux_facturacion\__manifest__.py" exit /b 49
+if not exist "%STAGED%\addons\vlux_pos_catalog\__manifest__.py" exit /b 50
 
 echo %STAGED%>"%ODOO_HOME%\last_vlux_staged.txt"
 echo [stage] OK: %STAGED%

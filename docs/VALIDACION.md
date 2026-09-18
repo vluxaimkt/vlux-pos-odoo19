@@ -38,7 +38,7 @@ Cree una base desechable llamada `vlux_pos_test` y ejecute:
   C:\Odoo\src\odoo\odoo-bin `
   -c C:\Odoo\config\odoo.conf `
   -d vlux_pos_test `
-  -i vlux_mobile_scanner,vlux_owner,vlux_facturacion `
+  -i vlux_mobile_scanner,vlux_owner,vlux_pos_catalog,vlux_facturacion `
   --without-demo `
   --stop-after-init
 ```
@@ -55,9 +55,9 @@ Ejecútelas exclusivamente en una base desechable:
   C:\Odoo\src\odoo\odoo-bin `
   -c C:\Odoo\config\odoo.conf `
   -d vlux_pos_test `
-  -u vlux_mobile_scanner,vlux_owner,vlux_facturacion `
+  -u vlux_mobile_scanner,vlux_owner,vlux_pos_catalog,vlux_facturacion `
   --test-enable `
-  --test-tags /vlux_mobile_scanner,/vlux_owner,/vlux_facturacion `
+  --test-tags /vlux_mobile_scanner,/vlux_owner,/vlux_pos_catalog,/vlux_facturacion `
   --stop-after-init
 ```
 
