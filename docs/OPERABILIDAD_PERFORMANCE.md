@@ -17,7 +17,7 @@ medir y cómo probar. La gestión del proyecto vive fuera de Git.
 | 5 | POS performance: apertura, catálogo, compresión | Completa |
 | 6 | Observabilidad (`/vlux/ready`, doctor) | Completa |
 | 7 | Scale hardening (perfiles de capacidad, PostgreSQL) | Completa |
-| 8 | CI dividida (rápida / E2E / performance) y regresión completa | Pendiente |
+| 8 | CI dividida (rápida / E2E / performance) y regresión completa | Completa |
 
 `PRODUCTION_GO=NOT_YET`: nada de esta rama está validado manualmente ni
 integrado en `main`.
@@ -460,9 +460,55 @@ navegador, 3 de carga del POS y 14 de `vlux_owner` (4 previos + 10 del contrato 
 día local, comparación, bloques horarios, cajas, top, últimas ventas, stock
 bajo, multi-company, queries constantes y caché), todos en verde.
 
-## Integración pendiente
+## CI y distribución (fase 8)
 
-`vlux_pos_catalog` todavía no está en las listas de addons productivos de CI,
-`Dockerfile`, `build_release.py`, `vlux_cloud.py`, `vlux_pos.py`,
-`Program.cs` ni `smoke_check.py`; se incorporará junto con la división de CI
-(fase 8). Hasta entonces se instala manualmente con `-i vlux_pos_catalog`.
+### Jobs de `.github/workflows/ci.yml`
+
+| Job | Cuándo | Qué hace |
+| --- | --- | --- |
+| `test` | push, PR, nightly, manual | Checks estáticos, escaneo de repo público, build de release, tests Node del escáner, instalación y tests de los addons sin tours (`-vlux_e2e`), metadatos de distribución |
+| `e2e` | push, PR, nightly, manual | Instala los addons y ejecuta los tours de navegador (`vlux_e2e`) con el Google Chrome del runner; exige que se hayan ejecutado tests y guarda el log si falla |
+| `performance` | nightly (07:00 UTC) y manual | Siembra 1k productos / 1k órdenes sintéticos y aplica budgets absolutos: Owner p95 ≤ 1.5 s y ≤ 25 queries; apertura del POS p95 ≤ 8 s y payload ≤ 3 MB; reapertura con caché p95 ≤ 1.5 s. Publica los JSON como artefacto |
+
+Primera ejecución de `performance` (runner ubuntu-24.04, 1k/1k): Owner p95 41.5 ms
+y 20 queries; apertura del POS p95 449 ms y 1.36 MB; reapertura con caché p95
+64 ms. Los budgets dejan margen amplio para la variabilidad de los runners.
+
+Las acciones de GitHub usan las primeras versiones con Node 24 (`checkout@v5`,
+`setup-python@v6`, `upload-artifact@v6`, `download-artifact@v7`,
+`setup-dotnet@v5`, `setup-buildx-action@v4`).
+
+### `vlux_pos_catalog` en las distribuciones
+
+`local_complete` y `cloud_managed` incluyen `vlux_pos_catalog`
+(`local_core` sigue siendo sólo `vlux_core`): imagen de nube, `vlux-cloud`,
+`build_release.py`, distribución Ubuntu/Windows, service host de Windows,
+scripts `02`–`04` y `smoke_check.py`, readiness y documentación.
+
+Las actualizaciones ejecutan `-i <addons> -u <addons>`: `-u` sólo actualiza
+módulos instalados, así que una instalación existente nunca habría recibido un
+addon nuevo del producto. Verificado sobre una copia de una base sin
+`vlux_pos_catalog`: queda instalado y el resto se actualiza.
+
+`static_checks.py` (`check_product_addon_lists`) es la fuente de verdad de la
+lista de addons del producto y falla si alguna de las copias (Python, C#,
+batch, shell, Dockerfile, docs) no coincide.
+
+### Estado final de la iniciativa
+
+| Criterio | Estado |
+| --- | --- |
+| Barcode existente → carrito; desconocido → alta → carrito; foto → filestore; mismo código ×5 → qty 5 | PASS (tours) |
+| 100 scans sin pérdidas ni duplicados; 3.27 → 1.0 requests por scan | PASS |
+| Owner sin cargar el dataset en Python, BEFORE/AFTER | PASS (p95 604 → 162 ms con 10k) |
+| POS sin regresión | PASS (apertura −33 %, 12 tours verdes) |
+| Seguridad de roles y endpoints | PASS (catálogo, escáner, `/vlux/ready` sin datos sensibles) |
+| Backup/cloud sin regresión | PASS estático (`cloud_checks.py`); e2e real en staging pendiente |
+| Escaneo de repo público | PASS |
+| CI (rápida + E2E; performance nightly) | PASS |
+| Validación manual en tienda real | Pendiente |
+
+`PRODUCTION_GO=NOT_YET` hasta la validación manual: abrir el POS, emparejar un
+teléfono real, cámara, escanear, crear un producto con foto, repetir el mismo
+producto y completar una venta; y en staging: `vlux-cloud doctor`, perfiles de
+capacidad y `cloud_e2e.sh`.
