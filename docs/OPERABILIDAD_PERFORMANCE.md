@@ -16,7 +16,7 @@ medir y cómo probar. La gestión del proyecto vive fuera de Git.
 | 4 | Owner V2: agregaciones en base de datos | Completa |
 | 5 | POS performance: apertura, catálogo, compresión | Completa |
 | 6 | Observabilidad (`/vlux/ready`, doctor) | Completa |
-| 7 | Scale hardening (perfiles de capacidad, PostgreSQL) | Pendiente |
+| 7 | Scale hardening (perfiles de capacidad, PostgreSQL) | Completa |
 | 8 | CI dividida (rápida / E2E / performance) y regresión completa | Pendiente |
 
 `PRODUCTION_GO=NOT_YET`: nada de esta rama está validado manualmente ni
@@ -37,7 +37,7 @@ altos, y su estado:
 | ZXing decodificaba el frame completo cada 120 ms en un canvas nuevo | Resuelto (fase 3) |
 | Owner: órdenes y líneas del día iteradas en Python, 500 productos con `qty_available`, refresco 30 s | Resuelto (fase 4) |
 | `/vlux/health` sólo liveness; sin readiness ni doctor | Resuelto (fase 6) |
-| Prefijo R2 puede producir `tenants/tenants/...`; capacidad fija (`workers=2`) | Pendiente (fase 7) |
+| Prefijo R2 puede producir `tenants/tenants/...`; capacidad fija (`workers=2`) | Resuelto (fase 7) |
 
 ## vlux_pos_catalog
 
@@ -350,6 +350,31 @@ La recolección (Docker, `psql`, `curl`) y la evaluación están separadas:
 (`DOCTOR_CONTRACT`) prueba con escenarios sintéticos, incluida la ausencia de
 credenciales en la salida. La recolección no se ha ejecutado aún contra un
 tenant real: queda para la validación en el host de staging.
+
+## Capacidad (fase 7)
+
+`vlux-cloud provision --profile small|medium|large` dimensiona juntos Odoo,
+PostgreSQL y los contenedores de cada tenant (tabla completa en
+[`packaging/cloud/README.md`](../packaging/cloud/README.md#capacity-profiles)).
+
+| Antes | Después |
+| --- | --- |
+| `workers=2` fijo, `limit_memory_hard` 2.5 GB por worker | Perfil por tienda: 2 / 4 / 8 workers, límites de memoria por worker acordes |
+| Contenedores sin `mem_limit` ni `cpus` | Límites por perfil en app y PostgreSQL; aviso si la suma de perfiles supera la RAM del host |
+| PostgreSQL con la configuración de la imagen (`shared_buffers` 128 MB, `max_connections` 100) | `shared_buffers` ~25 %, `effective_cache_size` ~75 % de la memoria de PostgreSQL, `work_mem`, checkpoints y parámetros de SSD por perfil |
+| `db_maxconn = max(16, (workers + cron) x 8)` por proceso: con 2 workers podía llegar a 96 conexiones | `db_maxconn` derivado de `max_connections` con 5 conexiones reservadas |
+| `--prefix .../tenants` producía `tenants/tenants/` en R2 | `offsite_tenants_root` no duplica; los objetos anteriores no se mueven y siguen restaurables por su clave registrada |
+
+Compatibilidad: los tenants existentes quedan como `legacy` (mismo
+comportamiento de antes) hasta que el operador elige un perfil; `doctor` lo
+señala en `WORKERS`. Las reglas (presupuesto de conexiones, proporciones de
+memoria, render del compose por perfil, `legacy` sin límites, prefijos R2) se
+prueban sin Docker en `cloud_checks.py` (`CAPACITY_PROFILES`, `R2_PREFIX`).
+
+Pendiente de validar en un host real (ver `VLUX_SEGUIMIENTO`): arranque de
+PostgreSQL con los `-c` de cada perfil, mediciones de `bench_owner.py` y
+`bench_pos_load.py` dentro del contenedor y cambio de `legacy` a un perfil
+sobre un tenant con datos.
 
 ## Herramientas de rendimiento (`tools/perf`)
 
