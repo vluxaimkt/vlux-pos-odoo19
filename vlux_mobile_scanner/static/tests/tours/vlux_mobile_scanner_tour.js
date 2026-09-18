@@ -16,6 +16,9 @@ import * as Dialog from "@point_of_sale/../tests/generic_helpers/dialog_util";
 const KNOWN_BARCODE = "7509992000019";
 const UNKNOWN_BARCODE = "7509992000026";
 const RESULT_TIMEOUT_MS = 8000;
+// Same as scanner.js PUSH_SAFETY_NET_MS: with the websocket up, the real phone
+// only polls results that stay pending longer than this.
+const PUSH_SAFETY_NET_MS = 3000;
 
 function openRegister() {
     return [Chrome.startPoS(), Dialog.confirm("Open Register")].flat();
@@ -78,12 +81,16 @@ async function pairPhone() {
     return phone;
 }
 
-/** Scan like a phone: POST the barcode, then wait for the push or the batch poll. */
-async function scanFromPhone(barcode, { requestId = crypto.randomUUID() } = {}) {
+/**
+ * Scan like a phone: POST the barcode, then wait for the push or the batch poll.
+ * ``firstPollMs`` is when the first poll fires; tours asserting the push path use
+ * the real client's safety-net delay so a fast poll cannot win the race.
+ */
+async function scanFromPhone(barcode, { requestId = crypto.randomUUID(), firstPollMs = 300 } = {}) {
     const phone = window.__vluxScannerTour;
     await postJson("/vlux/mobile/scan", { barcode, request_id: requestId }, phone.token);
     const startedAt = Date.now();
-    let nextPoll = startedAt + 300;
+    let nextPoll = startedAt + firstPollMs;
     while (Date.now() - startedAt < RESULT_TIMEOUT_MS) {
         const pushed = phone.pushed.get(requestId);
         if (pushed) {
@@ -135,7 +142,7 @@ registry.category("web_tour.tours").add("VluxScannerPushDeliveryTour", {
                     throw new Error("phone websocket did not open");
                 }
                 for (let i = 0; i < 3; i += 1) {
-                    await scanFromPhone(KNOWN_BARCODE);
+                    await scanFromPhone(KNOWN_BARCODE, { firstPollMs: PUSH_SAFETY_NET_MS });
                 }
                 const pushes = phone.transports.filter((t) => t === "push").length;
                 if (pushes < 2) {
