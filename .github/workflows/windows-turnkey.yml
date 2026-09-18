@@ -286,6 +286,29 @@ jobs:
           Assert-HttpOk "http://127.0.0.1:8080/vlux-owner/manifest.webmanifest?db=vlux_pos" | Out-Null
           Assert-HttpOk "http://127.0.0.1:8080/vlux/scanner?db=vlux_pos" | Out-Null
 
+          # Security: no default admin/admin on the LAN, and secrets only readable by
+          # SYSTEM, Administrators and the service account.
+          function Test-OdooAdminLogin([string]$password) {
+            $body = @{ jsonrpc = "2.0"; method = "call"; params = @{ db = "vlux_pos"; login = "admin"; password = $password } } |
+              ConvertTo-Json -Depth 5
+            $response = Invoke-RestMethod -Uri "http://127.0.0.1:8080/web/session/authenticate" -Method Post `
+              -ContentType "application/json" -Body $body
+            return [bool]($response.result -and $response.result.uid)
+          }
+          $ownerSecrets = Get-Content "C:\ProgramData\VLUX\POS\config\secrets.json" -Raw | ConvertFrom-Json
+          if (Test-OdooAdminLogin "admin") { throw "Default admin/admin is still accepted" }
+          if (!(Test-OdooAdminLogin $ownerSecrets.InitialOwnerPassword)) { throw "Initial owner password was not applied to admin" }
+          $broadSids = @("S-1-5-32-545", "S-1-1-0", "S-1-5-11", "S-1-5-4")
+          foreach ($secretFile in @("C:\ProgramData\VLUX\POS\config\secrets.json", "C:\ProgramData\VLUX\POS\config\odoo.conf")) {
+            $rules = (Get-Acl $secretFile).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+            foreach ($rule in $rules) {
+              $readable = ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::ReadData) -ne 0
+              if ($rule.AccessControlType -eq "Allow" -and $readable -and $broadSids -contains $rule.IdentityReference.Value) {
+                throw "$secretFile is readable by $($rule.IdentityReference.Value)"
+              }
+            }
+          }
+
           Restart-Service VLUXPOS -Force
           Wait-VluxHealth "http://127.0.0.1:8080/vlux/health?db=vlux_pos" | Out-Null
           Assert-CurlOk "https://localhost:8443/vlux/health?db=vlux_pos" | Out-Null

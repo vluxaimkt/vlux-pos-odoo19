@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,6 +38,12 @@ public sealed class VluxPosWorker : BackgroundService
     {
         _paths = RuntimePaths.Create();
         _paths.EnsureDirectories();
+        // Before any secret is written: the data tree must not be readable by
+        // ordinary local accounts (e.g. a cashier on a shared POS PC).
+        foreach (var failure in RestrictDataTree(_paths))
+        {
+            _logger.LogWarning("Could not reset the ACL of {Path}: {Error}", failure.Path, failure.Error);
+        }
         ValidatePayload(_paths);
 
         var secrets = LoadOrCreateSecrets(_paths);
@@ -43,10 +51,13 @@ public sealed class VluxPosWorker : BackgroundService
         WriteOdooConfig(_paths, secrets);
         WriteCaddyfile(_paths, tlsIdentity);
         WriteLanTlsMetadata(_paths, tlsIdentity);
+        AssertNotReadableByOrdinaryUsers(_paths.SecretsFile);
+        AssertNotReadableByOrdinaryUsers(_paths.OdooConf);
 
         await EnsurePostgresqlAsync(_paths, secrets, stoppingToken);
         await EnsureDatabaseAsync(_paths, secrets, stoppingToken);
         await EnsureOdooInitializedAsync(_paths, stoppingToken);
+        await EnsureAdminPasswordReplacedAsync(_paths, secrets, stoppingToken);
         StartOdoo(_paths);
         await WaitForHttpAsync($"http://127.0.0.1:{OdooHttpPort}/vlux/health?db={DatabaseName}", stoppingToken);
         StartCaddy(_paths);
@@ -145,6 +156,111 @@ public sealed class VluxPosWorker : BackgroundService
         var json = JsonSerializer.Serialize(secrets, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(paths.SecretsFile, json + Environment.NewLine, Utf8NoBom);
         return secrets;
+    }
+
+    // SYSTEM, Administrators and the service account (LocalService, see
+    // scripts/release/build_windows_wix.py) are the only principals allowed on
+    // the VLUX data tree. It holds secrets.json and odoo.conf (PostgreSQL
+    // superuser, database and Odoo master passwords), the database files, the
+    // filestore and the backups.
+    private static readonly WellKnownSidType[] DataTreeOwners =
+    {
+        WellKnownSidType.LocalSystemSid,
+        WellKnownSidType.BuiltinAdministratorsSid,
+        WellKnownSidType.LocalServiceSid,
+    };
+
+    // Principals that include ordinary interactive accounts.
+    private static readonly WellKnownSidType[] BroadPrincipals =
+    {
+        WellKnownSidType.BuiltinUsersSid,
+        WellKnownSidType.WorldSid,
+        WellKnownSidType.AuthenticatedUserSid,
+        WellKnownSidType.InteractiveSid,
+    };
+
+    private static DirectorySecurity DataTreeSecurity()
+    {
+        var security = new DirectorySecurity();
+        // Protected DACL: drop what C:\ProgramData would otherwise pass down
+        // (BUILTIN\Users: read & execute on every file).
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var sidType in DataTreeOwners)
+        {
+            security.AddAccessRule(new FileSystemAccessRule(
+                new SecurityIdentifier(sidType, null),
+                FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+        }
+        return security;
+    }
+
+    /// <summary>
+    /// The root gets a protected DACL on every start. Once per install (marker
+    /// file), every existing child is reset to inherit only from it, so files
+    /// written before this fix with the ProgramData defaults lose the Users
+    /// grant too; anything created afterwards inherits the restricted DACL.
+    /// Per-entry failures are returned for logging: the secrets check that runs
+    /// right after fails closed anyway.
+    /// </summary>
+    private static List<(string Path, string Error)> RestrictDataTree(RuntimePaths paths)
+    {
+        var failures = new List<(string Path, string Error)>();
+        var root = new DirectoryInfo(paths.ProgramDataRoot);
+        root.SetAccessControl(DataTreeSecurity());
+        if (File.Exists(paths.AclHardenedMarker))
+        {
+            return failures;
+        }
+        foreach (var entry in root.EnumerateFileSystemInfos("*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                if (entry is DirectoryInfo directory)
+                {
+                    var inherited = new DirectorySecurity();
+                    inherited.SetAccessRuleProtection(isProtected: false, preserveInheritance: false);
+                    directory.SetAccessControl(inherited);
+                }
+                else if (entry is FileInfo file)
+                {
+                    var inherited = new FileSecurity();
+                    inherited.SetAccessRuleProtection(isProtected: false, preserveInheritance: false);
+                    file.SetAccessControl(inherited);
+                }
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or InvalidOperationException)
+            {
+                failures.Add((entry.FullName, ex.Message));
+            }
+        }
+        if (failures.Count == 0)
+        {
+            File.WriteAllText(paths.AclHardenedMarker, DateTimeOffset.UtcNow.ToString("O") + Environment.NewLine);
+        }
+        return failures;
+    }
+
+    /// <summary>Fail closed: never run with secrets readable by ordinary local accounts.</summary>
+    private static void AssertNotReadableByOrdinaryUsers(string path)
+    {
+        var broad = BroadPrincipals.Select(sid => new SecurityIdentifier(sid, null)).ToHashSet();
+        var rules = new FileInfo(path)
+            .GetAccessControl()
+            .GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier));
+        foreach (FileSystemAccessRule rule in rules)
+        {
+            if (rule.AccessControlType == AccessControlType.Allow
+                && rule.IdentityReference is SecurityIdentifier sid
+                && broad.Contains(sid)
+                && (rule.FileSystemRights & FileSystemRights.ReadData) != 0)
+            {
+                throw new UnauthorizedAccessException(
+                    $"{path} is readable by {sid.Value}; refusing to start with exposed secrets.");
+            }
+        }
     }
 
     private static string RandomSecret()
@@ -505,6 +621,67 @@ public sealed class VluxPosWorker : BackgroundService
         await File.WriteAllTextAsync(paths.OdooInitializedMarker, DateTimeOffset.UtcNow.ToString("O") + Environment.NewLine, token);
     }
 
+    /// <summary>Odoo shell script (read from stdin) that swaps the default admin password.</summary>
+    internal static string AdminPasswordScript(string initialOwnerPassword)
+    {
+        return $$"""
+        from odoo.exceptions import AccessDenied
+
+        def accepts(user, password):
+            try:
+                user.with_user(user)._check_credentials(
+                    {"type": "password", "login": user.login, "password": password},
+                    {"interactive": False},
+                )
+                return True
+            except AccessDenied:
+                return False
+
+        admin = env.ref("base.user_admin")
+        if accepts(admin, "admin"):
+            admin.password = {{JsonSerializer.Serialize(initialOwnerPassword)}}
+            env.cr.commit()
+            print("VLUX_ADMIN_PASSWORD=REPLACED")
+        else:
+            print("VLUX_ADMIN_PASSWORD=ALREADY_CUSTOM")
+        """;
+    }
+
+    /// <summary>
+    /// Odoo seeds base.user_admin with login "admin" and password "admin" (data,
+    /// not demo) and Caddy publishes Odoo on the LAN. Replace that password with
+    /// the generated InitialOwnerPassword, but only while it still is "admin":
+    /// a password the owner already changed is never overwritten. Runs on every
+    /// start, so installs created before this fix are corrected too. The secret
+    /// travels through stdin, never argv, and the call is logged as sensitive.
+    /// </summary>
+    private static async Task EnsureAdminPasswordReplacedAsync(RuntimePaths paths, SecretState secrets, CancellationToken token)
+    {
+        var script = AdminPasswordScript(secrets.InitialOwnerPassword);
+        await RunAsync(
+            paths.PythonExe,
+            new[]
+            {
+                paths.OdooBin,
+                "shell",
+                "-c", paths.OdooConf,
+                "-d", DatabaseName,
+                "--db_host", "127.0.0.1",
+                "--db_port", PostgresPort.ToString(),
+                "--db_user", OdooDbUser,
+                "--no-http",
+                "--logfile", paths.OdooInitLog,
+            },
+            paths.Root,
+            paths.OdooAdminPasswordLog,
+            token,
+            sensitive: true,
+            stdin: script,
+            environment: OdooEnvironment(paths, secrets),
+            timeout: TimeSpan.FromMinutes(5)
+        );
+    }
+
     private void StartOdoo(RuntimePaths paths)
     {
         _odoo = StartManagedProcess(
@@ -749,6 +926,7 @@ public sealed class RuntimePaths
     public required string OdooInitializedMarker { get; init; }
     public required string OdooLog { get; init; }
     public required string OdooInitLog { get; init; }
+    public required string OdooAdminPasswordLog { get; init; }
     public required string OdooStdoutLog { get; init; }
     public required string OdooStderrLog { get; init; }
     public required string PostgresExe { get; init; }
@@ -773,6 +951,7 @@ public sealed class RuntimePaths
     public required string PublicCaExport { get; init; }
     public required string LanTlsMetadataFile { get; init; }
     public required string SecretsFile { get; init; }
+    public required string AclHardenedMarker { get; init; }
 
     public static RuntimePaths Create()
     {
@@ -800,6 +979,7 @@ public sealed class RuntimePaths
             OdooInitializedMarker = Path.Combine(dataDir, ".odoo_initialized"),
             OdooLog = Path.Combine(logsDir, "odoo.log"),
             OdooInitLog = Path.Combine(logsDir, "odoo-init.log"),
+            OdooAdminPasswordLog = Path.Combine(logsDir, "odoo-admin-password.log"),
             OdooStdoutLog = Path.Combine(logsDir, "vluxpos.stdout.log"),
             OdooStderrLog = Path.Combine(logsDir, "vluxpos.stderr.log"),
             PostgresExe = Path.Combine(root, "runtime", "postgresql", "bin", "postgres.exe"),
@@ -824,6 +1004,7 @@ public sealed class RuntimePaths
             PublicCaExport = Path.Combine(certificatesDir, "VLUX_POS_Local_CA.crt"),
             LanTlsMetadataFile = Path.Combine(configDir, "lan-tls.json"),
             SecretsFile = Path.Combine(configDir, "secrets.json"),
+            AclHardenedMarker = Path.Combine(configDir, ".acl-hardened-v1"),
         };
     }
 
