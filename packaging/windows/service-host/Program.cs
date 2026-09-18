@@ -199,11 +199,13 @@ public sealed class VluxPosWorker : BackgroundService
         }
 
         :{{CaddyHttpPort}} {
+            encode zstd gzip
             reverse_proxy 127.0.0.1:{{OdooHttpPort}}
         }
 
         {{httpsSites}} {
             tls internal
+            encode zstd gzip
             reverse_proxy 127.0.0.1:{{OdooHttpPort}}
         }
         """;
