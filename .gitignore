@@ -13,6 +13,9 @@
 !/scripts/distribution/**
 !/scripts/windows/
 !/scripts/windows/**
+!/tools/
+!/tools/perf/
+!/tools/perf/**
 !/config/
 !/docs/
 !/packaging/
