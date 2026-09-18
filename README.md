@@ -13,6 +13,7 @@ El sistema POS está compuesto por estos addons:
 | `vlux_core` | Roles VLUX, metadatos de edición, health check y diagnóstico base | `point_of_sale`, `stock`, `product` |
 | `vlux_mobile_scanner` | Convierte un teléfono en lector inalámbrico del POS | `point_of_sale`, `bus`, `web` |
 | `vlux_owner` | Dashboard móvil de ventas, cajas, productos e inventario | `vlux_core`, `point_of_sale`, `stock`, `web` |
+| `vlux_pos_catalog` | Alta rápida de productos desde el POS al escanear un código desconocido | `point_of_sale`, `stock`, `vlux_core` |
 | `vlux_facturacion` | Portal y flujo de facturación simulada desde tickets POS | `account`, `mail`, `point_of_sale`, `l10n_mx` |
 
 `vlux_facturacion` no emite CFDI real. No incluye timbrado, cancelación, CSD ni
@@ -104,6 +105,7 @@ infraestructura real de firma.
 - [Distribución de producción](docs/DISTRIBUCION_PRODUCCION.md)
 - [Producción controlada](docs/PRODUCCION.md)
 - [Respaldo y restauración](docs/RESPALDO_RESTAURACION.md)
+- [Operabilidad y rendimiento](docs/OPERABILIDAD_PERFORMANCE.md)
 
 ## Estado operativo
 
@@ -132,7 +134,7 @@ Antes de producción deben cumplirse, como mínimo, estas condiciones:
   nativos de Odoo cuando son seguros y añade controles servidor donde el permiso
   nativo es demasiado amplio, por ejemplo bloqueo de `pos.config` para Cashier.
 - Nunca suba `odoo.conf`, `.env`, dumps, filestore, logs ni credenciales.
-- Mantenga el repositorio privado mientras contenga lógica comercial.
+- El repositorio es público: cada commit debe asumirse visible. Nunca versione datos reales.
 - Use API Keys de Odoo para el endpoint compartido de Owner y revoque las que no
   estén en uso.
 - No publique directamente el puerto `8069` en Internet.

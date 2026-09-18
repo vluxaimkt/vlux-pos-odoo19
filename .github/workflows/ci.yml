@@ -12,7 +12,7 @@ env:
   ODOO_DIR: ${{ github.workspace }}/odoo
   ADDONS_DIR: ${{ github.workspace }}/vlux-addons
   TEST_DB: vlux_ci
-  VLUX_ADDONS: vlux_core,vlux_mobile_scanner,vlux_owner,vlux_facturacion
+  VLUX_ADDONS: vlux_core,vlux_mobile_scanner,vlux_owner,vlux_pos_catalog,vlux_facturacion
 
 jobs:
   test:
@@ -96,6 +96,11 @@ jobs:
           python scripts/release/public_repo_scan.py
           python scripts/release/test_build_release.py
 
+      - name: Mobile scanner client unit tests
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          node --test vlux_mobile_scanner/static/tests/node/scanner_core.test.js
+
       - name: Create test database
         env:
           PGPASSWORD: odoo
@@ -129,7 +134,7 @@ jobs:
             -d "$TEST_DB" \
             -u "$VLUX_ADDONS" \
             --test-enable \
-            --test-tags /vlux_core,/vlux_mobile_scanner,/vlux_owner,/vlux_facturacion \
+            --test-tags /vlux_core,/vlux_mobile_scanner,/vlux_owner,/vlux_pos_catalog,/vlux_facturacion,-vlux_e2e \
             --stop-after-init \
             --log-level=test
 

@@ -1,0 +1,260 @@
+# VLUX POS — Operabilidad y rendimiento
+
+Documentación técnica de la iniciativa *VLUX POS Operability & Performance*
+(rama `feature/pos-operability-performance`, base `506d671`). Describe lo que
+existe en código: arquitectura, contratos de API, decisiones técnicas, cómo
+medir y cómo probar. La gestión del proyecto vive fuera de Git.
+
+## Estado por fase
+
+| Fase | Contenido | Estado |
+| --- | --- | --- |
+| 0 | Auditoría del repositorio | Completa |
+| 1 | Baseline de rendimiento reproducible (`tools/perf`) | Completa |
+| 2 | `vlux_pos_catalog`: alta rápida de productos desde el POS | Completa |
+| 3 | Scanner V2: push/batch de resultados, cola, idempotencia, cámara | Completa |
+| 4 | Owner V2: agregaciones en base de datos | Pendiente |
+| 5 | POS performance (imágenes, assets, búsqueda) | Pendiente |
+| 6 | Observabilidad (`/vlux/ready`, doctor) | Pendiente |
+| 7 | Scale hardening (perfiles de capacidad, PostgreSQL) | Pendiente |
+| 8 | CI dividida (rápida / E2E / performance) y regresión completa | Pendiente |
+
+`PRODUCTION_GO=NOT_YET`: nada de esta rama está validado manualmente ni
+integrado en `main`.
+
+## Hallazgos de la auditoría (fase 0)
+
+Sin hallazgos críticos de pérdida de datos ni secretos versionados. Los puntos
+altos, y su estado:
+
+| Hallazgo | Estado |
+| --- | --- |
+| Polling de resultados cada 250 ms por scan y scans serializados en el teléfono | Resuelto (fase 3) |
+| `authenticate_mobile_token` escribía `last_seen_at` en cada request | Resuelto (fase 3) |
+| Cooldown servidor de 1.5 s bloqueaba repeticiones intencionales; `request_id` generado por el servidor (reintentos duplicaban) | Resuelto (fase 3) |
+| Odoo 19 ignora `?db=`; el cliente móvil dependía de monodb/dbfilter | Mitigado: el cliente envía `X-Odoo-Database` en HTTP; push requiere monodb/dbfilter (como producción) |
+| Sin alta rápida de productos | Resuelto (fase 2) |
+| ZXing decodificaba el frame completo cada 120 ms en un canvas nuevo | Resuelto (fase 3) |
+| Owner: órdenes y líneas del día iteradas en Python, 500 productos con `qty_available`, refresco 30 s | Pendiente (fase 4) |
+| `/vlux/health` sólo liveness; sin readiness ni doctor | Pendiente (fase 6) |
+| Prefijo R2 puede producir `tenants/tenants/...`; capacidad fija (`workers=2`) | Pendiente (fase 7) |
+
+## vlux_pos_catalog
+
+Addon independiente (`depends`: `point_of_sale`, `stock`, `vlux_core`). Cuando
+el POS recibe un código de barras sin producto, un usuario autorizado ve el
+formulario rápido en lugar del aviso genérico *Unknown Barcode*.
+
+### Flujo
+
+```
+barcodeReader.scan() -> ProductScreen._barcodeProductAction (patch)
+    producto encontrado  -> flujo estándar de Odoo
+    no encontrado + permiso -> QuickProductDialog (no bloquea el mutex de escaneo)
+        Guardar -> product.template.vlux_pos_quick_create(values, config_id)
+               -> pos.loadNewProducts([["id", "=", tmpl_id]])   (API nativa Odoo 19)
+               -> addLineToCurrentOrder(...)                      (sin recargar el POS)
+```
+
+### Autorización (server-side)
+
+Grupo `vlux_pos_catalog.group_vlux_catalog_quick_create` ("VLUX Catalog: alta
+rápida en POS"):
+
+- implicado por `VLUX Administrator` (y por tanto `VLUX Owner`) y por
+  `VLUX Inventory Operator`;
+- `VLUX Cashier` **no** lo recibe; se asigna explícitamente por usuario;
+- el método exige además `point_of_sale.group_pos_user` y una sesión abierta en
+  una `pos.config` visible para el usuario (reglas multi-compañía normales).
+
+El grupo no otorga `product.group_product_manager`: un cajero con alta rápida
+sigue sin poder crear productos por el backend. La creación usa `sudo()` sólo
+para el `create` final con valores validados y whitelisted.
+
+### API RPC (`product.template`)
+
+| Método | Descripción |
+| --- | --- |
+| `vlux_pos_quick_create_defaults(config_id)` | Impuestos por defecto de la compañía, `is_storable` por defecto (`ir.config_parameter` `vlux_pos_catalog.default_is_storable`, `1` por defecto), categoría POS sugerida |
+| `vlux_pos_quick_create(values, config_id)` | Crea el producto. Devuelve `{"ok": true, product_tmpl_id, product_id, barcode}` o `{"ok": false, "code": "BARCODE_EXISTS", "existing": {...}}` |
+| `vlux_pos_enable_existing(product_id, config_id)` | Reactiva/marca `available_in_pos` un producto existente o archivado |
+| `vlux_audit_duplicate_barcodes(company)` | Auditoría de códigos duplicados (un `GROUP BY`), para diagnóstico y preflight |
+
+`values` aceptados: `barcode` (3–64 alfanuméricos), `name`, `list_price`,
+`default_code`, `pos_categ_id`, `categ_id`, `taxes_ids` (sólo impuestos de
+venta de la compañía), `is_storable`, `initial_qty`, `image` (base64).
+
+### Unicidad de códigos
+
+Odoo 19 valida la unicidad por compañía con una restricción Python, sin índice
+UNIQUE. No se añadió un índice global (rompería bases con duplicados legítimos
+entre compañías). En su lugar: `pg_advisory_xact_lock` por `(company, barcode)`
+durante el alta, búsqueda previa (incluye archivados y empaques `product.uom`)
+y la auditoría `vlux_audit_duplicate_barcodes`.
+
+### Imágenes
+
+La foto se elige manualmente (`<input type="file" accept="image/*"
+capture="environment">`, abierto sólo por acción del usuario). El cliente la
+reduce a ≤1024 px JPEG 0.85 (`image_utils.js`) antes de enviarla; el servidor
+valida que sea imagen y la guarda en `image_1920`, de donde Odoo deriva
+`image_128` para las tarjetas del POS. Todo queda en `ir.attachment`/filestore
+estándar; no hay almacenamiento paralelo.
+
+### Stock inicial
+
+Si `is_storable` y `initial_qty > 0`, se aplica un ajuste de inventario
+(`stock.quant` en `inventory_mode` + `action_apply_inventory`) en la ubicación
+de origen del tipo de operación de la caja (o el stock del almacén de la
+compañía), con historial de movimientos.
+
+## Scanner V2 (`vlux_mobile_scanner` 19.0.2.0.0)
+
+Se conservan tokens hasheados, pairing temporal, `request_id` único, rate limit
+persistente, sesión POS, bus nativo `pos.config._notify`, ACK, revocación y
+expiración. Cambia la entrega de resultados y el manejo de repeticiones.
+
+### Protocolo
+
+```
+Teléfono                            Odoo                              POS
+POST /vlux/mobile/scan {barcode, request_id (UUID v4 cliente)}
+                              -> vlux.mobile.scanner.event (queued)
+                              -> pos.config._notify(VLUX_MOBILE_BARCODE)  -> barcodeReader.scan()
+                                                                          <- POST /vlux/pos/ack
+                              <- event.apply_pos_result()
+   <- bus push VLUX_MOBILE_RESULT en canal privado (websocket /websocket)
+   (fallback) POST /vlux/mobile/results {request_ids: [...]}  (≤50 ids por llamada)
+```
+
+| Endpoint | Cambio |
+| --- | --- |
+| `POST /vlux/mobile/pair`, `/heartbeat` | Devuelven además `push_channel`, `push_version` (versión del worker websocket de Odoo) y `results_batch_max` |
+| `POST /vlux/mobile/scan` | Acepta `request_id` del cliente. Misma id → mismo evento, respuesta `200 {duplicate: true}` sin segunda notificación al POS. Id ajena a otro pairing → `409 REQUEST_ID_CONFLICT`. Ids no UUID se ignoran y se genera una en servidor |
+| `POST /vlux/mobile/results` | Nuevo. Lookup batch de varios `request_id` en una consulta; ids ajenas → `status: "unknown"` |
+| `POST /vlux/mobile/result` | Se mantiene por compatibilidad |
+| `POST /vlux/pos/ack` | Pasa por `event.apply_pos_result()`, que guarda y empuja el resultado al teléfono |
+
+Rate limits por pairing (por minuto): scan 240, results 120, heartbeat 12.
+
+### Canal push
+
+`push_channel = "vlux_mobile_scanner:" + sha256("push:" + token_hash)[:40]`.
+Se deriva del hash del token (nunca del token), se calcula en servidor y sólo se
+entrega al teléfono que ya posee el token. El teléfono abre
+`/websocket?version=<push_version>` y envía
+`{"event_name": "subscribe", "data": {"channels": [push_channel], "last": 0}}`,
+el mismo contrato que usa el cliente web de Odoo. Los websockets son públicos
+en Odoo (usuario `public`); el nombre de canal actúa como capacidad
+no adivinable, igual que los canales de livechat.
+
+Requisito: la sesión pública del websocket debe persistirse, por lo que el
+push funciona en hosts monodb o con `dbfilter` (toda instalación productiva
+VLUX). Sin eso el cliente cae automáticamente al polling batch.
+
+### Cliente móvil
+
+- `scanner_core.js` (lógica pura, sin DOM, probada con `node --test`):
+  - `ScanGate`: un código se acepta si es distinto al último, o si **salió del
+    encuadre** ≥400 ms y pasaron ≥700 ms desde la última aceptación. Un código
+    quieto ante la cámara se acepta exactamente una vez; retirarlo y volver a
+    enfocarlo cuenta como otro scan. Entradas manuales y el botón *+1 Repetir*
+    saltan la compuerta (intención explícita).
+  - `PendingQueue`: cola local ordenada con reintentos (máx. 4, backoff 400 ms →
+    4 s) y expiración (30 s).
+  - `PollBackoff`: 300 ms → ×1.6 → 1500 ms; se reinicia al recibir resultados y
+    se detiene con la cola vacía. Con push activo sólo se consultan scans
+    pendientes >3 s (red de seguridad cada 2 s).
+- `scanner.js`: scans en paralelo (sin `state.sending`), cabecera
+  `X-Odoo-Database`, heartbeat cada 30 s, reconexión del websocket con
+  backoff, reintento al volver `online`/visible, historial de últimos
+  resultados y badge "N en proceso".
+- Cámara: `BarcodeDetector` nativo primero; ZXing sólo como fallback y sólo
+  sobre el marco de escaneo (80 % × 40 % centrado) reducido a ≤640 px en un
+  canvas reutilizado; `getUserMedia` pide 1280×720; el bucle se ralentiza con
+  la pestaña oculta. No se usa Web Worker: el detector nativo ya corre fuera
+  del hilo principal y el recorte+downscale deja a ZXing dentro de presupuesto.
+
+### Base de datos
+
+`authenticate_mobile_token` es de sólo lectura en el camino normal:
+`last_seen_at` se escribe como máximo una vez por minuto y siempre en el
+heartbeat. `cooldown_ms` (anti-rebote en servidor) queda en 0 por defecto y se
+mantiene como opción. El rate limit por upsert en PostgreSQL se conserva: con
+1 request por scan su coste es una fila por pairing.
+
+## Herramientas de rendimiento (`tools/perf`)
+
+Ver [`tools/perf/README.md`](../tools/perf/README.md). Datos siempre
+sintéticos; los generadores rechazan bases cuyo nombre contenga `prod` o
+`real`.
+
+| Herramienta | Mide |
+| --- | --- |
+| `seed_synthetic.py` | Catálogo (1k/10k/50k) y ventas (10k/100k) sintéticos, idempotente |
+| `bench_owner.py` | Latencia p50/p95, queries y registros ORM de `get_dashboard` |
+| `bench_pos_load.py` | `pos.session.load_data`: latencia, queries, bytes |
+| `bench_scanner.py` | Requests por scan, latencia scan→resultado, perdidos/duplicados (`v1`, `batch`, `push`) |
+| `bench_startup.py` | Arranque hasta `/vlux/health`, RSS, conexiones PG |
+| `compare.py` | Tabla BEFORE/AFTER y budgets relativos/absolutos |
+
+### Mediciones (Windows Server, PostgreSQL 16 local, sin proxy)
+
+Baseline (BEFORE, `506d671`):
+
+| Métrica | 1k prod / 1k órdenes | 10k prod / 10k órdenes |
+| --- | --- | --- |
+| Owner `get_dashboard` p50 / p95 | 217 / 341 ms | 738 / 817 ms |
+| Owner queries por llamada | 27 | 46 |
+| Owner valores ORM en caché | 59 577 | 409 321 |
+| POS `load_data` p50 (payload) | 2.0 s (1.36 MB) | 3.7 s (6.06 MB, 5 002 templates) |
+| Arranque → `/vlux/health` | 7.0 s, RSS 151 MB, 8 conexiones PG | — |
+
+Scanner (POS simulado con ACK a 150 ms / 600 ms):
+
+| Escenario | v1 (BEFORE) | batch | push (AFTER) |
+| --- | --- | --- | --- |
+| Requests HTTP por scan, POS rápido | 2.0 | 1.7 | 1.0 |
+| Requests HTTP por scan, POS lento | 3.27 | 1.63 | 1.0 |
+| Throughput | 1.2–2.5 scans/s | 3.6–4.1 | 3.8–5.1 scans/s |
+| Mismo código ×5 intencional | 1 evento, 4 perdidos | 5/5 | 5/5 |
+| 100 scans consecutivos | — | — | 100 entregados, 0 perdidos, 0 duplicados |
+
+Los valores absolutos dependen del host; el objetivo de CI es la comparación
+relativa con `compare.py`.
+
+## Pruebas
+
+```powershell
+# Transacción + HTTP (rápidas)
+python odoo-bin -c odoo.conf -d <db> -u vlux_pos_catalog,vlux_mobile_scanner `
+  --test-enable --test-tags /vlux_pos_catalog,/vlux_mobile_scanner --stop-after-init
+
+# Lógica pura del cliente móvil
+node --test vlux_mobile_scanner/static/tests/node/scanner_core.test.js
+```
+
+Los E2E de navegador son tours de Odoo (`HttpCase`, etiqueta `vlux_e2e`):
+`vlux_pos_catalog` (código conocido, repetido ×5, desconocido → alta →
+carrito, foto manual → filestore, usuario sin permiso) y
+`vlux_mobile_scanner` (entrega, push real por bus, ráfaga de 10, repetido ×5,
+POS no listo, entrega duplicada). Requieren `websocket-client` y un Chromium;
+en Windows sin Chrome, `tools/dev/edge_devtools_wrapper.cmd` permite usar
+Microsoft Edge:
+
+```powershell
+$env:VLUX_PYTHON = "C:\Odoo\venv\Scripts\python.exe"
+$env:ODOO_BROWSER_BIN = "C:\Odoo\custom_addons\tools\dev\edge_devtools_wrapper.cmd"
+```
+
+Resultado actual en el entorno de desarrollo: 21 tests de catálogo, 21 de
+scanner (8 previos + 13 de protocolo), 9 unitarios Node y 12 tours de
+navegador, todos en verde. `vlux_core`, `vlux_owner` y `vlux_facturacion`
+mantienen sus pruebas previas.
+
+## Integración pendiente
+
+`vlux_pos_catalog` todavía no está en las listas de addons productivos de CI,
+`Dockerfile`, `build_release.py`, `vlux_cloud.py`, `vlux_pos.py`,
+`Program.cs` ni `smoke_check.py`; se incorporará junto con la división de CI
+(fase 8). Hasta entonces se instala manualmente con `-i vlux_pos_catalog`.
