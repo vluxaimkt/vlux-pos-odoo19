@@ -404,13 +404,13 @@ jobs:
           python tools/perf/bench_pos_load.py $COMMON --iterations 3 --json perf/pos_load.json
           python tools/perf/bench_pos_load.py $COMMON --iterations 3 --incremental --json perf/pos_load_incremental.json
           python tools/perf/compare.py perf/owner.json perf/owner.json \
-            --budget latency_ms.p95:<=:abs:1500 \
-            --budget sql_queries_per_call.max:<=:abs:25
+            --budget 'latency_ms.p95:<=:abs:1500' \
+            --budget 'sql_queries_per_call.max:<=:abs:25'
           python tools/perf/compare.py perf/pos_load.json perf/pos_load.json \
-            --budget load_data_ms.p95:<=:abs:8000 \
-            --budget payload_bytes:<=:abs:3000000
+            --budget 'load_data_ms.p95:<=:abs:8000' \
+            --budget 'payload_bytes:<=:abs:3000000'
           python tools/perf/compare.py perf/pos_load_incremental.json perf/pos_load_incremental.json \
-            --budget load_data_ms.p95:<=:abs:1500
+            --budget 'load_data_ms.p95:<=:abs:1500'
 
       - name: Keep benchmark reports
         if: always()
