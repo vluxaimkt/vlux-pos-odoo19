@@ -130,9 +130,24 @@
   }
 
   window.addEventListener("resize", () => { if (state.tab === "summary" && state.data) { drawChart("sparkline", state.data.sales_trend, true); drawChart("salesChart", state.data.sales_trend, false); } });
+  // Refresco cada 30 s solo con la app visible; al volver a primer plano se
+  // actualiza de inmediato si los datos tienen más de 10 s. El servidor además
+  // cachea las métricas ~15 s por compañía (vlux_owner.dashboard_cache_ttl).
+  const REFRESH_MS = 30000;
+  const STALE_ON_RETURN_MS = 10000;
+  let lastLoad = 0;
+  let loading = false;
+  async function refresh() {
+    if (loading || document.hidden) return;
+    loading = true;
+    try { await loadDashboard(); } finally { loading = false; lastLoad = Date.now(); }
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && Date.now() - lastLoad > STALE_ON_RETURN_MS) refresh();
+  });
   render();
-  loadDashboard();
-  window.setInterval(loadDashboard, 30000);
+  refresh();
+  window.setInterval(refresh, REFRESH_MS);
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("/vlux-owner/sw.js", { scope: "/vlux-owner/" }).catch(console.error));

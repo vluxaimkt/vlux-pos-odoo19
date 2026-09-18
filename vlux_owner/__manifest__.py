@@ -1,7 +1,7 @@
 {
     "name": "VLUX Owner",
     "summary": "Dashboard móvil PWA para propietarios conectado a Odoo POS",
-    "version": "19.0.1.2.0",
+    "version": "19.0.1.3.0",
     "category": "Point of Sale",
     "author": "VLUX",
     "license": "LGPL-3",
