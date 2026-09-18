@@ -25,6 +25,12 @@ def main() -> int:
     parser.add_argument("--config-name", default="", help="pos.config name (default: first config)")
     parser.add_argument("--json", default="")
     parser.add_argument("--label", default="pos_load")
+    parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help="Measure a warm re-open: the browser already has the IndexedDB cache and only asks "
+        "for records changed since its last sync (context pos_last_server_date)",
+    )
     args = parser.parse_args()
     odoo = bootstrap(args)
 
@@ -43,6 +49,10 @@ def main() -> int:
         )
         if not session:
             session = env["pos.session"].create({"config_id": config.id, "user_id": env.uid})
+        if args.incremental:
+            # Same context the POS data service sends when its IndexedDB cache is valid.
+            env.cr.execute("SELECT (now() AT TIME ZONE 'UTC')::timestamp(0)::text")
+            session = session.with_context(pos_last_server_date=env.cr.fetchone()[0])
         for _ in range(args.iterations):
             env.invalidate_all()
             before = env.cr.sql_log_count
@@ -61,6 +71,7 @@ def main() -> int:
             "db": args.db,
             "pos_config": config.name,
             "iterations": args.iterations,
+            "mode": "incremental" if args.incremental else "full",
             "load_data_ms": {
                 "p50": round(percentile(timings, 0.5), 1),
                 "p95": round(percentile(timings, 0.95), 1),

@@ -74,7 +74,7 @@ Se adopta la **opción C**:
 | Etapa | Contenido | Entregable |
 | --- | --- | --- |
 | Iniciativa actual (fases 5–8) | Cerrar operabilidad y rendimiento. La fase 5 prioriza la capa de datos (carga de catálogo, sincronización incremental por `write_date`, consultas) porque sirve a ambos POS; en la UI de Odoo sólo mejoras de bajo coste | Producto estable para pilotos |
-| Iniciativa 2 — VLUX API v1 | Autenticación de usuario/dispositivo sin `/web/login`; catálogo con sincronización incremental; clientes; listas de precios e impuestos; apertura y cierre de caja; envío de órdenes (envoltorio de `sync_from_ui`); inventario; OpenAPI y tests de contrato | Base para cualquier interfaz |
+| Iniciativa 2 — VLUX API v1 | Autenticación de usuario/dispositivo sin `/web/login`; catálogo con sincronización incremental (cursor `(write_date, id)`, bajas explícitas de productos archivados o retirados del POS, páginas acotadas; el POS de Odoo ya lo hace con `pos_last_server_date` + `filter_local_data` y sirve de referencia); clientes; listas de precios e impuestos; apertura y cierre de caja; envío de órdenes (envoltorio de `sync_from_ui`); inventario; OpenAPI y tests de contrato | Base para cualquier interfaz |
 | Iniciativa 3 — POS VLUX mínimo | Flujo minorista completo: escanear, carrito, cobro efectivo/tarjeta, ticket, cola offline con `uuid`. En paralelo al POS de Odoo en la tienda piloto | Primera caja propia sin riesgo |
 | Iniciativa 4 — Paridad y cambio | Devoluciones, descuentos, control de efectivo, impresoras y cajón, CFDI (cuando `vlux_facturacion` deje de ser simulación). POS VLUX por defecto; POS de Odoo como respaldo | Caja 100 % VLUX |
 | Posterior | Administración VLUX para las tareas del dueño | Odoo invisible para el cliente |

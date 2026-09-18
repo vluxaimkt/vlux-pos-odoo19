@@ -14,7 +14,7 @@ medir y cómo probar. La gestión del proyecto vive fuera de Git.
 | 2 | `vlux_pos_catalog`: alta rápida de productos desde el POS | Completa |
 | 3 | Scanner V2: push/batch de resultados, cola, idempotencia, cámara | Completa |
 | 4 | Owner V2: agregaciones en base de datos | Completa |
-| 5 | POS performance (imágenes, assets, búsqueda) | Pendiente |
+| 5 | POS performance: apertura, catálogo, compresión | Completa |
 | 6 | Observabilidad (`/vlux/ready`, doctor) | Pendiente |
 | 7 | Scale hardening (perfiles de capacidad, PostgreSQL) | Pendiente |
 | 8 | CI dividida (rápida / E2E / performance) y regresión completa | Pendiente |
@@ -223,6 +223,84 @@ Correcciones de comportamiento incluidas:
   visible (`document.hidden`), actualización inmediata al volver a primer
   plano si los datos tienen más de 10 s, y sin peticiones solapadas.
 
+## POS: apertura y catálogo (fase 5)
+
+Siguiendo [la decisión de arquitectura](ARQUITECTURA_HEADLESS.md), la fase se
+centró en la capa de datos y en mejoras de bajo coste; no se invirtió en la
+interfaz OWL del POS.
+
+### Cómo carga Odoo 19 el POS
+
+- **Primera apertura** (o tras cambiar la configuración de la caja):
+  `pos.session.load_data` envía catálogo, impuestos, métodos de pago, etc.
+  Los productos se limitan a `point_of_sale.limited_product_count` (5 000 por
+  defecto), priorizando favoritos, los de movimiento de stock reciente y los
+  modificados recientemente.
+- **Reaperturas**: el navegador guarda los datos en IndexedDB y sólo pide los
+  registros con `write_date` posterior a su última sincronización
+  (`pos_last_server_date`) más la lista de registros a retirar
+  (`filter_local_data`).
+- **Productos no cargados**: un código escaneado o una búsqueda que no está en
+  memoria se resuelve en el servidor (`load_product_from_pos`).
+
+### Dónde se va el tiempo y el tamaño (10k productos, 5 002 cargados)
+
+`tools/perf/pos_payload_breakdown.py`: el 97 % de los 6.06 MB son
+`product.template` (67 %) y `product.product` (30 %), repartidos en ~35 campos
+por fila sin ningún campo dominante. Los addons VLUX añaden ~100 bytes
+(`type_tax_use` en impuestos y un booleano de usuario).
+
+El perfil del servidor mostró que ~⅓ del tiempo de `load_data` era
+`_add_archived_combinations`: una llamada a `_get_attribute_exclusions` por
+cada plantilla, aunque no tenga atributos. Una plantilla sin
+`product.template.attribute.value` no puede tener exclusiones ni combinaciones
+archivadas, así que `vlux_pos_catalog` (`models/pos_load.py`) sólo calcula las
+plantillas con atributos y devuelve `[]` para el resto. El payload es idéntico
+byte a byte; `tests/test_pos_load.py` lo compara con la implementación estándar.
+
+### Compresión
+
+El payload JSON comprime al 6.5 % (6.06 MB → 393 KB con gzip). El Caddy de la
+nube ya usaba `encode zstd gzip`; el Caddyfile que genera la instalación
+Windows (`packaging/windows/service-host/Program.cs`) no comprimía y ahora sí,
+lo que importa en tablets y teléfonos por Wi-Fi.
+
+### Mediciones (Windows Server, PostgreSQL 16 local)
+
+| Escenario (10k productos) | Antes | Después |
+| --- | --- | --- |
+| Primera apertura, servidor (`load_data` p50) | 3 765 ms | **2 540 ms** (−33 %) |
+| Primera apertura, bytes por la red (Caddy) | 6.06 MB (Windows sin compresión) | 393 KB |
+| Reapertura con caché (`--incremental`) | 108 ms, 6 KB | 101 ms, 6 KB |
+| Código no cargado → servidor (`load_product_from_pos`) | — | 36 ms p50 |
+| Búsqueda en servidor (30 resultados) | — | 67 ms p50 |
+| Arranque → `/vlux/health` | 7.0 s, 151 MB | 5.6 s, 150 MB |
+
+"Antes" de la primera apertura es el código actual sin la optimización (misma
+base clonada); la base de referencia `506d671` da 3 689 ms, es decir, los addons
+VLUX no introducen regresión. Límite de productos precargados y coste de la
+primera apertura en servidor: 1 000 → 0.7 s (1.37 MB), 2 000 → 1.1 s (2.54 MB),
+5 000 → 2.5 s (6.06 MB). Se mantiene 5 000: menos productos precargados
+significa menos catálogo disponible sin conexión, y cada producto no precargado
+cuesta un viaje al servidor al escanearlo. Es un parámetro por instalación.
+
+### Descartado en esta fase
+
+- Medir el render del POS en navegador: es interfaz de Odoo que se sustituirá;
+  los 12 tours cubren la ausencia de regresiones funcionales.
+- Un servicio propio de sincronización de catálogo: Odoo ya lo resuelve para
+  su POS. El de la API v1 se diseñará con su autenticación (cursor
+  `(write_date, id)`, bajas explícitas y páginas acotadas; ver
+  [ARQUITECTURA_HEADLESS.md](ARQUITECTURA_HEADLESS.md)).
+
+### Tour de push estable
+
+`VluxScannerPushDeliveryTour` fallaba de forma intermitente (2 de 4 corridas):
+el teléfono simulado hacía polling a los 300 ms y, con el ACK del POS en
+~320 ms, a veces el polling llegaba antes que el push. No había pérdida de
+datos. El tour ahora usa el mismo retardo que el cliente real
+(`PUSH_SAFETY_NET_MS` = 3 s): 5 de 5 corridas en verde.
+
 ## Herramientas de rendimiento (`tools/perf`)
 
 Ver [`tools/perf/README.md`](../tools/perf/README.md). Datos siempre
@@ -303,7 +381,7 @@ $env:ODOO_BROWSER_BIN = "C:\Odoo\custom_addons\tools\dev\edge_devtools_wrapper.c
 
 Resultado actual en el entorno de desarrollo: 21 tests de catálogo, 21 de
 scanner (8 previos + 13 de protocolo), 9 unitarios Node, 12 tours de
-navegador y 14 de `vlux_owner` (4 previos + 10 del contrato del dashboard:
+navegador, 3 de carga del POS y 14 de `vlux_owner` (4 previos + 10 del contrato del dashboard:
 día local, comparación, bloques horarios, cajas, top, últimas ventas, stock
 bajo, multi-company, queries constantes y caché), todos en verde.
 
