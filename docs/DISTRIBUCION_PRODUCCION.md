@@ -23,7 +23,7 @@ Baseline fijo:
 | Odoo Community | `a2d73c5900d8886d115afe1ccb7f5c97c7e71a97` |
 | Python | `3.12.10` |
 | PostgreSQL | `16.x` compatible, baseline `16.14` |
-| VLUX Core | `19.0.1.0.0` |
+| VLUX Core | `19.0.1.1.0` |
 
 `vlux_facturacion` se mantiene para regresion CI en modo simulacion. No forma
 parte del perfil productivo por defecto y no habilita CFDI real.

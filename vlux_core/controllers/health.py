@@ -1,8 +1,11 @@
 import json
+import logging
 
 from odoo import http
 from odoo.exceptions import AccessError
 from odoo.http import Response, request
+
+_logger = logging.getLogger(__name__)
 
 
 class VluxCoreHealthController(http.Controller):
@@ -27,6 +30,29 @@ class VluxCoreHealthController(http.Controller):
     )
     def health(self, **kwargs):
         return self._json_response({"status": "ok"})
+
+    @http.route(
+        "/vlux/ready",
+        type="http",
+        auth="public",
+        methods=["GET"],
+        sitemap=False,
+        save_session=False,
+        readonly=True,
+    )
+    def ready(self, **kwargs):
+        """Readiness: 200 si la instancia puede vender, 503 si no.
+
+        ``/vlux/health`` sigue siendo el liveness que usan Docker, Caddy y el
+        service host de Windows; esta ruta es para balanceadores, monitoreo y
+        ``vlux-cloud doctor``.
+        """
+        try:
+            payload = request.env["vlux.core.system.info"].sudo().readiness()
+        except Exception:
+            _logger.exception("VLUX readiness falló")
+            payload = {"status": "not_ready", "checks": {"database": "error"}}
+        return self._json_response(payload, status=200 if payload["status"] == "ready" else 503)
 
     @http.route(
         "/vlux/system/info",

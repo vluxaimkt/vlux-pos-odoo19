@@ -46,12 +46,14 @@ class TestVluxCoreSystemInfo(TransactionCase):
             self.support_user
         ).get_safe_info()
 
-        self.assertEqual(info["vlux_core_version"], "19.0.1.0.0")
+        self.assertEqual(info["vlux_core_version"], "19.0.1.1.0")
         self.assertEqual(info["edition"], "local_core")
         self.assertIn("addons", info)
         self.assertNotIn("database", info)
         self.assertNotIn("paths", info)
         self.assertNotIn("password", str(info).lower())
+        self.assertIn(info["ready"]["status"], {"ready", "not_ready"})
+        self.assertIn("database", info["ready"]["checks"])
 
     def test_non_support_cannot_read_system_info(self):
         with self.assertRaises(AccessError):

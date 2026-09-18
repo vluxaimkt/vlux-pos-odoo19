@@ -38,7 +38,8 @@ repositorio oficial de Odoo y no se duplica en este repositorio.
 
 Centraliza metadatos y roles funcionales comunes de VLUX sin absorber la lógica
 de los demás addons. Publica `/vlux/health` con respuesta mínima
-`{"status": "ok"}` y `/vlux/system/info` para el rol `VLUX Support`, limitado a
+`{"status": "ok"}` (liveness), `/vlux/ready` (readiness: 200 si la instancia
+puede vender, 503 si no, sólo con códigos genéricos) y `/vlux/system/info` para el rol `VLUX Support`, limitado a
 versión, edición, compañía activa y addons VLUX instalados.
 
 Roles definidos:
