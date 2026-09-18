@@ -9,8 +9,16 @@ PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 PAIR_CODE_LENGTH = 8
 PAIR_CODE_TTL_MINUTES = 10
 MOBILE_TOKEN_TTL_HOURS = 8
-DEFAULT_COOLDOWN_MS = 1500
+# Server-side anti-bounce for the same barcode. 0 = disabled: the phone client
+# owns repeat detection (it can tell "still in frame" from "scanned again") and
+# network retries are idempotent through the client request_id.
+DEFAULT_COOLDOWN_MS = 0
 PAIRING_RETENTION_DAYS = 30
+# last_seen_at is informational (shown in the pairing dialog). Writing it on
+# every authenticated request turned each scan into an extra UPDATE; a
+# throttled write keeps the value fresh enough without the amplification.
+LAST_SEEN_THROTTLE_SECONDS = 60
+PUSH_CHANNEL_PREFIX = "vlux_mobile_scanner"
 
 
 class VluxMobileScannerPairing(models.Model):
@@ -41,6 +49,7 @@ class VluxMobileScannerPairing(models.Model):
     revoked_at = fields.Datetime(readonly=True)
     last_seen_at = fields.Datetime(readonly=True)
     cooldown_ms = fields.Integer(default=DEFAULT_COOLDOWN_MS, required=True)
+    push_channel = fields.Char(compute="_compute_push_channel")
 
     _pair_code_unique = models.Constraint(
         "unique (pair_code)",
@@ -50,6 +59,22 @@ class VluxMobileScannerPairing(models.Model):
         "unique (token_hash)",
         "El token movil debe ser unico.",
     )
+
+    @api.depends("token_hash")
+    def _compute_push_channel(self):
+        """Bus channel the phone subscribes to for push results.
+
+        Derived from the token hash (never from the raw token), so it can be
+        recomputed server-side without storing another secret and cannot be
+        reversed into the bearer token. It is only handed to the phone that
+        already holds the token.
+        """
+        for pairing in self:
+            if pairing.token_hash and pairing.state == "paired":
+                digest = hashlib.sha256(f"push:{pairing.token_hash}".encode("utf-8")).hexdigest()
+                pairing.push_channel = f"{PUSH_CHANNEL_PREFIX}:{digest[:40]}"
+            else:
+                pairing.push_channel = False
 
     @api.model
     def _new_pair_code(self):
@@ -129,8 +154,22 @@ class VluxMobileScannerPairing(models.Model):
         })
         return raw_token
 
+    def touch_last_seen(self, force=False):
+        """Refresh last_seen_at, at most once per LAST_SEEN_THROTTLE_SECONDS unless forced."""
+        self.ensure_one()
+        now = fields.Datetime.now()
+        if (
+            force
+            or not self.last_seen_at
+            or (now - self.last_seen_at).total_seconds() >= LAST_SEEN_THROTTLE_SECONDS
+        ):
+            self.sudo().write({"last_seen_at": now})
+            return True
+        return False
+
     @api.model
     def authenticate_mobile_token(self, raw_token):
+        """Resolve a bearer token to its paired record. Read-only on the hot path."""
         if not raw_token or len(raw_token) > 256:
             return self.browse()
         digest = self._hash_token(raw_token)
@@ -140,7 +179,7 @@ class VluxMobileScannerPairing(models.Model):
         pairing.refresh_state()
         if pairing.state != "paired":
             return self.browse()
-        pairing.sudo().write({"last_seen_at": fields.Datetime.now()})
+        pairing.touch_last_seen()
         return pairing
 
     @api.autovacuum

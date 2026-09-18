@@ -8,9 +8,10 @@
                 <meta name="theme-color" content="#101114"/>
                 <title>VLUX Mobile Scanner</title>
                 <link rel="stylesheet" href="/vlux_mobile_scanner/static/src/scanner/scanner.css"/>
+                <script defer="defer" src="/vlux_mobile_scanner/static/src/scanner/scanner_core.js"></script>
                 <script defer="defer" src="/vlux_mobile_scanner/static/src/scanner/scanner.js"></script>
             </head>
-            <body t-att-data-db="db_name" t-att-data-pair-code="pair_code">
+            <body t-att-data-db="db_name" t-att-data-pair-code="pair_code" t-att-data-push-version="push_version">
                 <main class="vlux-app">
                     <header class="vlux-header">
                         <div class="vlux-brand">
@@ -20,9 +21,12 @@
                                 <div class="vlux-subtitle">MOBILE SCANNER</div>
                             </div>
                         </div>
-                        <div id="connectionBadge" class="vlux-status is-offline">
-                            <span class="vlux-status-dot"></span>
-                            <span id="connectionText">Desconectado</span>
+                        <div class="vlux-status-group">
+                            <span id="transportBadge" class="vlux-transport"></span>
+                            <div id="connectionBadge" class="vlux-status is-offline">
+                                <span class="vlux-status-dot"></span>
+                                <span id="connectionText">Desconectado</span>
+                            </div>
                         </div>
                     </header>
 
@@ -57,12 +61,17 @@
                         </section>
 
                         <section class="vlux-card vlux-result-card">
-                            <div class="vlux-eyebrow">ULTIMO RESULTADO</div>
+                            <div class="vlux-result-head">
+                                <div class="vlux-eyebrow">ULTIMO RESULTADO</div>
+                                <span id="queueBadge" class="vlux-queue-badge is-hidden"></span>
+                            </div>
                             <div id="resultIcon" class="vlux-result-icon">—</div>
                             <h2 id="resultTitle">Esperando un codigo</h2>
                             <div id="resultCode" class="vlux-code"></div>
                             <div id="resultProduct" class="vlux-product"></div>
                             <div id="resultMessage" class="vlux-muted">Escanea un producto o introduce un codigo manualmente.</div>
+                            <button id="repeatButton" class="vlux-btn vlux-btn-secondary vlux-repeat is-hidden" type="button">+1 Repetir ultimo codigo</button>
+                            <ul id="historyList" class="vlux-history"></ul>
                         </section>
 
                         <section class="vlux-card">
