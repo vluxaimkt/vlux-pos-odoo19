@@ -49,9 +49,9 @@ TENANT_ROOT = "/srv/vlux-pos/tenants/tenant-a"
 DB = "vlux_tenant_a"
 
 
-def render_all(cli) -> dict[str, str]:
+def render_compose(cli, capacity_blocks: dict[str, str]) -> str:
     read_only_block = "    read_only: true\n    tmpfs:\n      - /tmp:size=512m,mode=1777\n"
-    compose_text = cli.render(
+    return cli.render(
         TEMPLATES / "tenant-compose.yaml.tmpl",
         {
             "__TENANT_ROOT__": TENANT_ROOT,
@@ -65,7 +65,14 @@ def render_all(cli) -> dict[str, str]:
             "__EDGE_NETWORK__": "vlux-edge",
             "__TENANT__": TENANT,
             "__READ_ONLY_BLOCK__": read_only_block,
+            **capacity_blocks,
         },
+    )
+
+
+def render_all(cli) -> dict[str, str]:
+    compose_text = render_compose(
+        cli, cli.capacity_compose_blocks(cli.resolve_capacity(cli.DEFAULT_PROFILE))
     )
     caddy_text = cli.render(
         TEMPLATES / "tenant.caddy.tmpl",
@@ -447,6 +454,11 @@ SAMPLE_ARGV = {
     "retention_command": ["retention", "tenant-a"],
     "doctor": ["doctor", "tenant-a"],
 }
+# Extra argv per handler: every handler must also accept these.
+PROFILE_ARGV = {
+    "provision": SAMPLE_ARGV["provision"] + ["--profile", "medium", "--workers", "3"],
+    "migration_import": SAMPLE_ARGV["migration_import"] + ["--profile", "large"],
+}
 
 
 def check_cli_surface(cli) -> None:
@@ -488,6 +500,12 @@ def check_cli_surface(cli) -> None:
                 hasattr(namespace, attr),
                 "CLI: " + handler + " reads args." + attr + " but " + argv[0] + " does not define it",
             )
+
+    for handler, argv in PROFILE_ARGV.items():
+        try:
+            parser.parse_args(argv)
+        except SystemExit:
+            FAILURES.append("CLI: cannot parse " + " ".join(argv) + " for " + handler)
 
     for command in ("host-init", "provision", "status", "health", "list",
                     "backup", "restore", "upgrade", "disable"):
@@ -669,6 +687,114 @@ def check_machine_json_contract() -> None:
     )
 
 
+def _service_block(compose_text: str, service_marker: str) -> str:
+    """Text of one compose service, from its key line to the next top-level service."""
+    start = compose_text.index(service_marker)
+    rest = compose_text[start + len(service_marker):]
+    ends = [rest.find("\n  " + TENANT), rest.find("\nnetworks:")]
+    end = min(pos for pos in ends if pos >= 0)
+    return rest[:end]
+
+
+def check_capacity_profiles(cli) -> None:
+    """Capacity profiles must fit PostgreSQL and render valid compose/odoo.conf."""
+    check(cli.DEFAULT_PROFILE in cli.CAPACITY_PROFILES, "CAPACITY: default profile must exist")
+    check(cli.LEGACY_PROFILE in cli.PROFILE_CHOICES, "CAPACITY: legacy must stay selectable")
+    previous_workers = 0
+    for name in ("small", "medium", "large"):
+        capacity = cli.resolve_capacity(name)
+        processes = capacity["workers"] + capacity["max_cron_threads"] + 1
+        check(
+            processes * capacity["db_maxconn"]
+            <= capacity["pg_max_connections"] - cli.PG_RESERVED_CONNECTIONS,
+            "CAPACITY: " + name + " db_maxconn x processes exceeds max_connections",
+        )
+        check(capacity["db_maxconn"] >= 4, "CAPACITY: " + name + " db_maxconn below 4")
+        check(
+            capacity["pg_shared_buffers_mb"] <= capacity["pg_memory_mb"] * 0.3,
+            "CAPACITY: " + name + " shared_buffers above 30 % of PostgreSQL memory",
+        )
+        check(
+            capacity["pg_effective_cache_size_mb"] <= capacity["pg_memory_mb"] * 0.8,
+            "CAPACITY: " + name + " effective_cache_size above 80 % of PostgreSQL memory",
+        )
+        check(
+            capacity["app_memory_mb"] >= capacity["limit_memory_hard_mb"] + 256 * processes,
+            "CAPACITY: " + name + " app memory cannot hold one worker at its hard limit",
+        )
+        check(
+            capacity["limit_memory_soft_mb"] < capacity["limit_memory_hard_mb"],
+            "CAPACITY: " + name + " soft memory limit must be below the hard limit",
+        )
+        check(capacity["workers"] > previous_workers, "CAPACITY: profiles must grow in workers")
+        previous_workers = capacity["workers"]
+
+        compose_text = render_compose(cli, cli.capacity_compose_blocks(capacity))
+        pg_block = _service_block(compose_text, "  " + TENANT + "-postgres:")
+        app_block = _service_block(compose_text, "  " + TENANT + "-app:")
+        check(
+            "    mem_limit: " + str(capacity["pg_memory_mb"]) + "m\n" in pg_block
+            and "    cpus: " in pg_block and "    shm_size: 256m\n" in pg_block,
+            "CAPACITY: " + name + " PostgreSQL limits missing from compose",
+        )
+        check(
+            "    mem_limit: " + str(capacity["app_memory_mb"]) + "m\n" in app_block
+            and "    cpus: " in app_block,
+            "CAPACITY: " + name + " app limits missing from compose",
+        )
+        settings = cli.postgres_settings(capacity)
+        check(
+            pg_block.count("      - -c\n") == len(settings)
+            and "      - max_connections=" + str(capacity["pg_max_connections"]) + "\n" in pg_block
+            and "    command:\n      - postgres\n" in pg_block,
+            "CAPACITY: " + name + " PostgreSQL command settings not rendered",
+        )
+        check("-c" not in app_block, "CAPACITY: PostgreSQL settings leaked into the app service")
+
+    legacy = cli.resolve_capacity(cli.LEGACY_PROFILE)
+    legacy_compose = render_compose(cli, cli.capacity_compose_blocks(legacy))
+    check(
+        "    mem_limit:" not in legacy_compose and "    command:" not in legacy_compose,
+        "CAPACITY: legacy tenants must keep unlimited containers and stock PostgreSQL",
+    )
+    check(legacy["db_maxconn"] == 24, "CAPACITY: legacy db_maxconn formula changed")
+
+    try:
+        cli.resolve_capacity("small", workers=32)
+        FAILURES.append("CAPACITY: 32 workers on the small profile must be refused")
+    except SystemExit:
+        pass
+    override = cli.resolve_capacity("medium", workers=3)
+    check(override["workers"] == 3 and override["profile"] == "medium", "CAPACITY: overrides must apply")
+
+    source = (CLOUD / "vlux_cloud.py").read_text(encoding="utf-8")
+    check(
+        'profile = LEGACY_PROFILE if existing else DEFAULT_PROFILE' in source,
+        "CAPACITY: existing tenants without a profile must stay legacy on re-provision",
+    )
+
+
+def check_offsite_prefix(cli) -> None:
+    """R2 keys: never tenants/tenants, whatever the operator's prefix."""
+    cases = {
+        "vlux-pos": "vlux-pos/tenants",
+        "/vlux-pos/": "vlux-pos/tenants",
+        "vlux-pos/tenants": "vlux-pos/tenants",
+        "vlux-pos/tenants/": "vlux-pos/tenants",
+        "tenants": "tenants",
+        "": "tenants",
+        "a/b": "a/b/tenants",
+    }
+    for prefix, expected in cases.items():
+        got = cli.offsite_tenants_root(prefix)
+        check(got == expected, "R2_PREFIX: prefix " + repr(prefix) + " gave " + got)
+    key = cli.offsite_object_key({"prefix": "vlux-pos/tenants"}, TENANT, Path("x.tar.gz"))
+    check(
+        key == "vlux-pos/tenants/" + TENANT + "/daily/x.tar.gz" and "tenants/tenants" not in key,
+        "R2_PREFIX: object key must not double tenants: " + key,
+    )
+
+
 def _doctor_raw(**overrides) -> dict:
     """Synthetic facts for a healthy tenant; overrides replace whole top-level keys."""
     raw = {
@@ -679,6 +805,7 @@ def _doctor_raw(**overrides) -> dict:
             "data_class": "DEMO",
             "image": {"reference": "repo/vlux-pos:tag", "digest": "sha256:" + "0" * 64, "odoo_commit": "a2d73c5"},
             "odoo": {"workers": 2, "max_cron_threads": 1},
+            "capacity": {"profile": "small"},
             "maintenance": False,
         },
         "containers": {"app": "healthy", "postgres": "healthy", "edge": "healthy"},
@@ -758,6 +885,8 @@ def check_doctor(cli) -> None:
 
     too_many = dict(_doctor_raw()["metadata"], odoo={"workers": 9, "max_cron_threads": 1})
     check(status_of("WORKERS", metadata=too_many) == "WARN", "DOCTOR: workers > 2*CPU+1 must WARN")
+    legacy = dict(_doctor_raw()["metadata"], capacity={"profile": "legacy"})
+    check(status_of("WORKERS", metadata=legacy) == "WARN", "DOCTOR: a legacy tenant must WARN (no profile)")
 
     pending = {"vlux_core": "installed", "vlux_mobile_scanner": "to upgrade", "vlux_owner": "installed"}
     check(status_of("ADDONS", modules=pending) == "FAIL", "DOCTOR: pending module upgrade must FAIL")
@@ -858,6 +987,8 @@ def main() -> int:
     check_tunnel(cli, rendered)
     check_machine_json_contract()
     check_doctor(cli)
+    check_capacity_profiles(cli)
+    check_offsite_prefix(cli)
     check_staging_secret_scans()
 
     if FAILURES:
@@ -874,6 +1005,8 @@ def main() -> int:
     print("CLOUDFLARE_TUNNEL_STATIC_CHECK=PASS")
     print("MACHINE_JSON_OUTPUT=PASS")
     print("DOCTOR_CONTRACT=PASS")
+    print("CAPACITY_PROFILES=PASS")
+    print("R2_PREFIX=PASS")
     print("INVENTORY_E2E_STATIC_CHECK=PASS")
     print("CLOUDFLARE_TOKEN_LEAK_SCAN=PASS")
     print("R2_SECRET_LEAK_SCAN=PASS")

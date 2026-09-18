@@ -82,6 +82,13 @@ and confirms it is gone. It reports `R2_WRITE`, `R2_READ`, `R2_INTEGRITY` and
 
 Nothing is written to the bucket root.
 
+If the configured prefix already ends in `tenants` (for example
+`--prefix vlux-pos/tenants`), it is not appended again: keys are
+`vlux-pos/tenants/<tenant>/...`, never `vlux-pos/tenants/tenants/...`. Older
+uploads made under the doubled path are not moved or deleted: each backup
+records its exact object key (`backup.offsite_last_object` in `tenant.json`
+and the backup record), and `restore --from-s3` takes that key as is.
+
 ## What a backup contains
 
 | Included | Excluded |

@@ -110,7 +110,7 @@ sudo vlux-cloud provision braille \
   --edition cloud_managed \
   --tls-mode public \
   --image ghcr.io/vluxaimkt/vlux-pos@sha256:<digest> \
-  --workers 2 --max-cron-threads 1
+  --profile small
 ```
 
 Validates the slug and domain, runs the DNS preflight, creates the directories,
@@ -140,11 +140,41 @@ a DNS preflight first: if the domain does not resolve, provisioning stops rather
 than claiming an HTTPS pass. `--tls-mode internal` exists for CI and lab work
 only and must never be used for a customer domain.
 
+### Capacity profiles
+
+Each tenant gets a capacity profile that sizes Odoo, PostgreSQL and the
+containers together:
+
+| Profile | For | Odoo workers / cron | Worker memory soft / hard | App container | PostgreSQL container | `max_connections` | `db_maxconn` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `small` (default) | 1-2 registers | 2 / 1 | 640 / 1024 MB | 2 GB, 1 CPU | 1 GB, 1 CPU | 40 | 8 |
+| `medium` | 3-6 registers | 4 / 1 | 768 / 1280 MB | 4 GB, 2 CPU | 2 GB, 1.5 CPU | 60 | 9 |
+| `large` | 7-15 registers | 8 / 2 | 768 / 1536 MB | 8 GB, 4 CPU | 4 GB, 2 CPU | 120 | 10 |
+
+- PostgreSQL gets `shared_buffers` ~25 % and `effective_cache_size` ~75 % of
+  its container memory, plus `work_mem`, `maintenance_work_mem`,
+  `checkpoint_completion_target=0.9`, `wal_buffers=16MB`,
+  `random_page_cost=1.1` and `effective_io_concurrency=200` (SSD), passed as
+  `postgres -c ...` in the compose file.
+- `db_maxconn` is per Odoo process, so it is derived:
+  `(workers + cron + gevent) x db_maxconn <= max_connections - 5` (the 5 are
+  kept for backups, `doctor` and `psql`).
+- `--workers`, `--max-cron-threads` and `--limit-memory-*-mb` still override
+  the profile; a combination that would exhaust the profile's connections is
+  refused ("raise the profile instead").
+- Provisioning warns (never blocks) when the memory reserved by all tenants'
+  profiles exceeds the host's RAM.
+- **Existing tenants** provisioned before profiles existed are reported as
+  `legacy`: re-running `provision` keeps their previous behaviour (no container
+  limits, stock PostgreSQL settings) until an operator passes `--profile`.
+  Changing profile re-renders the compose file and restarts PostgreSQL and
+  Odoo, so do it in a maintenance window. `doctor` flags `legacy` tenants with
+  a `WORKERS` warning.
+
 ### Workers and websockets
 
-Odoo runs multiprocess. `workers` and `max_cron_threads` are per tenant
-(defaults 2 and 1 - suitable for a small tenant, not a hard-coded 8).
-`proxy_mode = True` is always set because the app only ever sees traffic from
+Odoo runs multiprocess. `workers` and `max_cron_threads` come from the tenant's
+capacity profile (see above). `proxy_mode = True` is always set because the app only ever sees traffic from
 the edge. The bus runs on the gevent port 8072, and the edge routes
 `/websocket*` to `<tenant>-app:8072` while everything else goes to
 `<tenant>-app:8069`.

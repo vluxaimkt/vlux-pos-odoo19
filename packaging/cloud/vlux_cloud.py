@@ -115,6 +115,52 @@ DB_PORT = 5432
 DEFAULT_WORKERS = 2
 DEFAULT_MAX_CRON_THREADS = 1
 
+# Capacity profiles for one tenant (one store). Sizing follows Odoo's prefork
+# guidance (about 6 concurrent POS/back-office users per worker, a few hundred
+# MB per worker on average) and PostgreSQL's usual ratios (shared_buffers ~25 %
+# and effective_cache_size ~75 % of the memory given to the database).
+#
+# db_maxconn is per Odoo process, so it is derived from max_connections:
+# (workers + cron threads + the gevent process) * db_maxconn stays below
+# max_connections minus PG_RESERVED_CONNECTIONS (backups, doctor, psql).
+#
+# "legacy" is what tenants provisioned before profiles existed get until an
+# operator picks a profile: no container limits, stock PostgreSQL settings and
+# the historical db_maxconn formula. Re-provisioning never changes it silently.
+PG_RESERVED_CONNECTIONS = 5
+CAPACITY_PROFILES = {
+    "small": {
+        "description": "1-2 registers",
+        "workers": 2, "max_cron_threads": 1,
+        "app_memory_mb": 2048, "app_cpus": 1.0,
+        "limit_memory_soft_mb": 640, "limit_memory_hard_mb": 1024,
+        "pg_memory_mb": 1024, "pg_cpus": 1.0, "pg_max_connections": 40,
+        "pg_shared_buffers_mb": 256, "pg_effective_cache_size_mb": 768,
+        "pg_work_mem_mb": 4, "pg_maintenance_work_mem_mb": 64,
+    },
+    "medium": {
+        "description": "3-6 registers",
+        "workers": 4, "max_cron_threads": 1,
+        "app_memory_mb": 4096, "app_cpus": 2.0,
+        "limit_memory_soft_mb": 768, "limit_memory_hard_mb": 1280,
+        "pg_memory_mb": 2048, "pg_cpus": 1.5, "pg_max_connections": 60,
+        "pg_shared_buffers_mb": 512, "pg_effective_cache_size_mb": 1536,
+        "pg_work_mem_mb": 8, "pg_maintenance_work_mem_mb": 128,
+    },
+    "large": {
+        "description": "7-15 registers",
+        "workers": 8, "max_cron_threads": 2,
+        "app_memory_mb": 8192, "app_cpus": 4.0,
+        "limit_memory_soft_mb": 768, "limit_memory_hard_mb": 1536,
+        "pg_memory_mb": 4096, "pg_cpus": 2.0, "pg_max_connections": 120,
+        "pg_shared_buffers_mb": 1024, "pg_effective_cache_size_mb": 3072,
+        "pg_work_mem_mb": 16, "pg_maintenance_work_mem_mb": 256,
+    },
+}
+LEGACY_PROFILE = "legacy"
+DEFAULT_PROFILE = "small"
+PROFILE_CHOICES = tuple(CAPACITY_PROFILES) + (LEGACY_PROFILE,)
+
 PRODUCTIVE_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner")
 OWNER_GROUP_XMLID = "vlux_core.group_vlux_owner"
 
@@ -1182,16 +1228,131 @@ def tenant_env_file(
     )
 
 
+def resolve_capacity(
+    profile: str,
+    *,
+    workers: int | None = None,
+    max_cron_threads: int | None = None,
+    memory_soft_mb: int | None = None,
+    memory_hard_mb: int | None = None,
+) -> dict:
+    """Effective capacity settings: the profile plus explicit operator overrides."""
+    if profile not in PROFILE_CHOICES:
+        fail("Unknown capacity profile: " + str(profile))
+    if profile == LEGACY_PROFILE:
+        base = {
+            "workers": DEFAULT_WORKERS, "max_cron_threads": DEFAULT_MAX_CRON_THREADS,
+            "limit_memory_soft_mb": 2048, "limit_memory_hard_mb": 2560,
+        }
+    else:
+        base = dict(CAPACITY_PROFILES[profile])
+        base.pop("description")
+    for key, value in (
+        ("workers", workers),
+        ("max_cron_threads", max_cron_threads),
+        ("limit_memory_soft_mb", memory_soft_mb),
+        ("limit_memory_hard_mb", memory_hard_mb),
+    ):
+        if value is not None:
+            base[key] = value
+    if base["workers"] < 0 or base["workers"] > 32:
+        fail("--workers must be between 0 and 32")
+    if base["max_cron_threads"] < 0 or base["max_cron_threads"] > 8:
+        fail("--max-cron-threads must be between 0 and 8")
+    if base["limit_memory_soft_mb"] > base["limit_memory_hard_mb"]:
+        fail("--limit-memory-soft-mb must not exceed --limit-memory-hard-mb")
+
+    processes = base["workers"] + base["max_cron_threads"] + 1
+    if profile == LEGACY_PROFILE:
+        base["db_maxconn"] = max(16, (base["workers"] + base["max_cron_threads"]) * 8)
+    else:
+        budget = base["pg_max_connections"] - PG_RESERVED_CONNECTIONS
+        base["db_maxconn"] = min(32, budget // processes)
+        if base["db_maxconn"] < 4:
+            fail(
+                "Profile " + profile + " cannot serve " + str(base["workers"]) + " workers: "
+                "raise the profile instead of overriding --workers."
+            )
+    base["profile"] = profile
+    return base
+
+
+def _compose_limits(memory_mb: int, cpus: float, indent: str = "    ") -> str:
+    return indent + "mem_limit: " + str(memory_mb) + "m\n" + indent + "cpus: " + repr(float(cpus)) + "\n"
+
+
+def postgres_settings(capacity: dict) -> list[str]:
+    """PostgreSQL -c settings for a profile ([] for legacy: stock settings)."""
+    if capacity["profile"] == LEGACY_PROFILE:
+        return []
+    return [
+        "max_connections=" + str(capacity["pg_max_connections"]),
+        "shared_buffers=" + str(capacity["pg_shared_buffers_mb"]) + "MB",
+        "effective_cache_size=" + str(capacity["pg_effective_cache_size_mb"]) + "MB",
+        "work_mem=" + str(capacity["pg_work_mem_mb"]) + "MB",
+        "maintenance_work_mem=" + str(capacity["pg_maintenance_work_mem_mb"]) + "MB",
+        "checkpoint_completion_target=0.9",
+        "wal_buffers=16MB",
+        "random_page_cost=1.1",
+        "effective_io_concurrency=200",
+    ]
+
+
+def capacity_compose_blocks(capacity: dict) -> dict[str, str]:
+    """Template blocks for the tenant compose file (empty for legacy)."""
+    if capacity["profile"] == LEGACY_PROFILE:
+        return {"__PG_CAPACITY_BLOCK__": "", "__APP_CAPACITY_BLOCK__": ""}
+    command = "    command:\n      - postgres\n" + "".join(
+        "      - -c\n      - " + setting + "\n" for setting in postgres_settings(capacity)
+    )
+    pg_block = (
+        _compose_limits(capacity["pg_memory_mb"], capacity["pg_cpus"])
+        + "    shm_size: 256m\n"
+        + command
+    )
+    return {
+        "__PG_CAPACITY_BLOCK__": pg_block,
+        "__APP_CAPACITY_BLOCK__": _compose_limits(capacity["app_memory_mb"], capacity["app_cpus"]),
+    }
+
+
+def capacity_metadata(capacity: dict) -> dict:
+    keys = (
+        "profile", "workers", "max_cron_threads", "db_maxconn",
+        "limit_memory_soft_mb", "limit_memory_hard_mb",
+        "app_memory_mb", "app_cpus", "pg_memory_mb", "pg_cpus", "pg_max_connections",
+    )
+    return {key: capacity[key] for key in keys if key in capacity}
+
+
+def host_capacity_warning(layout: "Layout", tenant: str, capacity: dict) -> str | None:
+    """Warn when the memory reserved by all tenant profiles exceeds the host."""
+    host_memory = _host_memory_bytes()
+    if not host_memory:
+        return None
+    reserved_mb = 0
+    for name in layout.known_tenants():
+        if name == tenant:
+            continue
+        other = read_json(layout.tenant(name).metadata).get("capacity", {})
+        reserved_mb += int(other.get("app_memory_mb") or 0) + int(other.get("pg_memory_mb") or 0)
+    reserved_mb += int(capacity.get("app_memory_mb") or 0) + int(capacity.get("pg_memory_mb") or 0)
+    host_mb = host_memory // (1024 * 1024)
+    if reserved_mb > host_mb:
+        return (
+            "Tenant profiles reserve " + str(reserved_mb) + " MB but the host has "
+            + str(host_mb) + " MB: containers may be OOM-killed under load."
+        )
+    return None
+
+
 def render_tenant_files(
     paths: TenantPaths,
     *,
     db_name: str,
     db_user: str,
     db_host: str,
-    workers: int,
-    max_cron_threads: int,
-    memory_soft_mb: int,
-    memory_hard_mb: int,
+    capacity: dict,
     readonly_rootfs: bool,
 ) -> None:
     read_only_block = ""
@@ -1201,6 +1362,7 @@ def render_tenant_files(
             "    tmpfs:\n"
             "      - /tmp:size=512m,mode=1777\n"
         )
+    blocks = capacity_compose_blocks(capacity)
     write_file(
         paths.compose,
         render(
@@ -1217,12 +1379,12 @@ def render_tenant_files(
                 "__EDGE_NETWORK__": paths.layout.edge_network,
                 "__TENANT__": paths.name,
                 "__READ_ONLY_BLOCK__": read_only_block,
+                **blocks,
             },
         ),
         0o640,
     )
 
-    db_maxconn = max(16, (workers + max_cron_threads) * 8)
     write_file(
         paths.odoo_conf,
         render(
@@ -1234,13 +1396,13 @@ def render_tenant_files(
                 "__DB_USER__": db_user,
                 "__VLUX_DB_PASSWORD__": paths.secret("db_password"),
                 "__DB_NAME__": db_name,
-                "__DB_MAXCONN__": str(db_maxconn),
+                "__DB_MAXCONN__": str(capacity["db_maxconn"]),
                 "__HTTP_PORT__": str(HTTP_PORT),
                 "__GEVENT_PORT__": str(GEVENT_PORT),
-                "__WORKERS__": str(workers),
-                "__MAX_CRON_THREADS__": str(max_cron_threads),
-                "__LIMIT_MEMORY_SOFT__": str(memory_soft_mb * 1024 * 1024),
-                "__LIMIT_MEMORY_HARD__": str(memory_hard_mb * 1024 * 1024),
+                "__WORKERS__": str(capacity["workers"]),
+                "__MAX_CRON_THREADS__": str(capacity["max_cron_threads"]),
+                "__LIMIT_MEMORY_SOFT__": str(capacity["limit_memory_soft_mb"] * 1024 * 1024),
+                "__LIMIT_MEMORY_HARD__": str(capacity["limit_memory_hard_mb"] * 1024 * 1024),
             },
         ),
         0o640,
@@ -1347,16 +1509,36 @@ def provision(args: argparse.Namespace) -> int:
     db_host = args.db_host or existing.get("database", {}).get("host") or "postgres"
     app_image = args.image or existing.get("image", {}).get("reference") or DEFAULT_APP_IMAGE
     postgres_image = args.postgres_image or POSTGRES_IMAGE
-    workers = args.workers if args.workers is not None else existing.get("odoo", {}).get("workers", DEFAULT_WORKERS)
-    max_cron = (
-        args.max_cron_threads
-        if args.max_cron_threads is not None
-        else existing.get("odoo", {}).get("max_cron_threads", DEFAULT_MAX_CRON_THREADS)
+    # New tenants get DEFAULT_PROFILE; tenants created before profiles existed
+    # stay "legacy" (their current behaviour) until --profile is passed.
+    previous_capacity = existing.get("capacity", {})
+    if args.profile:
+        profile = args.profile
+    elif previous_capacity.get("profile"):
+        profile = previous_capacity["profile"]
+    else:
+        profile = LEGACY_PROFILE if existing else DEFAULT_PROFILE
+    keep_overrides = not args.profile and profile == previous_capacity.get("profile")
+    capacity = resolve_capacity(
+        profile,
+        workers=args.workers if args.workers is not None else (
+            existing.get("odoo", {}).get("workers") if keep_overrides or profile == LEGACY_PROFILE else None
+        ),
+        max_cron_threads=args.max_cron_threads if args.max_cron_threads is not None else (
+            existing.get("odoo", {}).get("max_cron_threads") if keep_overrides or profile == LEGACY_PROFILE else None
+        ),
+        memory_soft_mb=args.limit_memory_soft_mb if args.limit_memory_soft_mb is not None else (
+            previous_capacity.get("limit_memory_soft_mb") if keep_overrides else None
+        ),
+        memory_hard_mb=args.limit_memory_hard_mb if args.limit_memory_hard_mb is not None else (
+            previous_capacity.get("limit_memory_hard_mb") if keep_overrides else None
+        ),
     )
-    if workers < 0 or workers > 32:
-        fail("--workers must be between 0 and 32")
-    if max_cron < 0 or max_cron > 8:
-        fail("--max-cron-threads must be between 0 and 8")
+    workers = capacity["workers"]
+    max_cron = capacity["max_cron_threads"]
+    capacity_warning = host_capacity_warning(layout, tenant, capacity)
+    if capacity_warning:
+        info("WARNING: " + capacity_warning)
 
     tenant_env_file(paths, db_name, db_user, app_image, postgres_image)
     render_tenant_files(
@@ -1364,10 +1546,7 @@ def provision(args: argparse.Namespace) -> int:
         db_name=db_name,
         db_user=db_user,
         db_host=db_host,
-        workers=workers,
-        max_cron_threads=max_cron,
-        memory_soft_mb=args.limit_memory_soft_mb,
-        memory_hard_mb=args.limit_memory_hard_mb,
+        capacity=capacity,
         readonly_rootfs=not args.no_readonly_rootfs,
     )
 
@@ -1446,6 +1625,7 @@ def provision(args: argparse.Namespace) -> int:
             "odoo_commit": ODOO_COMMIT,
             "python_version": PYTHON_VERSION,
         },
+        "capacity": capacity_metadata(capacity),
         "odoo": {
             "workers": workers,
             "max_cron_threads": max_cron,
@@ -1491,6 +1671,8 @@ def provision(args: argparse.Namespace) -> int:
         "private_network": paths.private_network,
         "workers": workers,
         "max_cron_threads": max_cron,
+        "capacity_profile": capacity["profile"],
+        "capacity_warning": capacity_warning,
         "image": app_image,
         "image_digest": metadata["image"]["digest"],
         "owner_email": owner_email,
@@ -1663,6 +1845,7 @@ def status(args: argparse.Namespace) -> int:
                 "odoo_commit": metadata.get("image", {}).get("odoo_commit"),
                 "odoo": health_report["app_container"],
                 "odoo_workers": metadata.get("odoo", {}).get("workers"),
+                "capacity_profile": metadata.get("capacity", {}).get("profile", LEGACY_PROFILE),
                 "postgresql": health_report["postgres_container"],
                 "postgres_image": metadata.get("image", {}).get("postgres"),
                 "postgres_public_exposure": "NONE",
@@ -1902,11 +2085,25 @@ def _s3_request(
         return 0, {}, str(exc).encode("utf-8")
 
 
+def offsite_tenants_root(prefix: str) -> str:
+    """``<prefix>/tenants``, without doubling it when the prefix already ends in ``tenants``.
+
+    Operators sometimes configure ``--prefix vlux-pos/tenants``; appending
+    ``tenants`` again produced ``vlux-pos/tenants/tenants/<tenant>/...``. Only
+    new uploads change: every upload records its exact object key
+    (``backup.offsite_last_object`` and the backup record) and restores use that
+    key, so objects already stored under the doubled path stay restorable and
+    nothing is moved or deleted.
+    """
+    parts = [part for part in str(prefix or "").strip("/").split("/") if part]
+    if parts and parts[-1] == "tenants":
+        return "/".join(parts)
+    return "/".join(parts + ["tenants"])
+
+
 def offsite_object_key(config: dict, tenant: str, archive: Path, tier: str = "daily") -> str:
-    """tenants/<tenant>/<tier>/<archive> under the configured prefix."""
-    return "/".join(
-        [str(config["prefix"]).strip("/"), "tenants", tenant, tier, archive.name]
-    )
+    """<prefix>/tenants/<tenant>/<tier>/<archive>."""
+    return "/".join([offsite_tenants_root(config["prefix"]), tenant, tier, archive.name])
 
 
 def offsite_upload(
@@ -3428,11 +3625,15 @@ def migration_import(args: argparse.Namespace) -> int:
         db_user = db_identifier(paths.name)
         app_image = args.image or DEFAULT_APP_IMAGE
         postgres_image = args.postgres_image or POSTGRES_IMAGE
-        workers = args.workers if args.workers is not None else DEFAULT_WORKERS
-        max_cron = (
-            args.max_cron_threads if args.max_cron_threads is not None
-            else DEFAULT_MAX_CRON_THREADS
+        capacity = resolve_capacity(
+            args.profile or DEFAULT_PROFILE,
+            workers=args.workers,
+            max_cron_threads=args.max_cron_threads,
+            memory_soft_mb=args.limit_memory_soft_mb,
+            memory_hard_mb=args.limit_memory_hard_mb,
         )
+        workers = capacity["workers"]
+        max_cron = capacity["max_cron_threads"]
 
         tenant_env_file(paths, db_name, db_user, app_image, postgres_image)
         render_tenant_files(
@@ -3440,10 +3641,7 @@ def migration_import(args: argparse.Namespace) -> int:
             db_name=db_name,
             db_user=db_user,
             db_host=args.db_host or "postgres",
-            workers=workers,
-            max_cron_threads=max_cron,
-            memory_soft_mb=args.limit_memory_soft_mb,
-            memory_hard_mb=args.limit_memory_hard_mb,
+            capacity=capacity,
             readonly_rootfs=not args.no_readonly_rootfs,
         )
 
@@ -3531,6 +3729,7 @@ def migration_import(args: argparse.Namespace) -> int:
                 "odoo_commit": ODOO_COMMIT,
                 "python_version": PYTHON_VERSION,
             },
+            "capacity": capacity_metadata(capacity),
             "odoo": {
                 "workers": workers,
                 "max_cron_threads": max_cron,
@@ -3807,6 +4006,7 @@ def doctor_collect(layout: Layout, paths: TenantPaths) -> dict:
                 key: metadata.get("odoo", {}).get(key)
                 for key in ("workers", "max_cron_threads")
             },
+            "capacity": metadata.get("capacity", {"profile": LEGACY_PROFILE}),
             "maintenance": bool(metadata.get("maintenance", {}).get("enabled")),
         },
         "containers": {
@@ -3944,8 +4144,12 @@ def doctor_evaluate(raw: dict) -> dict:
         workers_status = "WARN"
     else:
         workers_status = "OK"
+    profile = (meta.get("capacity") or {}).get("profile", LEGACY_PROFILE)
+    if profile == LEGACY_PROFILE and workers_status == "OK":
+        workers_status = "WARN"
     sections["WORKERS"] = _section(
-        workers_status, workers=workers, max_cron_threads=meta["odoo"].get("max_cron_threads"),
+        workers_status, profile=profile, workers=workers,
+        max_cron_threads=meta["odoo"].get("max_cron_threads"),
         host_cpus=cpus, host_memory_bytes=raw["host"]["memory_bytes"],
         recommended_max_workers=recommended_max,
     )
@@ -4020,10 +4224,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--postgres-image", default=None)
     p.add_argument("--db-host", default=None, help="Point at managed PostgreSQL instead of the tenant container.")
     p.add_argument("--company-name", default=None)
-    p.add_argument("--workers", type=int, default=None)
+    p.add_argument(
+        "--profile", choices=PROFILE_CHOICES, default=None,
+        help="Capacity profile (small, medium, large). New tenants default to "
+        + DEFAULT_PROFILE + "; existing tenants keep theirs (legacy if none).",
+    )
+    p.add_argument("--workers", type=int, default=None, help="Override the profile's worker count.")
     p.add_argument("--max-cron-threads", type=int, default=None)
-    p.add_argument("--limit-memory-soft-mb", type=int, default=2048)
-    p.add_argument("--limit-memory-hard-mb", type=int, default=2560)
+    p.add_argument("--limit-memory-soft-mb", type=int, default=None)
+    p.add_argument("--limit-memory-hard-mb", type=int, default=None)
     p.add_argument("--no-readonly-rootfs", action="store_true")
     p.add_argument("--skip-dns-check", action="store_true")
     p.add_argument("--pull", action="store_true")
@@ -4157,10 +4366,12 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--postgres-image", default=None)
     q.add_argument("--db-host", default=None)
     q.add_argument("--tls-mode", choices=TLS_MODES, default="public")
+    q.add_argument("--profile", choices=PROFILE_CHOICES, default=None,
+                   help="Capacity profile for the adopted tenant (default " + DEFAULT_PROFILE + ").")
     q.add_argument("--workers", type=int, default=None)
     q.add_argument("--max-cron-threads", type=int, default=None)
-    q.add_argument("--limit-memory-soft-mb", type=int, default=2048)
-    q.add_argument("--limit-memory-hard-mb", type=int, default=2560)
+    q.add_argument("--limit-memory-soft-mb", type=int, default=None)
+    q.add_argument("--limit-memory-hard-mb", type=int, default=None)
     q.add_argument("--no-readonly-rootfs", action="store_true")
     q.add_argument("--allow-incompatible", action="store_true")
     q.add_argument("--workdir", default=None)

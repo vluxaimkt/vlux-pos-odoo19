@@ -7,6 +7,10 @@
 #   * The app joins the tenant private network (to reach PostgreSQL) and the
 #     shared edge network under the unique alias __APP_ALIAS__.
 #   * Neither service maps a host port. Only VLUX EDGE binds 80/443.
+#
+# Capacity: the PostgreSQL and app capacity blocks carry mem_limit, cpus
+# and the PostgreSQL -c settings of the tenant's capacity profile (empty for
+# "legacy" tenants provisioned before profiles existed).
 
 name: __PROJECT__
 
@@ -21,7 +25,7 @@ services:
       POSTGRES_USER: ${VLUX_DB_USER}
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       PGDATA: /var/lib/postgresql/data/pgdata
-    volumes:
+__PG_CAPACITY_BLOCK__    volumes:
       - __TENANT_ROOT__/postgres:/var/lib/postgresql/data
     secrets:
       - db_password
@@ -66,7 +70,7 @@ services:
       - __TENANT_ROOT__/config:/etc/vlux-pos:ro
       - __TENANT_ROOT__/filestore:/var/lib/vlux-pos
       - __TENANT_ROOT__/logs:/var/log/vlux-pos
-__READ_ONLY_BLOCK__    networks:
+__READ_ONLY_BLOCK____APP_CAPACITY_BLOCK__    networks:
       tenant_private:
         aliases:
           - app
