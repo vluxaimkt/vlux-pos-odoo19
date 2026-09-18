@@ -22,6 +22,10 @@ Navegador POS / Teléfono / Dashboard
               Filestore
 ```
 
+La dirección a largo plazo (Odoo como motor de negocio detrás de una API
+VLUX versionada, con interfaces propias) está en
+[ARQUITECTURA_HEADLESS.md](ARQUITECTURA_HEADLESS.md).
+
 ## Componentes
 
 ### Odoo core
