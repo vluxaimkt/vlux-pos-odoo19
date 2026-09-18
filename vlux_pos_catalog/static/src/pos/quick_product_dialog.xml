@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+    <t t-name="vlux_pos_catalog.QuickProductDialog">
+        <Dialog title="'Registrar producto'" size="'md'" contentClass="'vlux-catalog-dialog'">
+            <div class="vlux-catalog-form" t-on-keydown="onKeydown">
+                <div class="vlux-catalog-notfound">
+                    <div class="vlux-catalog-eyebrow">Producto no encontrado</div>
+                    <div class="vlux-catalog-barcode">Codigo: <strong t-esc="state.barcode"/></div>
+                </div>
+
+                <div t-if="state.error" class="alert alert-warning py-2 mb-2" role="alert">
+                    <div t-esc="state.error"/>
+                    <div t-if="state.existing" class="mt-2 d-flex align-items-center gap-2 flex-wrap">
+                        <span><t t-esc="state.existing.name"/>
+                            <t t-if="!state.existing.active"> (archivado)</t>
+                            <t t-elif="!state.existing.available_in_pos"> (no disponible en POS)</t>
+                        </span>
+                        <button type="button" class="btn btn-sm btn-primary vlux-catalog-use-existing" t-on-click="useExisting" t-att-disabled="state.saving">
+                            Usar este producto
+                        </button>
+                    </div>
+                </div>
+
+                <div class="row g-2">
+                    <div class="col-12 col-md-6">
+                        <label class="form-label mb-1" for="vluxCatalogBarcode">Codigo de barras *</label>
+                        <input id="vluxCatalogBarcode" class="form-control vlux-catalog-input-barcode" type="text" inputmode="text" autocomplete="off" spellcheck="false" maxlength="64" t-model="state.barcode"/>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label mb-1" for="vluxCatalogPrice">Precio de venta *</label>
+                        <div class="input-group">
+                            <span class="input-group-text" t-esc="currencySymbol"/>
+                            <input id="vluxCatalogPrice" class="form-control vlux-catalog-input-price" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" t-model="state.list_price"/>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label mb-1" for="vluxCatalogName">Nombre *</label>
+                        <input id="vluxCatalogName" t-ref="nameInput" class="form-control form-control-lg vlux-catalog-input-name" type="text" autocomplete="off" maxlength="256" placeholder="Ej. Refresco cola 600 ml" t-model="state.name"/>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label mb-1" for="vluxCatalogPosCateg">Categoria POS</label>
+                        <select id="vluxCatalogPosCateg" class="form-select vlux-catalog-input-pos-categ" t-model="state.pos_categ_id">
+                            <option value="">Sin categoria</option>
+                            <t t-foreach="posCategories" t-as="categ" t-key="categ.id">
+                                <option t-att-value="categ.id" t-esc="categ.name"/>
+                            </t>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label mb-1" for="vluxCatalogCateg">Categoria de producto</label>
+                        <select id="vluxCatalogCateg" class="form-select vlux-catalog-input-categ" t-model="state.categ_id">
+                            <option value="">Por defecto</option>
+                            <t t-foreach="productCategories" t-as="categ" t-key="categ.id">
+                                <option t-att-value="categ.id" t-esc="categ.name"/>
+                            </t>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label mb-1" for="vluxCatalogRef">Referencia interna</label>
+                        <input id="vluxCatalogRef" class="form-control vlux-catalog-input-ref" type="text" autocomplete="off" maxlength="64" t-model="state.default_code"/>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label mb-1">Impuestos</label>
+                        <div class="d-flex flex-wrap gap-1 vlux-catalog-taxes">
+                            <t t-if="!saleTaxes.length"><span class="text-muted small">Sin impuestos configurados</span></t>
+                            <t t-foreach="saleTaxes" t-as="tax" t-key="tax.id">
+                                <button type="button" class="btn btn-sm" t-att-class="isTaxSelected(tax.id) ? 'btn-primary' : 'btn-outline-secondary'" t-on-click="() => this.toggleTax(tax.id)" t-esc="tax.name"/>
+                            </t>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="form-check mt-2">
+                            <input id="vluxCatalogStorable" class="form-check-input vlux-catalog-input-storable" type="checkbox" t-model="state.is_storable"/>
+                            <label class="form-check-label" for="vluxCatalogStorable">Controlar inventario</label>
+                        </div>
+                    </div>
+                    <div class="col-6" t-if="state.is_storable">
+                        <label class="form-label mb-1" for="vluxCatalogQty">Stock inicial</label>
+                        <input id="vluxCatalogQty" class="form-control vlux-catalog-input-qty" type="text" inputmode="numeric" autocomplete="off" placeholder="0" t-model="state.initial_qty"/>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label mb-1">Foto (opcional)</label>
+                        <div class="d-flex align-items-center gap-3 flex-wrap vlux-catalog-photo">
+                            <div class="vlux-catalog-photo-preview">
+                                <img t-if="state.imageDataUrl" t-att-src="state.imageDataUrl" alt="Vista previa"/>
+                                <span t-else="" class="text-muted"><i class="fa fa-camera"/></span>
+                            </div>
+                            <div class="d-flex flex-column gap-1">
+                                <button type="button" class="btn btn-secondary vlux-catalog-photo-button" t-on-click="openImagePicker">
+                                    <i class="fa fa-camera me-1"/> <t t-if="state.imageDataUrl">Cambiar foto</t><t t-else="">Tomar o elegir foto</t>
+                                </button>
+                                <button t-if="state.imageDataUrl" type="button" class="btn btn-link btn-sm p-0 text-start" t-on-click="clearImage">Quitar foto</button>
+                                <small class="text-muted" t-esc="state.imageInfo"/>
+                            </div>
+                            <input t-ref="fileInput" type="file" accept="image/*" capture="environment" class="d-none vlux-catalog-file-input" t-on-change="onImageSelected"/>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <t t-set-slot="footer">
+                <button type="button" class="btn btn-primary btn-lg vlux-catalog-confirm" t-on-click="confirm" t-att-disabled="!isValid or state.saving or !state.defaultsLoaded">
+                    <t t-if="state.saving">Guardando...</t>
+                    <t t-else="">Guardar y agregar</t>
+                </button>
+                <button type="button" class="btn btn-secondary btn-lg vlux-catalog-cancel" t-on-click="props.close" t-att-disabled="state.saving">Cancelar</button>
+            </t>
+        </Dialog>
+    </t>
+</templates>

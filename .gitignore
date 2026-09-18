@@ -24,6 +24,7 @@
 !/vlux_mobile_scanner/
 !/vlux_owner/
 !/vlux_facturacion/
+!/vlux_pos_catalog/
 
 **/__pycache__/
 *.py[cod]

@@ -1,0 +1,34 @@
+.vlux-catalog-dialog {
+    .vlux-catalog-notfound {
+        border-left: 4px solid var(--bs-warning, #f0ad4e);
+        padding: 0.35rem 0.75rem;
+        margin-bottom: 0.75rem;
+        background: rgba(240, 173, 78, 0.08);
+    }
+    .vlux-catalog-eyebrow {
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0.75;
+    }
+    .vlux-catalog-barcode {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .vlux-catalog-photo-preview {
+        width: 96px;
+        height: 96px;
+        border: 1px dashed var(--bs-border-color, #ccc);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        font-size: 1.75rem;
+        background: #fff;
+        img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+    }
+}
