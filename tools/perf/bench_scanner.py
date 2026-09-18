@@ -113,7 +113,9 @@ class BusWebSocket:
             "Upgrade: websocket\r\nConnection: Upgrade\r\n"
             f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n"
             f"Origin: {parts.scheme}://{host}:{port}\r\n"
-            f"X-Odoo-Database: {db}\r\n"
+            # No X-Odoo-Database here: a stateless (header) session cannot be persisted
+            # and the bus dispatcher closes such sockets with 4001. Push therefore
+            # needs a mono-db host or dbfilter, exactly like production.
             "User-Agent: vlux-bench\r\n\r\n"
         )
         self.sock.sendall(request.encode())

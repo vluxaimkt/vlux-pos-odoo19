@@ -9,7 +9,15 @@ import argparse
 import contextlib
 import os
 import sys
+import time
 from pathlib import Path
+
+# odoo-bin forces UTC before anything calls localtime(); the ORM's
+# fields.Datetime.now() relies on it. Standalone tools must do the same or
+# every timestamp they write is shifted by the host timezone.
+os.environ["TZ"] = "UTC"
+if hasattr(time, "tzset"):
+    time.tzset()
 
 
 def add_common_arguments(parser: argparse.ArgumentParser) -> None:
