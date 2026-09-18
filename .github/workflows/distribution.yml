@@ -28,6 +28,7 @@ on:
       - "vlux_core/**"
       - "vlux_mobile_scanner/**"
       - "vlux_owner/**"
+      - "vlux_pos_catalog/**"
       - "requirements-extra.txt"
 
 env:
@@ -48,12 +49,12 @@ jobs:
       source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
       - name: Checkout VLUX addons
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: vlux-addons
 
       - name: Checkout Odoo baseline
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: odoo/odoo
           ref: ${{ env.ODOO_COMMIT }}
@@ -66,7 +67,7 @@ jobs:
         run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -86,12 +87,12 @@ jobs:
     needs: precheck
     steps:
       - name: Checkout VLUX addons
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: vlux-addons
 
       - name: Checkout Odoo baseline
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: odoo/odoo
           ref: ${{ env.ODOO_COMMIT }}
@@ -99,12 +100,12 @@ jobs:
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Set up .NET for WiX
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "8.0.x"
 
@@ -133,7 +134,7 @@ jobs:
           }
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vlux-pos-windows-${{ env.DIST_VERSION }}
           path: |
@@ -149,12 +150,12 @@ jobs:
     needs: precheck
     steps:
       - name: Checkout VLUX addons
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: vlux-addons
 
       - name: Checkout Odoo baseline
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: odoo/odoo
           ref: ${{ env.ODOO_COMMIT }}
@@ -162,7 +163,7 @@ jobs:
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -196,7 +197,7 @@ jobs:
           PY
 
       - name: Upload Ubuntu artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vlux-pos-ubuntu-${{ env.DIST_VERSION }}
           path: |
@@ -211,12 +212,12 @@ jobs:
     needs: precheck
     steps:
       - name: Checkout VLUX addons
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: vlux-addons
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build and export OCI artifact
         working-directory: ${{ env.ADDONS_DIR }}
@@ -261,7 +262,7 @@ jobs:
           (cd dist/cloud && sha256sum -c "vlux-pos_${version}_amd64.oci.tar.sha256")
 
       - name: Upload Cloud artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vlux-pos-cloud-${{ env.DIST_VERSION }}
           path: |
@@ -280,12 +281,12 @@ jobs:
       - cloud
     steps:
       - name: Checkout VLUX addons
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: vlux-addons
 
       - name: Download target artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: gathered
 
@@ -300,7 +301,7 @@ jobs:
             --out-dir dist/manifests
 
       - name: Upload global manifests
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vlux-pos-manifests-${{ env.DIST_VERSION }}
           path: |

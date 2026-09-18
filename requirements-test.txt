@@ -1,0 +1,2 @@
+# Solo pruebas: HttpCase controla Chrome por DevTools (tours de navegador).
+websocket-client==1.2.3

@@ -27,6 +27,7 @@ on:
       - "vlux_core/**"
       - "vlux_mobile_scanner/**"
       - "vlux_owner/**"
+      - "vlux_pos_catalog/**"
       - "requirements-extra.txt"
 
 env:
@@ -45,12 +46,12 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Checkout VLUX addons
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: vlux-addons
 
       - name: Checkout Odoo baseline
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: odoo/odoo
           ref: ${{ env.ODOO_COMMIT }}
@@ -58,7 +59,7 @@ jobs:
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -91,7 +92,7 @@ jobs:
         run: bash scripts/release/ubuntu_turnkey_ci.sh "${{ env.UBUNTU_VERSION }}"
 
       - name: Upload Ubuntu turnkey artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vlux-pos-ubuntu-turnkey-${{ env.UBUNTU_VERSION }}
           path: |
