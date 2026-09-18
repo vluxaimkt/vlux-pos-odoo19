@@ -15,7 +15,7 @@ medir y cómo probar. La gestión del proyecto vive fuera de Git.
 | 3 | Scanner V2: push/batch de resultados, cola, idempotencia, cámara | Completa |
 | 4 | Owner V2: agregaciones en base de datos | Completa |
 | 5 | POS performance: apertura, catálogo, compresión | Completa |
-| 6 | Observabilidad (`/vlux/ready`, doctor) | Pendiente |
+| 6 | Observabilidad (`/vlux/ready`, doctor) | Completa |
 | 7 | Scale hardening (perfiles de capacidad, PostgreSQL) | Pendiente |
 | 8 | CI dividida (rápida / E2E / performance) y regresión completa | Pendiente |
 
@@ -36,7 +36,7 @@ altos, y su estado:
 | Sin alta rápida de productos | Resuelto (fase 2) |
 | ZXing decodificaba el frame completo cada 120 ms en un canvas nuevo | Resuelto (fase 3) |
 | Owner: órdenes y líneas del día iteradas en Python, 500 productos con `qty_available`, refresco 30 s | Resuelto (fase 4) |
-| `/vlux/health` sólo liveness; sin readiness ni doctor | Pendiente (fase 6) |
+| `/vlux/health` sólo liveness; sin readiness ni doctor | Resuelto (fase 6) |
 | Prefijo R2 puede producir `tenants/tenants/...`; capacidad fija (`workers=2`) | Pendiente (fase 7) |
 
 ## vlux_pos_catalog
@@ -300,6 +300,56 @@ el teléfono simulado hacía polling a los 300 ms y, con el ACK del POS en
 ~320 ms, a veces el polling llegaba antes que el push. No había pérdida de
 datos. El tour ahora usa el mismo retardo que el cliente real
 (`PUSH_SAFETY_NET_MS` = 3 s): 5 de 5 corridas en verde.
+
+## Observabilidad (fase 6)
+
+### `/vlux/health` y `/vlux/ready`
+
+| Ruta | Pregunta que responde | Quién la usa |
+| --- | --- | --- |
+| `/vlux/health` | ¿El proceso Odoo responde? (liveness, sin cambios: `{"status": "ok"}`) | Healthcheck de Docker, Caddy, service host de Windows, `vlux-cloud health` |
+| `/vlux/ready` | ¿Esta instancia puede vender ahora? (readiness) | Monitoreo, balanceadores, `vlux-cloud doctor` |
+
+`/vlux/ready` es pública, de sólo lectura y no crea sesión. Responde 200 con
+`"status": "ready"` o 503 con `"not_ready"`, y un objeto `checks`:
+
+| Check | `ok` cuando | Otros valores |
+| --- | --- | --- |
+| `database` | `SELECT 1` responde | `error` |
+| `addons` | Están instalados los addons de la edición (`vlux_core.edition`) | `missing` |
+| `module_updates` | Ningún módulo en `to install` / `to upgrade` / `to remove` | `pending` |
+| `pos_config` | Existe al menos una caja activa | `missing` |
+
+Sólo devuelve esos códigos: ni nombres de módulos, ni base de datos, ni rutas
+(lo verifica el test). El detalle está en `/vlux/system/info` (rol VLUX
+Support), que ahora incluye `ready`. No sustituye al healthcheck de Docker a
+propósito: un contenedor "no listo" (p. ej. durante una actualización de
+módulos) no debe reiniciarse.
+
+### `vlux-cloud doctor <tenant>`
+
+Diagnóstico de sólo lectura de un tenant, ejecutado en el host (nunca expuesto
+por HTTP). Imprime un único JSON y termina con 0 (OK), 1 (WARN) o 2 (FAIL):
+
+| Sección | Qué mira | WARN / FAIL |
+| --- | --- | --- |
+| ODOO | Contenedor, `/vlux/health`, `/vlux/ready` | FAIL si no responde o 503; WARN si no existe `/vlux/ready` (addon sin actualizar) |
+| POSTGRES | `pg_isready`, versión, tamaño, transacción más larga | FAIL si no responde; WARN con transacciones de más de 10 min |
+| DB_CONNECTIONS | `pg_stat_activity` frente a `max_connections` | WARN al 80 % |
+| FILESTORE | Archivos y bytes | — |
+| DISK | Espacio libre del volumen del tenant | WARN < 15 %, FAIL < 5 % |
+| EDGE | Ruta de Caddy y contenedor, o estado del túnel | FAIL si falta la ruta o el túnel no está conectado |
+| BACKUP_AGE | Último respaldo local (misma regla que `status`, 48 h) | WARN; FAIL con `REAL_CLIENT_DATA` |
+| OFFSITE | Copia externa configurada y exitosa | WARN |
+| WORKERS | Workers frente a 2 × CPU + 1 del host | WARN si se excede |
+| ADDONS | Addons productivos instalados y sin actualizaciones pendientes | FAIL |
+| VERSION | Versión del CLI y del tenant, imagen, commit de Odoo | — |
+
+La recolección (Docker, `psql`, `curl`) y la evaluación están separadas:
+`doctor_evaluate` es una función pura que `scripts/release/cloud_checks.py`
+(`DOCTOR_CONTRACT`) prueba con escenarios sintéticos, incluida la ausencia de
+credenciales en la salida. La recolección no se ha ejecutado aún contra un
+tenant real: queda para la validación en el host de staging.
 
 ## Herramientas de rendimiento (`tools/perf`)
 
