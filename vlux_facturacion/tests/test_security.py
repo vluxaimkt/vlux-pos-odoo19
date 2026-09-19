@@ -3,6 +3,7 @@ from datetime import timedelta
 from psycopg2.errors import UniqueViolation
 
 from odoo import fields
+from odoo.exceptions import UserError, ValidationError
 from odoo.tests.common import TransactionCase, tagged
 
 
@@ -66,6 +67,20 @@ class TestVluxFiscalSecurity(TransactionCase):
             self.fiscal_request.authenticate_public_token(session_token)
         )
 
+    def test_public_link_token_cannot_be_reused(self):
+        raw_link = self.fiscal_request.issue_public_link_token()
+        record, session_token = self.fiscal_request.exchange_public_link_token(
+            raw_link
+        )
+
+        self.assertEqual(record, self.fiscal_request)
+        self.assertTrue(session_token)
+        reused_record, reused_session_token = (
+            self.fiscal_request.exchange_public_link_token(raw_link)
+        )
+        self.assertFalse(reused_record)
+        self.assertFalse(reused_session_token)
+
     def test_expired_public_token_is_rejected(self):
         raw_token = self.fiscal_request.issue_public_link_token()
         self.fiscal_request.sudo().write(
@@ -105,6 +120,59 @@ class TestVluxFiscalSecurity(TransactionCase):
                     "code": "vlux_simulator",
                 }
             )
+
+    def test_simulation_mode_processes_with_simulator(self):
+        config = self.env.ref("vlux_facturacion.vlux_fiscal_config_main_company")
+        config.sudo().write(
+            {
+                "fiscal_name": "VLUX Simulacion",
+                "mode": "simulation",
+            }
+        )
+        config.action_validate_configuration()
+        self.fiscal_request.sudo().write(
+            {
+                "config_id": config.id,
+                "pac_provider_id": config.pac_provider_id.id,
+                "fiscal_name": "Cliente Simulado",
+            }
+        )
+
+        self.fiscal_request.action_process_automatically()
+
+        self.assertEqual(self.fiscal_request.state, "simulation_completed")
+        self.assertTrue(self.fiscal_request.simulation_reference)
+        self.assertFalse(self.fiscal_request.fiscal_uuid)
+
+    def test_production_mode_rejects_simulator_provider(self):
+        config = self.env.ref("vlux_facturacion.vlux_fiscal_config_main_company")
+        config.sudo().write(
+            {
+                "mode": "production",
+                "fiscal_name": "VLUX Produccion",
+                "vat": "XAXX010101000",
+                "fiscal_zip": "01000",
+                "fiscal_regime": "601",
+            }
+        )
+
+        with self.assertRaises(ValidationError):
+            config.action_validate_configuration()
+
+    def test_custom_provider_without_adapter_fails_controlled(self):
+        provider = self.env["vlux.pac.provider"].sudo().create(
+            {
+                "name": "PAC Futuro",
+                "code": "future_pac",
+                "provider_type": "custom",
+            }
+        )
+
+        with self.assertRaises(UserError):
+            provider.validate_credentials()
+
+        with self.assertRaises(UserError):
+            provider.stamp_request(self.fiscal_request)
 
     def test_rate_limit_blocks_excess_requests(self):
         limiter = self.env["vlux.fiscal.rate.limit"].sudo()

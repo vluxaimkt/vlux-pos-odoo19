@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+case "${1:-remove}" in
+  remove|upgrade|failed-upgrade)
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    ;;
+  purge)
+    echo "Preserving /etc/vlux-pos, /var/lib/vlux-pos, /var/backups/vlux-pos and /var/log/vlux-pos." >&2
+    echo "Use an explicit VLUX data-destroy procedure if data removal is required." >&2
+    ;;
+esac
+
+exit 0

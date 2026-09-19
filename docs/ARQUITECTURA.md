@@ -13,7 +13,7 @@ Navegador POS / Teléfono / Dashboard
                 Odoo 19
         +---------+---------+
         |         |         |
-     Escáner    Owner   Facturación
+       Core    Escáner  Owner/Facturación
         |         |         |
         +---------+---------+
                   |
@@ -22,6 +22,10 @@ Navegador POS / Teléfono / Dashboard
               Filestore
 ```
 
+La dirección a largo plazo (Odoo como motor de negocio detrás de una API
+VLUX versionada, con interfaces propias) está en
+[ARQUITECTURA_HEADLESS.md](ARQUITECTURA_HEADLESS.md).
+
 ## Componentes
 
 ### Odoo core
@@ -29,6 +33,30 @@ Navegador POS / Teléfono / Dashboard
 Proporciona autenticación, ORM, interfaz web, POS, inventario, contabilidad,
 localización mexicana y comunicación en tiempo real. Se instala desde el
 repositorio oficial de Odoo y no se duplica en este repositorio.
+
+### `vlux_core`
+
+Centraliza metadatos y roles funcionales comunes de VLUX sin absorber la lógica
+de los demás addons. Publica `/vlux/health` con respuesta mínima
+`{"status": "ok"}` (liveness), `/vlux/ready` (readiness: 200 si la instancia
+puede vender, 503 si no, sólo con códigos genéricos) y `/vlux/system/info` para el rol `VLUX Support`, limitado a
+versión, edición, compañía activa y addons VLUX instalados.
+
+Roles definidos:
+
+| Rol | Base de permisos | Restricciones VLUX |
+| --- | --- | --- |
+| `VLUX Owner` | Hereda Administrator | Rol funcional máximo, no implica `base.group_system` |
+| `VLUX Administrator` | POS Manager, Stock Manager, Product Manager | Administración funcional sin administración técnica |
+| `VLUX Supervisor` | POS Manager | Granularidad limitada por Odoo; se reporta como brecha conocida |
+| `VLUX Cashier` | POS User | Bloqueo servidor sobre administración de `pos.config` |
+| `VLUX Inventory Operator` | Stock User | No recibe permisos POS por rol VLUX |
+| `VLUX Auditor` | Lectura explícita en modelos POS/producto/stock críticos | Sin create/write/unlink en esos modelos |
+| `VLUX Support` | Usuario interno | Diagnóstico seguro, sin operación de negocio |
+
+Las ediciones reconocidas son `local_core`, `local_complete` y
+`cloud_managed`. Si el parámetro `vlux_core.edition` falta o contiene un valor
+desconocido, el sistema reporta `local_core`.
 
 ### `vlux_mobile_scanner`
 

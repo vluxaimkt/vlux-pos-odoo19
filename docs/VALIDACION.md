@@ -38,7 +38,7 @@ Cree una base desechable llamada `vlux_pos_test` y ejecute:
   C:\Odoo\src\odoo\odoo-bin `
   -c C:\Odoo\config\odoo.conf `
   -d vlux_pos_test `
-  -i vlux_mobile_scanner,vlux_owner,vlux_facturacion `
+  -i vlux_mobile_scanner,vlux_owner,vlux_pos_catalog,vlux_facturacion `
   --without-demo `
   --stop-after-init
 ```
@@ -55,13 +55,53 @@ Ejecútelas exclusivamente en una base desechable:
   C:\Odoo\src\odoo\odoo-bin `
   -c C:\Odoo\config\odoo.conf `
   -d vlux_pos_test `
-  -u vlux_mobile_scanner,vlux_owner,vlux_facturacion `
+  -u vlux_mobile_scanner,vlux_owner,vlux_pos_catalog,vlux_facturacion `
   --test-enable `
-  --test-tags /vlux_mobile_scanner,/vlux_owner,/vlux_facturacion `
+  --test-tags /vlux_mobile_scanner,/vlux_owner,/vlux_pos_catalog,/vlux_facturacion `
   --stop-after-init
 ```
 
 No ejecute pruebas sobre una base de producción.
+
+### Checks estáticos y paquete de release
+
+Ejecute los checks ligeros del repositorio:
+
+```powershell
+& C:\Odoo\venv\Scripts\python.exe `
+  C:\Odoo\custom_addons\vlux-pos-odoo19\scripts\release\static_checks.py
+```
+
+Construya la release candidata desde un working tree limpio:
+
+```bat
+scripts\release\BUILD_RELEASE.bat 1.0.0-rc1
+```
+
+Verifique que se generen:
+
+```text
+VLUX_POS_1.0.0-rc1.zip
+release-manifest.json
+VLUX_POS_1.0.0-rc1.zip.sha256
+```
+
+El manifest debe identificar producto, versión, commit fuente, commit Odoo,
+Python, PostgreSQL soportado, addons incluidos, versiones de addons y SHA256 del
+paquete.
+
+### Dry-run de actualización Windows
+
+Cuando el entorno tenga rutas y credenciales protegidas configuradas, ejecute:
+
+```bat
+scripts\windows\00_preflight.bat
+scripts\windows\02_stage_release.bat C:\Updates\VLUX_POS_1.0.0-rc1.zip
+scripts\windows\03_verify_release.bat C:\Updates\VLUX_POS_1.0.0-rc1.zip
+```
+
+No declare exitoso el flujo completo si no se ejecutaron backup, upgrade dirigido
+y smoke test contra la DB objetivo.
 
 ## 2. Prueba del POS estándar
 
@@ -125,5 +165,6 @@ No ejecute pruebas sobre una base de producción.
 - Existe un respaldo previo verificado.
 - Staging ejecutó la misma release y migración.
 - Se probó rollback con base y filestore.
+- El paquete de release fue verificado por SHA256 y manifest.
 - HTTPS, WebSocket, monitoreo y alertas funcionan.
 - No hay advertencias propias por APIs obsoletas de Odoo.

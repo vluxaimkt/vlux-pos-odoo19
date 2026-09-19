@@ -1,0 +1,402 @@
+name: Windows Turnkey Installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Turnkey lab version"
+        required: true
+        default: "0.0.0-turnkey3"
+  push:
+    branches:
+      - feature/production-distribution
+    paths:
+      - ".github/workflows/windows-turnkey.yml"
+      - "packaging/windows/**"
+      - "scripts/release/**"
+      - "scripts/distribution/**"
+      - "vlux_core/**"
+      - "vlux_mobile_scanner/**"
+      - "vlux_owner/**"
+      - "vlux_pos_catalog/**"
+      - "requirements-extra.txt"
+
+env:
+  ODOO_COMMIT: a2d73c5900d8886d115afe1ccb7f5c97c7e71a97
+  ODOO_DIR: ${{ github.workspace }}/odoo
+  ADDONS_DIR: ${{ github.workspace }}/vlux-addons
+  TURNKEY_VERSION: ${{ inputs.version || '0.0.0-turnkey3' }}
+  PYTHON_VERSION: "3.12.10"
+  WIX_VERSION: "4.0.5"
+
+jobs:
+  windows-turnkey:
+    name: Build Windows turnkey lab installer
+    runs-on: windows-latest
+    steps:
+      - name: Checkout VLUX addons
+        uses: actions/checkout@v5
+        with:
+          path: vlux-addons
+
+      - name: Checkout Odoo baseline
+        uses: actions/checkout@v5
+        with:
+          repository: odoo/odoo
+          ref: ${{ env.ODOO_COMMIT }}
+          path: odoo
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up .NET and WiX
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install pinned WiX Toolset
+        shell: pwsh
+        run: |
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          dotnet tool install --global wix --version "$env:WIX_VERSION"
+          wix extension add --global "WixToolset.Bal.wixext/$env:WIX_VERSION"
+          wix extension add --global "WixToolset.Util.wixext/$env:WIX_VERSION"
+          wix --version
+
+      - name: Precheck
+        shell: pwsh
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          if ((git -C "$env:ODOO_DIR" rev-parse HEAD) -ne "$env:ODOO_COMMIT") { throw "Wrong Odoo commit" }
+          python scripts/release/static_checks.py
+          python scripts/release/public_repo_scan.py
+          python -m compileall scripts/release
+
+      - name: Build offline Windows runtime payload
+        shell: pwsh
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          python scripts/release/build_windows_runtime.py `
+            --out-dir dist/windows/extra-payload `
+            --odoo-home "$env:ODOO_DIR" `
+            --version "$env:TURNKEY_VERSION" `
+            --cache-dir "$env:RUNNER_TEMP\vlux-runtime-cache"
+          Copy-Item dist/windows/extra-payload/windows-turnkey/runtime-manifest.json dist/windows/runtime-manifest.json -Force
+
+      - name: Publish VLUX service host
+        shell: pwsh
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          dotnet publish packaging/windows/service-host/Vlux.Pos.ServiceHost.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:PublishTrimmed=false `
+            -o dist/windows/extra-payload/bin/servicehost
+          New-Item -ItemType Directory -Force -Path dist/windows/extra-payload/windows-turnkey | Out-Null
+          Get-ChildItem packaging/windows/turnkey |
+            Where-Object { $_.Name -ne "runtime-manifest.json" } |
+            Copy-Item -Destination dist/windows/extra-payload/windows-turnkey -Recurse -Force
+
+      - name: Build turnkey lab setup
+        shell: pwsh
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          $version = "$env:TURNKEY_VERSION"
+          python scripts/release/build_release.py $version --edition local_complete --odoo-home "$env:ODOO_DIR"
+          $canonical = Resolve-Path "..\vlux_release_output\$version\VLUX_POS_local_complete_$version.zip"
+          python scripts/release/build_windows_wix.py `
+            --version $version `
+            --canonical-zip $canonical `
+            --out-dir dist/windows `
+            --wix-version "$env:WIX_VERSION" `
+            --extra-payload dist/windows/extra-payload `
+            --client-payload `
+            --setup-file-name "VLUX_POS_Setup_${version}_x64.exe" `
+            --runtime-chain-status COMPLETE `
+            --payload-scan-report dist/windows/payload-scan.json
+          Get-Content "dist\windows\VLUX_POS_${version}_x64.msi.sha256", "dist\windows\VLUX_POS_Setup_${version}_x64.exe.sha256" | ForEach-Object {
+            $parts = $_ -split '\s+'
+            $actual = (Get-FileHash "dist\windows\$($parts[1])" -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $parts[0]) { throw "Checksum mismatch for $($parts[1])" }
+          }
+
+      - name: Setup EXE runtime E2E smoke
+        shell: pwsh
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          $version = "$env:TURNKEY_VERSION"
+          $setup = Resolve-Path "dist\windows\VLUX_POS_Setup_${version}_x64.exe"
+          $msi = Resolve-Path "dist\windows\VLUX_POS_${version}_x64.msi"
+          $diagnosticsDir = "dist\windows\diagnostics"
+          New-Item -ItemType Directory -Force -Path $diagnosticsDir | Out-Null
+
+          function Copy-IfExists {
+            param([string]$Path, [string]$Destination)
+            if (Test-Path $Path) {
+              Copy-Item $Path $Destination -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          function Write-Diagnostics {
+            param([string]$Reason)
+            New-Item -ItemType Directory -Force -Path $diagnosticsDir | Out-Null
+            Set-Content -Path "$diagnosticsDir\failure-reason.txt" -Value $Reason
+            Get-Service -Name VLUXPOS -ErrorAction SilentlyContinue | Format-List * | Out-File "$diagnosticsDir\service.txt"
+            sc.exe queryex VLUXPOS | Out-File "$diagnosticsDir\sc-queryex.txt" -ErrorAction SilentlyContinue
+            Get-ChildItem "C:\Program Files\VLUX\POS" -Recurse -ErrorAction SilentlyContinue |
+              Select-Object FullName,Length,LastWriteTime |
+              Out-File "$diagnosticsDir\program-files-tree.txt"
+            Get-ChildItem "C:\ProgramData\VLUX\POS" -Recurse -ErrorAction SilentlyContinue |
+              Select-Object FullName,Length,LastWriteTime |
+              Out-File "$diagnosticsDir\program-data-tree.txt"
+            Copy-IfExists "C:\ProgramData\VLUX\POS\logs" "$diagnosticsDir\programdata-logs"
+            Copy-IfExists "C:\ProgramData\VLUX\POS\config\odoo.conf" "$diagnosticsDir\odoo.conf"
+            Copy-IfExists "C:\ProgramData\VLUX\POS\config\Caddyfile" "$diagnosticsDir\Caddyfile"
+            Copy-IfExists "C:\ProgramData\VLUX\POS\config\lan-tls.json" "$diagnosticsDir\lan-tls.json"
+            Copy-IfExists "C:\ProgramData\VLUX\POS\certificates" "$diagnosticsDir\certificates"
+            if (Test-Path "$diagnosticsDir\odoo.conf") {
+              (Get-Content "$diagnosticsDir\odoo.conf") `
+                -replace '(?im)^(admin_passwd\s*=\s*).+$', '$1[REDACTED]' `
+                -replace '(?im)^(db_password\s*=\s*).+$', '$1[REDACTED]' |
+                Set-Content "$diagnosticsDir\odoo.conf"
+            }
+            Get-ChildItem $diagnosticsDir -Recurse -File -ErrorAction SilentlyContinue |
+              ForEach-Object {
+                (Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue) `
+                  -replace '(?i)(password|passwd|secret|token)\s*[:=]\s*[^,\r\n]+', '$1=[REDACTED]' |
+                  Set-Content $_.FullName -ErrorAction SilentlyContinue
+              }
+          }
+
+          trap {
+            Write-Diagnostics $_.Exception.Message
+            throw $_
+          }
+
+          function Wait-VluxHealth {
+            param([string]$Url, [int]$Seconds = 900)
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            $last = $null
+            while ((Get-Date) -lt $deadline) {
+              try {
+                $params = @{ Uri = $Url; UseBasicParsing = $true; TimeoutSec = 10 }
+                if ($Url.StartsWith("https://")) { $params.SkipCertificateCheck = $true }
+                $response = Invoke-WebRequest @params
+                if ($response.StatusCode -eq 200 -and $response.Content -match '"status"\s*:\s*"ok"') {
+                  return $response
+                }
+                $last = "Unexpected response $($response.StatusCode): $($response.Content)"
+              } catch {
+                $last = $_.Exception.Message
+              }
+              Start-Sleep -Seconds 5
+            }
+            throw "Timed out waiting for $Url. Last error: $last"
+          }
+
+          function Assert-HttpOk {
+            param([string]$Url, [switch]$SkipCertificateCheck)
+            $params = @{ Uri = $Url; UseBasicParsing = $true; TimeoutSec = 20; MaximumRedirection = 0; ErrorAction = "Stop" }
+            if ($SkipCertificateCheck) { $params.SkipCertificateCheck = $true }
+            try {
+              $response = Invoke-WebRequest @params
+              if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 400) { throw "HTTP $($response.StatusCode)" }
+              return $response
+            } catch {
+              $status = $_.Exception.Response.StatusCode.value__
+              if ($status -ge 300 -and $status -lt 400) { return $_.Exception.Response }
+              throw
+            }
+          }
+
+          function Assert-CurlOk {
+            param([string]$Url)
+            $output = (& curl.exe --ssl-no-revoke -sS -i $Url) -join "`n"
+            if ($LASTEXITCODE -ne 0) { throw "curl failed for $Url with exit code $LASTEXITCODE. Output: $output" }
+            if ($output -notmatch "HTTP/\S+\s+200") { throw "curl did not receive HTTP 200 for $Url. Output: $output" }
+            return $output
+          }
+
+          function Get-VluxLanIp {
+            $candidates = Get-NetIPAddress -AddressFamily IPv4 |
+              Where-Object {
+                $_.IPAddress -notlike "127.*" -and
+                $_.IPAddress -notlike "169.254.*" -and
+                $_.IPAddress -notmatch "^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\." -and
+                (
+                  $_.IPAddress -like "192.168.*" -or
+                  $_.IPAddress -like "10.*" -or
+                  $_.IPAddress -match "^172\\.(1[6-9]|2[0-9]|3[0-1])\\."
+                )
+              } |
+              Sort-Object @{
+                Expression = {
+                  if ($_.IPAddress -like "192.168.*") { 0 }
+                  elseif ($_.IPAddress -like "10.*") { 1 }
+                  else { 2 }
+                }
+              }, IPAddress
+            return ($candidates | Select-Object -First 1).IPAddress
+          }
+
+          $installLog = (Resolve-Path $diagnosticsDir).Path
+          $install = Start-Process -FilePath $setup -ArgumentList "/quiet /norestart /log `"$installLog\setup-install.log`"" -Wait -NoNewWindow -PassThru
+          if ($install.ExitCode -ne 0) { throw "Setup install failed with exit code $($install.ExitCode)" }
+          if (!(Test-Path "C:\Program Files\VLUX\POS\bin\servicehost\Vlux.Pos.ServiceHost.exe")) { throw "Service host missing" }
+          if (!(Test-Path "C:\Program Files\VLUX\POS\runtime\python\python.exe")) { throw "Private Python missing" }
+          if (!(Test-Path "C:\Program Files\VLUX\POS\runtime\postgresql\bin\postgres.exe")) { throw "PostgreSQL runtime missing" }
+          if (!(Test-Path "C:\Program Files\VLUX\POS\runtime\odoo\odoo-bin")) { throw "Odoo runtime missing" }
+          if ((Get-Content "C:\Program Files\VLUX\POS\runtime\odoo\ODOO_COMMIT.txt").Trim() -ne "$env:ODOO_COMMIT") { throw "Odoo runtime commit mismatch" }
+          if (!(Test-Path "C:\Program Files\VLUX\POS\runtime\caddy\caddy.exe")) { throw "Caddy runtime missing" }
+          $service = Get-Service -Name VLUXPOS -ErrorAction Stop
+          if ($service.Name -ne "VLUXPOS") { throw "Service not installed" }
+          if ($service.Status -ne "Running") { Start-Service VLUXPOS }
+
+          Wait-VluxHealth "http://127.0.0.1:8080/vlux/health?db=vlux_pos" | Out-Null
+          Wait-VluxHealth "http://127.0.0.1:8069/vlux/health?db=vlux_pos" | Out-Null
+          Wait-VluxHealth "https://localhost:8443/vlux/health?db=vlux_pos" | Out-Null
+          $publicCa = "C:\ProgramData\VLUX\POS\certificates\VLUX_POS_Local_CA.crt"
+          if (!(Test-Path $publicCa)) { throw "VLUX public CA export missing" }
+          $certDirKeys = Get-ChildItem "C:\ProgramData\VLUX\POS\certificates" -Recurse -File |
+            Where-Object { $_.Extension -in @(".key", ".pfx", ".p12", ".pem") }
+          if ($certDirKeys) { throw "Private key material exposed in public certificates directory: $($certDirKeys.FullName -join ', ')" }
+          Assert-CurlOk "https://localhost:8443/vlux/health?db=vlux_pos" | Out-Null
+          $lanIp = Get-VluxLanIp
+          if (!$lanIp) { throw "No RFC1918 LAN IP detected for LAN HTTPS test" }
+          Assert-CurlOk "https://$lanIp`:8443/vlux/health?db=vlux_pos" | Out-Null
+          $hostname = $env:COMPUTERNAME.ToLowerInvariant()
+          Assert-CurlOk "https://$hostname`:8443/vlux/health?db=vlux_pos" | Out-Null
+          $lanTls = Get-Content "C:\ProgramData\VLUX\POS\config\lan-tls.json" -Raw | ConvertFrom-Json
+          foreach ($expectedSan in @("localhost", "vlux-pos.local", $hostname, "$hostname.local", $lanIp)) {
+            if ($lanTls.san_list -notcontains $expectedSan) { throw "Missing TLS SAN identity: $expectedSan" }
+          }
+          $pgPort = Test-NetConnection -ComputerName 127.0.0.1 -Port 55432 -InformationLevel Quiet
+          if (!$pgPort) { throw "PostgreSQL local port is not reachable" }
+          if (!(Test-NetConnection -ComputerName $lanIp -Port 8443 -InformationLevel Quiet)) { throw "HTTPS 8443 is not reachable on LAN IP $lanIp" }
+          if (Test-NetConnection -ComputerName $lanIp -Port 8069 -InformationLevel Quiet) { throw "Odoo 8069 is exposed on LAN IP $lanIp" }
+          if (Test-NetConnection -ComputerName $lanIp -Port 55432 -InformationLevel Quiet) { throw "PostgreSQL 55432 is exposed on LAN IP $lanIp" }
+          if (!(Get-NetFirewallRule -DisplayName "VLUX POS HTTPS 8443" -ErrorAction SilentlyContinue)) { throw "VLUX HTTPS firewall rule missing" }
+          Assert-HttpOk "http://127.0.0.1:8080/web/login?db=vlux_pos" | Out-Null
+          Assert-HttpOk "http://127.0.0.1:8080/vlux-owner/manifest.webmanifest?db=vlux_pos" | Out-Null
+          Assert-HttpOk "http://127.0.0.1:8080/vlux/scanner?db=vlux_pos" | Out-Null
+
+          # Security: no default admin/admin on the LAN, and secrets only readable by
+          # SYSTEM, Administrators and the service account.
+          function Test-OdooAdminLogin([string]$password) {
+            $body = @{ jsonrpc = "2.0"; method = "call"; params = @{ db = "vlux_pos"; login = "admin"; password = $password } } |
+              ConvertTo-Json -Depth 5
+            $response = Invoke-RestMethod -Uri "http://127.0.0.1:8080/web/session/authenticate" -Method Post `
+              -ContentType "application/json" -Body $body
+            return [bool]($response.result -and $response.result.uid)
+          }
+          $ownerSecrets = Get-Content "C:\ProgramData\VLUX\POS\config\secrets.json" -Raw | ConvertFrom-Json
+          if (Test-OdooAdminLogin "admin") { throw "Default admin/admin is still accepted" }
+          if (!(Test-OdooAdminLogin $ownerSecrets.InitialOwnerPassword)) { throw "Initial owner password was not applied to admin" }
+          $broadSids = @("S-1-5-32-545", "S-1-1-0", "S-1-5-11", "S-1-5-4")
+          foreach ($secretFile in @("C:\ProgramData\VLUX\POS\config\secrets.json", "C:\ProgramData\VLUX\POS\config\odoo.conf")) {
+            $rules = (Get-Acl $secretFile).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+            foreach ($rule in $rules) {
+              $readable = ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::ReadData) -ne 0
+              if ($rule.AccessControlType -eq "Allow" -and $readable -and $broadSids -contains $rule.IdentityReference.Value) {
+                throw "$secretFile is readable by $($rule.IdentityReference.Value)"
+              }
+            }
+          }
+
+          Restart-Service VLUXPOS -Force
+          Wait-VluxHealth "http://127.0.0.1:8080/vlux/health?db=vlux_pos" | Out-Null
+          Assert-CurlOk "https://localhost:8443/vlux/health?db=vlux_pos" | Out-Null
+
+          New-Item -ItemType Directory -Force -Path "C:\ProgramData\VLUX\POS\data" | Out-Null
+          Set-Content -Path "C:\ProgramData\VLUX\POS\data\preserve.marker" -Value "preserve"
+          New-Item -ItemType Directory -Force -Path "C:\ProgramData\VLUX\POS\filestore", "C:\ProgramData\VLUX\POS\backups" | Out-Null
+          Set-Content -Path "C:\ProgramData\VLUX\POS\filestore\preserve.marker" -Value "preserve"
+          Set-Content -Path "C:\ProgramData\VLUX\POS\backups\preserve.marker" -Value "preserve"
+
+          $secrets = Get-Content "C:\ProgramData\VLUX\POS\config\secrets.json" -Raw | ConvertFrom-Json
+          $secretValues = @(
+            $secrets.PostgresAdminPassword,
+            $secrets.DbPassword,
+            $secrets.OdooMasterPassword,
+            $secrets.InitialOwnerPassword,
+            $secrets.InstallerSecret
+          ) | Where-Object { $_ }
+          $logFiles = Get-ChildItem "C:\ProgramData\VLUX\POS\logs" -File -ErrorAction SilentlyContinue
+          foreach ($secret in $secretValues) {
+            foreach ($log in $logFiles) {
+              if (Select-String -LiteralPath $log.FullName -SimpleMatch $secret -Quiet) {
+                throw "Secret leaked in log $($log.FullName)"
+              }
+            }
+          }
+
+          $uninstall = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart /L*v `"$installLog\msi-uninstall.log`"" -Wait -NoNewWindow -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "MSI uninstall failed with exit code $($uninstall.ExitCode)" }
+          if (!(Test-Path "C:\ProgramData\VLUX\POS\data\preserve.marker")) { throw "Data preservation marker was removed" }
+          if (!(Test-Path "C:\ProgramData\VLUX\POS\filestore\preserve.marker")) { throw "Filestore preservation marker was removed" }
+          if (!(Test-Path "C:\ProgramData\VLUX\POS\backups\preserve.marker")) { throw "Backup preservation marker was removed" }
+
+          $reinstall = Start-Process -FilePath $setup -ArgumentList "/quiet /norestart /log `"$installLog\setup-reinstall.log`"" -Wait -NoNewWindow -PassThru
+          if ($reinstall.ExitCode -ne 0) { throw "Setup reinstall failed with exit code $($reinstall.ExitCode)" }
+          $service = Get-Service -Name VLUXPOS -ErrorAction Stop
+          if ($service.Status -ne "Running") { Start-Service VLUXPOS }
+          Wait-VluxHealth "http://127.0.0.1:8080/vlux/health?db=vlux_pos" | Out-Null
+          Assert-CurlOk "https://localhost:8443/vlux/health?db=vlux_pos" | Out-Null
+
+          $manifestPath = "dist\windows\manifest.json"
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $manifest.validation.install_smoke = "PASS"
+          $manifest.runtime_chain_status = "COMPLETE"
+          $manifest | Add-Member -Force -NotePropertyName installer_mode -NotePropertyValue "OFFLINE"
+          $manifest | Add-Member -Force -NotePropertyName setup_size_mb -NotePropertyValue ([math]::Round((Get-Item $setup).Length / 1MB, 2))
+          $manifest.validation | Add-Member -Force -NotePropertyName runner_install_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName setup_runner_e2e -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName service_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName service_restart_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName postgres_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName odoo_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName health_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName https_runner_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName local_ca_trust -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName lan_https -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName hostname_https -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName tls_san_validation -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName firewall_8443 -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName odoo_lan_exposure -NotePropertyValue "PASS_NOT_EXPOSED"
+          $manifest.validation | Add-Member -Force -NotePropertyName postgres_lan_exposure -NotePropertyValue "PASS_NOT_EXPOSED"
+          $manifest.validation | Add-Member -Force -NotePropertyName private_key_exposure_scan -NotePropertyValue "PASS"
+          $manifest | Add-Member -Force -NotePropertyName lan_tls_primary_name -NotePropertyValue $lanTls.primary_name
+          $manifest | Add-Member -Force -NotePropertyName lan_tls_san_list -NotePropertyValue $lanTls.san_list
+          $manifest | Add-Member -Force -NotePropertyName lan_ip_detected -NotePropertyValue $lanIp
+          $manifest | Add-Member -Force -NotePropertyName ca_export_file -NotePropertyValue "C:\ProgramData\VLUX\POS\certificates\VLUX_POS_Local_CA.crt"
+          $manifest.validation | Add-Member -Force -NotePropertyName web_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName owner_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName scanner_http_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName uninstall_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName data_preservation -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName reinstall_smoke -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName offline_install_proof -NotePropertyValue "PASS_NO_CLIENT_DOWNLOAD_BOOTSTRAP"
+          $manifest.validation | Add-Member -Force -NotePropertyName log_secret_scan -NotePropertyValue "PASS"
+          $manifest.validation | Add-Member -Force -NotePropertyName clean_machine_e2e -NotePropertyValue "MANUAL_PENDING"
+          $manifest | ConvertTo-Json -Depth 12 | Set-Content -Encoding UTF8 $manifestPath
+
+      - name: Upload turnkey artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: vlux-pos-windows-turnkey-${{ env.TURNKEY_VERSION }}
+          path: |
+            ${{ env.ADDONS_DIR }}/dist/windows/*.msi
+            ${{ env.ADDONS_DIR }}/dist/windows/*.exe
+            ${{ env.ADDONS_DIR }}/dist/windows/*.sha256
+            ${{ env.ADDONS_DIR }}/dist/windows/manifest.json
+            ${{ env.ADDONS_DIR }}/dist/windows/runtime-manifest.json
+            ${{ env.ADDONS_DIR }}/dist/windows/payload-scan.json
+            ${{ env.ADDONS_DIR }}/dist/windows/diagnostics/**
+          if-no-files-found: error

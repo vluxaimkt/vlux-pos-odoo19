@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+case "${1:-configure}" in
+  configure)
+    if ! getent group vlux-pos >/dev/null; then
+      addgroup --system vlux-pos
+    fi
+    if ! id vlux-pos >/dev/null 2>&1; then
+      adduser --system --ingroup vlux-pos --home /var/lib/vlux-pos --no-create-home vlux-pos
+    fi
+
+    install -d -o root -g vlux-pos -m 0750 /etc/vlux-pos
+    install -d -o vlux-pos -g vlux-pos -m 0750 /var/lib/vlux-pos /var/lib/vlux-pos/filestore
+    install -d -o vlux-pos -g vlux-pos -m 0750 /var/backups/vlux-pos /var/log/vlux-pos
+    install -d -o root -g root -m 0755 /opt/vlux/pos
+
+    if [ -f /lib/systemd/system/vlux-pos.service ]; then
+      systemctl daemon-reload || true
+      systemctl enable vlux-pos.service || true
+    fi
+    ;;
+esac
+
+exit 0

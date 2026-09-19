@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# VLUX Cloud Managed operator CLI.
+exec /usr/bin/env python3 "$(dirname "$(readlink -f "$0")")/vlux_cloud.py" "$@"

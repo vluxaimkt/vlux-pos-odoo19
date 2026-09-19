@@ -10,8 +10,10 @@ El sistema POS está compuesto por estos addons:
 
 | Addon | Función | Dependencias Odoo |
 | --- | --- | --- |
+| `vlux_core` | Roles VLUX, metadatos de edición, health check y diagnóstico base | `point_of_sale`, `stock`, `product` |
 | `vlux_mobile_scanner` | Convierte un teléfono en lector inalámbrico del POS | `point_of_sale`, `bus`, `web` |
-| `vlux_owner` | Dashboard móvil de ventas, cajas, productos e inventario | `point_of_sale`, `stock`, `web` |
+| `vlux_owner` | Dashboard móvil de ventas, cajas, productos e inventario | `vlux_core`, `point_of_sale`, `stock`, `web` |
+| `vlux_pos_catalog` | Alta rápida de productos desde el POS al escanear un código desconocido | `point_of_sale`, `stock`, `vlux_core` |
 | `vlux_facturacion` | Portal y flujo de facturación simulada desde tickets POS | `account`, `mail`, `point_of_sale`, `l10n_mx` |
 
 `vlux_facturacion` no emite CFDI real. No incluye timbrado, cancelación, CSD ni
@@ -42,7 +44,7 @@ En una instalación que ya tenga Odoo 19 y PostgreSQL configurados:
   C:\Odoo\src\odoo\odoo-bin `
   -c C:\Odoo\config\odoo.conf `
   -d vlux_pos_dev `
-  -i vlux_mobile_scanner,vlux_owner,vlux_facturacion `
+  -i vlux_core,vlux_mobile_scanner,vlux_owner,vlux_pos_catalog,vlux_facturacion `
   --without-demo `
   --stop-after-init
 ```
@@ -81,15 +83,30 @@ Para reproducir datos existentes se necesitan un dump PostgreSQL y el filestore
 correspondiente a la misma base. Para una instalación nueva se crea una base
 vacía y se realiza la configuración funcional desde cero.
 
+## Releases para cliente
+
+GitHub privado es fuente interna de VLUX. Los equipos de cliente no deben tener
+tokens, deploy keys ni ejecutar `git pull` o `git fetch`.
+
+VLUX distribuye paquetes `VLUX_POS_<version>.zip` acompañados por
+`release-manifest.json` y `SHA256`. El manifest registra producto, versión,
+commit fuente, baseline Odoo, Python, PostgreSQL soportado, addons incluidos,
+versiones de addons y hash del paquete. La firma digital queda preparada como
+punto de extensión, pero no se declara configurada hasta contar con
+infraestructura real de firma.
+
 ## Documentación
 
 - [Arquitectura](docs/ARQUITECTURA.md)
+- [Decisión: Odoo como backend, interfaces propias](docs/ARQUITECTURA_HEADLESS.md)
 - [Instalación en Windows](docs/INSTALACION_WINDOWS.md)
 - [Configuración funcional](docs/CONFIGURACION_FUNCIONAL.md)
 - [Operación diaria](docs/OPERACION.md)
 - [Validación y pruebas](docs/VALIDACION.md)
+- [Distribución de producción](docs/DISTRIBUCION_PRODUCCION.md)
 - [Producción controlada](docs/PRODUCCION.md)
 - [Respaldo y restauración](docs/RESPALDO_RESTAURACION.md)
+- [Operabilidad y rendimiento](docs/OPERABILIDAD_PERFORMANCE.md)
 
 ## Estado operativo
 
@@ -113,8 +130,12 @@ Antes de producción deben cumplirse, como mínimo, estas condiciones:
 
 ## Seguridad
 
+- `vlux_core` define los roles funcionales VLUX: Owner, Administrator,
+  Supervisor, Cashier, Inventory Operator, Auditor y Support. Reutiliza grupos
+  nativos de Odoo cuando son seguros y añade controles servidor donde el permiso
+  nativo es demasiado amplio, por ejemplo bloqueo de `pos.config` para Cashier.
 - Nunca suba `odoo.conf`, `.env`, dumps, filestore, logs ni credenciales.
-- Mantenga el repositorio privado mientras contenga lógica comercial.
+- El repositorio es público: cada commit debe asumirse visible. Nunca versione datos reales.
 - Use API Keys de Odoo para el endpoint compartido de Owner y revoque las que no
   estén en uso.
 - No publique directamente el puerto `8069` en Internet.

@@ -4,4 +4,7 @@
         <field name="name">VLUX Owner</field>
         <field name="comment">Permite acceder a la aplicación móvil VLUX Owner y a sus métricas agregadas.</field>
     </record>
+    <record id="vlux_core.group_vlux_owner" model="res.groups">
+        <field name="implied_ids" eval="[(4, ref('vlux_owner.group_vlux_owner'))]"/>
+    </record>
 </odoo>

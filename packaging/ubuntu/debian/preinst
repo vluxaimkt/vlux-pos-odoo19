@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "vlux-pos preinst must run as root" >&2
+  exit 1
+fi
+
+ARCH="$(dpkg --print-architecture)"
+if [ "$ARCH" != "amd64" ]; then
+  echo "Unsupported architecture: $ARCH" >&2
+  exit 1
+fi
+
+exit 0

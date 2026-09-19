@@ -1,0 +1,21 @@
+# Rendered by `vlux-cloud host-init` into ${VLUX_EDGE_ROOT}/Caddyfile.
+# Do not edit in place: re-run host-init instead.
+{
+	admin 127.0.0.1:2019
+__ACME_EMAIL_LINE____ACME_CA_LINE__	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+# Container-local edge liveness probe. Never published to the host.
+:8080 {
+	handle /vlux/edge/health {
+		respond "ok" 200
+	}
+	handle {
+		respond 404
+	}
+}
+
+# One file per tenant, written atomically by `vlux-cloud provision`.
+import /etc/caddy/tenants/*.caddy

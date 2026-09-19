@@ -1,0 +1,52 @@
+# VLUX staging tunnel - rendered by `vlux-cloud staging-init`.
+#
+# cloudflared makes an outbound-only connection to the Cloudflare edge, so the
+# host needs no public IP, no port forwarding and no inbound firewall rule.
+#
+# It is attached to the edge network ONLY. It can reach the Caddy edge and
+# nothing else: no tenant private network, so no tenant PostgreSQL.
+#
+# The image is distroless (uid 65532, no shell), so the tunnel token is read
+# from a file owned by that account and health is probed over the metrics port
+# rather than with a shell healthcheck.
+
+name: __PROJECT__
+
+services:
+  cloudflared:
+    image: ${VLUX_CLOUDFLARED_IMAGE}
+    container_name: __TUNNEL_CONTAINER__
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --loglevel
+      - ${VLUX_TUNNEL_LOGLEVEL:-info}
+      - --metrics
+      - 0.0.0.0:__METRICS_PORT__
+      - run
+      - --token-file
+      - /run/secrets/cloudflare_tunnel_token
+    secrets:
+      - cloudflare_tunnel_token
+    networks:
+      - edge
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  edge:
+    name: __EDGE_NETWORK__
+    external: true
+
+secrets:
+  cloudflare_tunnel_token:
+    file: __TOKEN_FILE__

@@ -125,7 +125,7 @@ No agregue la copia con secretos al repositorio.
   C:\Odoo\src\odoo\odoo-bin `
   -c C:\Odoo\config\odoo.conf `
   -d vlux_pos_dev `
-  -i vlux_mobile_scanner,vlux_owner,vlux_facturacion `
+  -i vlux_mobile_scanner,vlux_owner,vlux_pos_catalog,vlux_facturacion `
   --without-demo `
   --stop-after-init
 ```
@@ -167,17 +167,31 @@ Continúe con [Configuración funcional](CONFIGURACION_FUNCIONAL.md) y
 
 ## Actualizar una instalación local
 
-Obtenga una versión aprobada y detenga Odoo antes de actualizar:
+GitHub privado es fuente interna de VLUX, no un mecanismo de actualización para
+clientes. Un equipo de cliente no debe tener token GitHub, deploy key, historial
+Git ni ejecutar `git pull` o `git fetch`.
 
-```powershell
-git -C C:\Odoo\custom_addons\vlux-pos-odoo19 pull --ff-only
-& C:\Odoo\venv\Scripts\python.exe `
-  C:\Odoo\src\odoo\odoo-bin `
-  -c C:\Odoo\config\odoo.conf `
-  -d vlux_pos_dev `
-  -u vlux_mobile_scanner,vlux_owner,vlux_facturacion `
-  --stop-after-init
+VLUX debe entregar un paquete aprobado:
+
+```text
+VLUX_POS_<version>.zip
+release-manifest.json
+VLUX_POS_<version>.zip.sha256
 ```
 
-No ejecute `pull` directamente en producción. Producción debe usar un tag o
-commit aprobado y un respaldo previo.
+El operador ejecuta el actualizador Windows desde `scripts\windows`:
+
+```bat
+set ODOO_DB=vlux_pos_dev
+set VLUX_PROFILE=scanner_owner
+VLUX_UPDATE.bat C:\Updates\VLUX_POS_1.0.1.zip
+```
+
+El actualizador ejecuta preflight, respaldo obligatorio de PostgreSQL y
+filestore, staging, verificación SHA256/manifest, activación, actualización
+dirigida de módulos y smoke test. Nunca usa `-u all`; `vlux_facturacion` sólo se
+actualiza con el perfil explícito `facturacion_internal` o `custom`.
+
+Si falla una etapa, el flujo se detiene y conserva logs/backup. El rollback es
+manual y explícito con `06_rollback.bat`, restaurando siempre DB + filestore +
+release previa.

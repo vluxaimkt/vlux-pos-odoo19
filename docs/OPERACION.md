@@ -86,7 +86,7 @@ En desarrollo puede actualizar los tres addons con:
   C:\Odoo\src\odoo\odoo-bin `
   -c C:\Odoo\config\odoo.conf `
   -d vlux_pos_dev `
-  -u vlux_mobile_scanner,vlux_owner,vlux_facturacion `
+  -u vlux_mobile_scanner,vlux_owner,vlux_pos_catalog,vlux_facturacion `
   --stop-after-init
 ```
 

@@ -1,0 +1,310 @@
+name: Distribution Build Factory
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Logical VLUX version to materialize"
+        required: true
+        default: "0.0.0-buildfactory"
+      edition:
+        description: "Distribution edition"
+        required: true
+        default: "local_complete"
+        type: choice
+        options:
+          - local_core
+          - local_complete
+          - cloud_managed
+  push:
+    branches:
+      - feature/production-distribution
+      - release/**
+    paths:
+      - ".github/workflows/distribution.yml"
+      - "packaging/**"
+      - "scripts/release/**"
+      - "scripts/distribution/**"
+      - "vlux_core/**"
+      - "vlux_mobile_scanner/**"
+      - "vlux_owner/**"
+      - "vlux_pos_catalog/**"
+      - "requirements-extra.txt"
+
+env:
+  ODOO_COMMIT: a2d73c5900d8886d115afe1ccb7f5c97c7e71a97
+  ODOO_DIR: ${{ github.workspace }}/odoo
+  ADDONS_DIR: ${{ github.workspace }}/vlux-addons
+  DIST_VERSION: ${{ inputs.version || '0.0.0-buildfactory' }}
+  DIST_EDITION: ${{ inputs.edition || 'local_complete' }}
+  PYTHON_VERSION: "3.12.10"
+  SUPPORTED_POSTGRESQL: "16.14"
+  WIX_VERSION: "4.0.5"
+
+jobs:
+  precheck:
+    name: Precheck
+    runs-on: ubuntu-24.04
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+    steps:
+      - name: Checkout VLUX addons
+        uses: actions/checkout@v5
+        with:
+          path: vlux-addons
+
+      - name: Checkout Odoo baseline
+        uses: actions/checkout@v5
+        with:
+          repository: odoo/odoo
+          ref: ${{ env.ODOO_COMMIT }}
+          path: odoo
+          fetch-depth: 1
+
+      - name: Set source commit
+        id: source
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Validate repository and metadata
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          test "$(git -C "$ODOO_DIR" rev-parse HEAD)" = "$ODOO_COMMIT"
+          python scripts/release/static_checks.py
+          python scripts/release/public_repo_scan.py
+          python scripts/release/test_build_release.py
+          python -m compileall scripts/release
+          python scripts/release/build_release.py "${{ env.DIST_VERSION }}" --edition "${{ env.DIST_EDITION }}" --odoo-home "$ODOO_DIR"
+
+  windows:
+    name: Windows MSI and Burn EXE
+    runs-on: windows-latest
+    needs: precheck
+    steps:
+      - name: Checkout VLUX addons
+        uses: actions/checkout@v5
+        with:
+          path: vlux-addons
+
+      - name: Checkout Odoo baseline
+        uses: actions/checkout@v5
+        with:
+          repository: odoo/odoo
+          ref: ${{ env.ODOO_COMMIT }}
+          path: odoo
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up .NET for WiX
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install pinned WiX Toolset
+        shell: pwsh
+        run: |
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          dotnet tool install --global wix --version "$env:WIX_VERSION"
+          wix extension add --global "WixToolset.Bal.wixext/$env:WIX_VERSION"
+          wix extension add --global "WixToolset.Util.wixext/$env:WIX_VERSION"
+          wix --version
+
+      - name: Build Windows artifacts
+        shell: pwsh
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          $version = "${{ env.DIST_VERSION }}"
+          python scripts/release/build_release.py $version --edition "${{ env.DIST_EDITION }}" --odoo-home "$env:ODOO_DIR"
+          $canonical = Resolve-Path "..\vlux_release_output\$version\VLUX_POS_${{ env.DIST_EDITION }}_$version.zip"
+          python scripts/release/build_windows_wix.py --version $version --canonical-zip $canonical --out-dir dist\windows --wix-version "$env:WIX_VERSION"
+          Get-Content "dist\windows\VLUX_POS_${version}_x64.msi.sha256", "dist\windows\VLUX_POS_Setup_${version}.exe.sha256" | ForEach-Object {
+            $parts = $_ -split '\s+'
+            $actual = (Get-FileHash "dist\windows\$($parts[1])" -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $parts[0]) { throw "Checksum mismatch for $($parts[1])" }
+          }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: vlux-pos-windows-${{ env.DIST_VERSION }}
+          path: |
+            ${{ env.ADDONS_DIR }}/dist/windows/*.msi
+            ${{ env.ADDONS_DIR }}/dist/windows/*.exe
+            ${{ env.ADDONS_DIR }}/dist/windows/*.sha256
+            ${{ env.ADDONS_DIR }}/dist/windows/manifest.json
+          if-no-files-found: error
+
+  ubuntu:
+    name: Ubuntu DEB
+    runs-on: ubuntu-24.04
+    needs: precheck
+    steps:
+      - name: Checkout VLUX addons
+        uses: actions/checkout@v5
+        with:
+          path: vlux-addons
+
+      - name: Checkout Odoo baseline
+        uses: actions/checkout@v5
+        with:
+          repository: odoo/odoo
+          ref: ${{ env.ODOO_COMMIT }}
+          path: odoo
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Build Ubuntu DEB
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          version="${{ env.DIST_VERSION }}"
+          python scripts/release/build_release.py "$version" --edition "${{ env.DIST_EDITION }}" --odoo-home "$ODOO_DIR"
+          canonical="../vlux_release_output/$version/VLUX_POS_${{ env.DIST_EDITION }}_$version.zip"
+          python scripts/release/build_ubuntu_deb.py --version "$version" --canonical-zip "$canonical" --out-dir dist/ubuntu --odoo-home "$ODOO_DIR"
+          (cd dist/ubuntu && sha256sum -c "vlux-pos_${version}_amd64.deb.sha256")
+          dpkg-deb --info "dist/ubuntu/vlux-pos_${version}_amd64.deb"
+          dpkg-deb --contents "dist/ubuntu/vlux-pos_${version}_amd64.deb"
+
+      - name: Install smoke
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          version="${{ env.DIST_VERSION }}"
+          sudo dpkg -i --force-depends "dist/ubuntu/vlux-pos_${version}_amd64.deb"
+          test -d /opt/vlux/pos
+          test -x /usr/bin/vlux-pos
+          test -f /lib/systemd/system/vlux-pos.service
+          sudo dpkg -r vlux-pos
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("dist/ubuntu/manifest.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          data["validation"]["install_smoke"] = "PASS"
+          path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload Ubuntu artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: vlux-pos-ubuntu-${{ env.DIST_VERSION }}
+          path: |
+            ${{ env.ADDONS_DIR }}/dist/ubuntu/*.deb
+            ${{ env.ADDONS_DIR }}/dist/ubuntu/*.sha256
+            ${{ env.ADDONS_DIR }}/dist/ubuntu/manifest.json
+          if-no-files-found: error
+
+  cloud:
+    name: Cloud OCI
+    runs-on: ubuntu-24.04
+    needs: precheck
+    steps:
+      - name: Checkout VLUX addons
+        uses: actions/checkout@v5
+        with:
+          path: vlux-addons
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and export OCI artifact
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          version="${{ env.DIST_VERSION }}"
+          source_sha="${{ needs.precheck.outputs.source_sha }}"
+          created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mkdir -p dist/cloud
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg ODOO_COMMIT="$ODOO_COMMIT" \
+            --build-arg VLUX_VERSION="$version" \
+            --build-arg SOURCE_COMMIT="$source_sha" \
+            --build-arg BUILD_CREATED="$created" \
+            --output "type=oci,dest=dist/cloud/vlux-pos_${version}_amd64.oci.tar" \
+            -f packaging/cloud/Dockerfile .
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg ODOO_COMMIT="$ODOO_COMMIT" \
+            --build-arg VLUX_VERSION="$version" \
+            --build-arg SOURCE_COMMIT="$source_sha" \
+            --build-arg BUILD_CREATED="$created" \
+            --load \
+            -t "vlux-pos:$version" \
+            -f packaging/cloud/Dockerfile .
+          docker image inspect "vlux-pos:$version"
+          docker run --rm --entrypoint python "vlux-pos:$version" -c "print('vlux container smoke')"
+          python scripts/release/inspect_oci.py \
+            --oci-tar "dist/cloud/vlux-pos_${version}_amd64.oci.tar" \
+            --version "$version" \
+            --source-commit "$source_sha" \
+            --edition "${{ env.DIST_EDITION }}" \
+            --out-dir dist/cloud
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("dist/cloud/manifest.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          data["validation"]["container_smoke"] = "PASS"
+          path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+          (cd dist/cloud && sha256sum -c "vlux-pos_${version}_amd64.oci.tar.sha256")
+
+      - name: Upload Cloud artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: vlux-pos-cloud-${{ env.DIST_VERSION }}
+          path: |
+            ${{ env.ADDONS_DIR }}/dist/cloud/*.oci.tar
+            ${{ env.ADDONS_DIR }}/dist/cloud/*.sha256
+            ${{ env.ADDONS_DIR }}/dist/cloud/manifest.json
+          if-no-files-found: error
+
+  manifests:
+    name: Global manifests
+    runs-on: ubuntu-24.04
+    needs:
+      - precheck
+      - windows
+      - ubuntu
+      - cloud
+    steps:
+      - name: Checkout VLUX addons
+        uses: actions/checkout@v5
+        with:
+          path: vlux-addons
+
+      - name: Download target artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: gathered
+
+      - name: Build global distribution manifest
+        working-directory: ${{ env.ADDONS_DIR }}
+        run: |
+          python scripts/release/write_distribution_manifest.py \
+            --version "${{ env.DIST_VERSION }}" \
+            --edition "${{ env.DIST_EDITION }}" \
+            --source-commit "${{ needs.precheck.outputs.source_sha }}" \
+            --artifacts-root "$GITHUB_WORKSPACE/gathered" \
+            --out-dir dist/manifests
+
+      - name: Upload global manifests
+        uses: actions/upload-artifact@v6
+        with:
+          name: vlux-pos-manifests-${{ env.DIST_VERSION }}
+          path: |
+            ${{ env.ADDONS_DIR }}/dist/manifests/distribution-manifest.json
+            ${{ env.ADDONS_DIR }}/dist/manifests/SHA256SUMS
+          if-no-files-found: error

@@ -1,0 +1,12 @@
+{
+  email soporte@example.com
+}
+
+pos.example.com {
+  encode zstd gzip
+  reverse_proxy 127.0.0.1:8069
+  header {
+    X-Content-Type-Options nosniff
+    Referrer-Policy same-origin
+  }
+}

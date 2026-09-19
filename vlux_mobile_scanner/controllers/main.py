@@ -1,19 +1,25 @@
 import base64
 import io
 import re
-import uuid
 from datetime import timedelta
 from urllib.parse import urlencode, urlsplit
 
 import qrcode
 
 from odoo import fields, http
+from odoo.addons.bus.websocket import WebsocketConnectionHandler
 from odoo.http import request
 
 
 BARCODE_MAX_LENGTH = 128
 JSON_BODY_MAX_BYTES = 16 * 1024
 PAIR_CODE_RE = re.compile(r"^[A-Z2-9]{8}$")
+RESULTS_BATCH_MAX = 50
+# Per-pairing request budgets (requests per minute). Scanning at 4/s sustained
+# stays inside the scan budget; results are batched so 120/min is generous.
+RATE_SCAN = 240
+RATE_RESULTS = 120
+RATE_HEARTBEAT = 12
 
 
 class VluxMobileScannerController(http.Controller):
@@ -156,6 +162,14 @@ class VluxMobileScannerController(http.Controller):
         encoded = base64.b64encode(stream.getvalue()).decode("ascii")
         return f"data:image/png;base64,{encoded}"
 
+    def _push_descriptor(self, pairing):
+        """What the phone needs to receive results without polling."""
+        return {
+            "push_channel": pairing.push_channel or "",
+            "push_version": WebsocketConnectionHandler._VERSION,
+            "results_batch_max": RESULTS_BATCH_MAX,
+        }
+
     def _validate_barcode(self, value):
         if not isinstance(value, str):
             return False, "El codigo debe ser texto."
@@ -181,7 +195,11 @@ class VluxMobileScannerController(http.Controller):
         pair_code = str(kwargs.get("pair") or "").strip().upper()
         response = request.render(
             "vlux_mobile_scanner.scanner_page",
-            {"db_name": request.db or "", "pair_code": pair_code},
+            {
+                "db_name": request.db or "",
+                "pair_code": pair_code,
+                "push_version": WebsocketConnectionHandler._VERSION,
+            },
         )
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -249,6 +267,7 @@ class VluxMobileScannerController(http.Controller):
                 "session_name": pairing.pos_session_id.name,
                 "token_expires_at": fields.Datetime.to_string(pairing.token_expires_at),
                 "cooldown_ms": pairing.cooldown_ms,
+                **self._push_descriptor(pairing),
             }
         )
 
@@ -269,13 +288,15 @@ class VluxMobileScannerController(http.Controller):
             return self._error(
                 "La vinculacion movil no es valida o expiro.", status=401, code="INVALID_TOKEN"
             )
-        if not self._consume_rate_limit("heartbeat", pairing.id, 12, 60):
+        if not self._consume_rate_limit("heartbeat", pairing.id, RATE_HEARTBEAT, 60):
             return self._rate_limit_error()
         if pairing.pos_session_id.state not in ("opening_control", "opened"):
             pairing.action_revoke()
             return self._error(
                 "La sesion del punto de venta ya no esta activa.", status=409, code="POS_SESSION_CLOSED"
             )
+        # The heartbeat is the one place where presence is written unconditionally.
+        pairing.touch_last_seen(force=True)
         return self._json(
             {
                 "ok": True,
@@ -283,6 +304,7 @@ class VluxMobileScannerController(http.Controller):
                 "pos_name": pairing.pos_config_id.name,
                 "session_name": pairing.pos_session_id.name,
                 "cooldown_ms": pairing.cooldown_ms,
+                **self._push_descriptor(pairing),
             }
         )
 
@@ -323,7 +345,7 @@ class VluxMobileScannerController(http.Controller):
             return self._error(
                 "La vinculacion movil no es valida o expiro.", status=401, code="INVALID_TOKEN"
             )
-        if not self._consume_rate_limit("scan", pairing.id, 120, 60):
+        if not self._consume_rate_limit("scan", pairing.id, RATE_SCAN, 60):
             return self._rate_limit_error()
         if pairing.pos_session_id.state not in ("opening_control", "opened"):
             pairing.action_revoke()
@@ -334,6 +356,7 @@ class VluxMobileScannerController(http.Controller):
         if validation_error:
             return self._error(validation_error, status=400, code="INVALID_BARCODE")
 
+        # Optional server-side anti-bounce (disabled by default, see pairing.cooldown_ms).
         cooldown_seconds = max(pairing.cooldown_ms, 0) / 1000.0
         if cooldown_seconds:
             cutoff = fields.Datetime.now() - timedelta(seconds=cooldown_seconds)
@@ -352,38 +375,57 @@ class VluxMobileScannerController(http.Controller):
                     code="DUPLICATE_COOLDOWN",
                 )
 
-        request_id = str(uuid.uuid4())
-        event = request.env["vlux.mobile.scanner.event"].sudo().create(
-            {
-                "request_id": request_id,
-                "pairing_id": pairing.id,
-                "barcode": barcode,
-                "device_identifier": pairing.device_identifier,
-            }
-        )
-
-        # Mecanismo nativo del POS 19: pos.config._notify -> Odoo Bus/WebSocket.
-        pairing.pos_config_id.sudo()._notify(
-            "VLUX_MOBILE_BARCODE",
-            {
-                "request_id": request_id,
-                "event_id": event.id,
-                "pairing_id": pairing.id,
-                "pos_config_id": pairing.pos_config_id.id,
-                "pos_session_id": pairing.pos_session_id.id,
-                "device_identifier": pairing.device_identifier,
-                "barcode": barcode,
-            },
-        )
+        Event = request.env["vlux.mobile.scanner.event"]
+        event, created = Event.register_scan(pairing, barcode, payload.get("request_id"))
+        if not event:
+            return self._error(
+                "El identificador de solicitud ya esta en uso.", status=409, code="REQUEST_ID_CONFLICT"
+            )
+        if created:
+            # Mecanismo nativo del POS 19: pos.config._notify -> Odoo Bus/WebSocket.
+            event.notify_pos()
         return self._json(
             {
                 "ok": True,
-                "status": "queued",
-                "request_id": request_id,
-                "message": "Codigo enviado a la caja.",
+                "status": event.state,
+                "request_id": event.request_id,
+                "duplicate": not created,
+                "message": "Codigo enviado a la caja." if created else "Lectura ya registrada.",
             },
-            status=202,
+            status=202 if created else 200,
         )
+
+    @http.route(
+        "/vlux/mobile/results",
+        type="http",
+        auth="public",
+        methods=["POST"],
+        csrf=False,
+        save_session=False,
+    )
+    def mobile_results(self, **kwargs):
+        """Batch result lookup: one request for every pending scan of the phone."""
+        invalid_request = self._validate_json_request()
+        if invalid_request:
+            return invalid_request
+        pairing = self._authenticate_mobile()
+        if not pairing:
+            return self._error(
+                "La vinculacion movil no es valida o expiro.", status=401, code="INVALID_TOKEN"
+            )
+        if not self._consume_rate_limit("results", pairing.id, RATE_RESULTS, 60):
+            return self._rate_limit_error()
+        payload = self._json_payload()
+        raw_ids = payload.get("request_ids")
+        if not isinstance(raw_ids, list) or not raw_ids or len(raw_ids) > RESULTS_BATCH_MAX:
+            return self._error("Lista de solicitudes invalida.", status=400, code="INVALID_REQUEST_IDS")
+        request_ids = []
+        for raw in raw_ids:
+            if not isinstance(raw, str) or len(raw) > 64:
+                return self._error("Lista de solicitudes invalida.", status=400, code="INVALID_REQUEST_IDS")
+            request_ids.append(raw.strip())
+        Event = request.env["vlux.mobile.scanner.event"]
+        return self._json({"ok": True, "results": Event.results_for(pairing, request_ids)})
 
     @http.route(
         "/vlux/mobile/result",
@@ -402,7 +444,7 @@ class VluxMobileScannerController(http.Controller):
             return self._error(
                 "La vinculacion movil no es valida o expiro.", status=401, code="INVALID_TOKEN"
             )
-        if not self._consume_rate_limit("result", pairing.id, 180, 60):
+        if not self._consume_rate_limit("results", pairing.id, RATE_RESULTS, 60):
             return self._rate_limit_error()
         payload = self._json_payload()
         request_id = str(payload.get("request_id") or "").strip()
@@ -411,24 +453,7 @@ class VluxMobileScannerController(http.Controller):
         )
         if not event:
             return self._error("No se encontro la solicitud.", status=404, code="REQUEST_NOT_FOUND")
-        return self._json(
-            {
-                "ok": True,
-                "request_id": event.request_id,
-                "status": event.state,
-                "result_code": event.result_code or "",
-                "message": event.result_message or "",
-                "product": (
-                    {
-                        "id": event.product_id.id,
-                        "name": event.product_name or event.product_id.display_name,
-                        "unit_price": event.unit_price,
-                    }
-                    if event.product_id or event.product_name
-                    else None
-                ),
-            }
-        )
+        return self._json({"ok": True, **event.result_payload()})
 
     @http.route("/vlux/pos/pairing/create", type="http", auth="user", methods=["POST"], csrf=False)
     def pos_pairing_create(self, **kwargs):
@@ -615,15 +640,14 @@ class VluxMobileScannerController(http.Controller):
         except (TypeError, ValueError):
             unit_price = 0.0
 
-        event.sudo().write(
+        event.apply_pos_result(
             {
                 "state": status,
-                "result_code": str(payload.get("result_code") or "")[:128],
-                "result_message": str(payload.get("message") or "")[:500],
+                "result_code": payload.get("result_code"),
+                "result_message": payload.get("message"),
                 "product_id": product.id if product else False,
-                "product_name": str(payload.get("product_name") or "")[:255],
+                "product_name": payload.get("product_name"),
                 "unit_price": unit_price,
-                "processed_at": fields.Datetime.now(),
             }
         )
         return self._json({"ok": True})

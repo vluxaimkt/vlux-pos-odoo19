@@ -1,0 +1,22 @@
+# VLUX tenant maintenance route - written by `vlux-cloud maintenance enable`.
+# The edge answers 503 for every path so no write can reach Odoo during a
+# cutover. The normal route file is restored by `vlux-cloud maintenance disable`.
+__SITE_ADDRESS__ {
+__TLS_LINE__	encode zstd gzip
+
+	header {
+		Cache-Control "no-store"
+		Retry-After "900"
+	}
+
+	handle {
+		respond "VLUX POS is temporarily in maintenance for a scheduled migration." 503
+	}
+
+	log {
+		output file /var/log/caddy/__TENANT__.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

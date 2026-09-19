@@ -1,4 +1,4 @@
-const CACHE_NAME = "vlux-owner-v1.0.2";
+const CACHE_NAME = "vlux-owner-v1.0.3";
 const APP_SHELL = [
   "/vlux-owner/",
   "/vlux_owner/static/dist/assets/app.css",

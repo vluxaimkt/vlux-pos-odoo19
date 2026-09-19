@@ -122,10 +122,16 @@ patch(PosStore.prototype, {
 
             const afterQuantity = Number(order.totalQuantity || 0);
             if (Math.abs(afterQuantity - beforeQuantity) < 1e-9) {
+                // vlux_pos_catalog (optional) sets this while its quick-create
+                // dialog is open for the barcode: tell the phone the cashier is
+                // registering the product rather than a plain "not found".
+                const registering = this.vluxCatalogPendingBarcode === payload.barcode;
                 await this._vluxAck(payload, {
                     status: "not_found",
-                    result_code: "NO_ORDER_CHANGE",
-                    message: "Odoo no encontro un producto compatible con ese codigo.",
+                    result_code: registering ? "REGISTER_PROMPTED" : "NO_ORDER_CHANGE",
+                    message: registering
+                        ? "Producto sin registrar: la caja abrio el alta rapida."
+                        : "Odoo no encontro un producto compatible con ese codigo.",
                 });
                 return;
             }

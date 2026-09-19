@@ -1,0 +1,12 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_pos_order_vlux_auditor,pos.order vlux auditor,point_of_sale.model_pos_order,vlux_core.group_vlux_auditor,1,0,0,0
+access_pos_order_line_vlux_auditor,pos.order.line vlux auditor,point_of_sale.model_pos_order_line,vlux_core.group_vlux_auditor,1,0,0,0
+access_pos_session_vlux_auditor,pos.session vlux auditor,point_of_sale.model_pos_session,vlux_core.group_vlux_auditor,1,0,0,0
+access_pos_config_vlux_auditor,pos.config vlux auditor,point_of_sale.model_pos_config,vlux_core.group_vlux_auditor,1,0,0,0
+access_pos_payment_vlux_auditor,pos.payment vlux auditor,point_of_sale.model_pos_payment,vlux_core.group_vlux_auditor,1,0,0,0
+access_report_pos_order_vlux_auditor,report.pos.order vlux auditor,point_of_sale.model_report_pos_order,vlux_core.group_vlux_auditor,1,0,0,0
+access_product_product_vlux_auditor,product.product vlux auditor,product.model_product_product,vlux_core.group_vlux_auditor,1,0,0,0
+access_product_template_vlux_auditor,product.template vlux auditor,product.model_product_template,vlux_core.group_vlux_auditor,1,0,0,0
+access_stock_picking_vlux_auditor,stock.picking vlux auditor,stock.model_stock_picking,vlux_core.group_vlux_auditor,1,0,0,0
+access_stock_move_vlux_auditor,stock.move vlux auditor,stock.model_stock_move,vlux_core.group_vlux_auditor,1,0,0,0
+access_stock_quant_vlux_auditor,stock.quant vlux auditor,stock.model_stock_quant,vlux_core.group_vlux_auditor,1,0,0,0

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="group_vlux_catalog_quick_create" model="res.groups">
+        <field name="name">VLUX Catalog: alta rapida en POS</field>
+        <field name="privilege_id" ref="vlux_core.res_groups_privilege_vlux"/>
+        <field name="comment">Permite registrar productos nuevos desde el POS con el formulario rapido. No otorga administracion completa de productos.</field>
+    </record>
+
+    <!-- Administrator (y por herencia Owner) e Inventory Operator obtienen el permiso.
+         Cashier NO lo recibe por defecto: se asigna explicitamente por usuario. -->
+    <record id="vlux_core.group_vlux_administrator" model="res.groups">
+        <field name="implied_ids" eval="[(4, ref('vlux_pos_catalog.group_vlux_catalog_quick_create'))]"/>
+    </record>
+    <record id="vlux_core.group_vlux_inventory_operator" model="res.groups">
+        <field name="implied_ids" eval="[(4, ref('vlux_pos_catalog.group_vlux_catalog_quick_create'))]"/>
+    </record>
+</odoo>
