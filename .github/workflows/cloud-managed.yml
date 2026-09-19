@@ -17,6 +17,7 @@ on:
           - "true"
   push:
     branches:
+      - main
       - feature/production-distribution
     paths:
       - ".github/workflows/cloud-managed.yml"
