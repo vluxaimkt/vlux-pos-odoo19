@@ -9,6 +9,7 @@ on:
         default: "0.0.0-turnkey3"
   push:
     branches:
+      - main
       - feature/production-distribution
     paths:
       - ".github/workflows/windows-turnkey.yml"
@@ -285,6 +286,12 @@ jobs:
           Assert-HttpOk "http://127.0.0.1:8080/web/login?db=vlux_pos" | Out-Null
           Assert-HttpOk "http://127.0.0.1:8080/vlux-owner/manifest.webmanifest?db=vlux_pos" | Out-Null
           Assert-HttpOk "http://127.0.0.1:8080/vlux/scanner?db=vlux_pos" | Out-Null
+          # Caddy must compress responses: the POS start-up payload drops to ~6.5 %.
+          $loginHtml = (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8080/web/login?db=vlux_pos").Content
+          $asset = [regex]::Match($loginHtml, '/web/assets/[^"]+\.css').Value
+          if (!$asset) { throw "No CSS asset found on the login page" }
+          $headers = curl.exe -s -o NUL -D - -H "Accept-Encoding: gzip, zstd" "http://127.0.0.1:8080$asset"
+          if (!($headers -match '(?im)^content-encoding:\s*(gzip|zstd)')) { throw "Caddy is not compressing $asset" }
 
           # Security: no default admin/admin on the LAN, and secrets only readable by
           # SYSTEM, Administrators and the service account.

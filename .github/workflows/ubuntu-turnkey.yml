@@ -17,6 +17,7 @@ on:
           - local_complete
   push:
     branches:
+      - main
       - feature/production-distribution
     paths:
       - ".github/workflows/ubuntu-turnkey.yml"

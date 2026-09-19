@@ -18,6 +18,7 @@ on:
           - cloud_managed
   push:
     branches:
+      - main
       - feature/production-distribution
       - release/**
     paths:
