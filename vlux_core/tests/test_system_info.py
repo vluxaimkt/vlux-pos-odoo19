@@ -46,7 +46,7 @@ class TestVluxCoreSystemInfo(TransactionCase):
             self.support_user
         ).get_safe_info()
 
-        self.assertEqual(info["vlux_core_version"], "19.0.1.1.0")
+        self.assertEqual(info["vlux_core_version"], "19.0.1.2.0")
         self.assertEqual(info["edition"], "local_core")
         self.assertIn("addons", info)
         self.assertNotIn("database", info)

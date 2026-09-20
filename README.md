@@ -101,6 +101,7 @@ infraestructura real de firma.
 - [Decisión: Odoo como backend, interfaces propias](docs/ARQUITECTURA_HEADLESS.md)
 - [Instalación en Windows](docs/INSTALACION_WINDOWS.md)
 - [Configuración funcional](docs/CONFIGURACION_FUNCIONAL.md)
+- [Hardware de la caja](docs/HARDWARE.md)
 - [Operación diaria](docs/OPERACION.md)
 - [Validación y pruebas](docs/VALIDACION.md)
 - [Distribución de producción](docs/DISTRIBUCION_PRODUCCION.md)
