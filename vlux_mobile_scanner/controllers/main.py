@@ -8,6 +8,7 @@ import qrcode
 
 from odoo import fields, http
 from odoo.addons.bus.websocket import WebsocketConnectionHandler
+from odoo.addons.vlux_core.controllers.assets import asset_version
 from odoo.http import request
 
 
@@ -199,6 +200,8 @@ class VluxMobileScannerController(http.Controller):
                 "db_name": request.db or "",
                 "pair_code": pair_code,
                 "push_version": WebsocketConnectionHandler._VERSION,
+                "asset_version": asset_version("vlux_mobile_scanner"),
+                "asset_version": asset_version("vlux_mobile_scanner"),
             },
         )
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"

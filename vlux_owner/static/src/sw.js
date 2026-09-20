@@ -1,10 +1,13 @@
-const CACHE_NAME = "vlux-owner-v1.0.3";
+// __VLUX_ASSET_VERSION__ is replaced by the addon version when the controller
+// serves this file, so a release gets its own cache and its own asset URLs.
+const ASSET_VERSION = "__VLUX_ASSET_VERSION__";
+const CACHE_NAME = "vlux-owner-" + ASSET_VERSION;
 const APP_SHELL = [
   "/vlux-owner/",
-  "/vlux_owner/static/dist/assets/app.css",
-  "/vlux_owner/static/dist/assets/app.js",
-  "/vlux_owner/static/img/icon-192.png",
-  "/vlux_owner/static/img/icon-512.png",
+  "/vlux_owner/static/dist/assets/app.css?v=" + ASSET_VERSION,
+  "/vlux_owner/static/dist/assets/app.js?v=" + ASSET_VERSION,
+  "/vlux_owner/static/img/icon-192.png?v=" + ASSET_VERSION,
+  "/vlux_owner/static/img/icon-512.png?v=" + ASSET_VERSION,
 ];
 
 self.addEventListener("install", (event) => {
