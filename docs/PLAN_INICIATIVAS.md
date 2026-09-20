@@ -29,8 +29,8 @@ disciplina de pruebas y despliegue existe. Lo que falta es el **contrato**.
 
 | # | Brecha | Impacto si no se cierra |
 | --- | --- | --- |
-| B1 | No hay espacio de nombres versionado (`/vlux/api/v1`) ni formato único de error | Cada interfaz nueva inventa su propio contrato y se rompe en cada actualización de Odoo |
-| B2 | No hay autenticación de cliente propia: Owner depende de la sesión de Odoo | Sin login propio no hay interfaz propia |
+| ~~B1~~ | ~~No hay espacio de nombres versionado ni formato único de error~~ (cerrada en Fase A) | Cada interfaz nueva inventa su propio contrato y se rompe en cada actualización de Odoo |
+| ~~B2~~ | ~~No hay autenticación de cliente propia~~ (cerrada en Fase A; falta migrar Owner a ella) | Sin login propio no hay interfaz propia |
 | B3 | No hay sincronización de catálogo con cursor ni bajas explícitas | Una caja propia no puede mantener su copia local al día |
 | B4 | No hay envío de órdenes por API | Sin esto no hay venta desde una interfaz propia |
 | B5 | No hay apertura ni cierre de caja por API | No se puede operar un día completo |
@@ -42,17 +42,23 @@ disciplina de pruebas y despliegue existe. Lo que falta es el **contrato**.
 
 Cuatro fases. Cada una entra a `main` con sus pruebas y no rompe nada existente.
 
-### Fase A — Cimientos del contrato
+### Fase A — Cimientos del contrato — **entregada** (`vlux_core 19.0.1.3.0`)
+
+Documentada en [API_V1.md](API_V1.md).
+
 - Espacio `/vlux/api/v1` con envoltura única de respuesta y errores
   (`{"ok": false, "error": "<CODIGO>", "message": "..."}`), identificador de
-  petición en cada respuesta y cabeceras de caché correctas.
-- Autenticación de dispositivo y de usuario con alcances, derivada del modelo
-  del escáner: token hasheado, revocable, con expiración y límites por minuto.
-- Mapa de roles VLUX a alcances de API.
-- OpenAPI generado y publicado con la versión del addon.
-- **Criterio de aceptación:** un cliente sin sesión de Odoo se autentica, es
-  rechazado fuera de su alcance, y el contrato queda descrito en OpenAPI con
-  pruebas que fallan si cambia.
+  petición en cada respuesta y en `X-Request-Id`, y `no-store` en todas.
+- Autenticación con token `vlux.api.token`, derivada del modelo del escáner:
+  solo se guarda el hash, el texto plano se muestra una vez, es revocable, puede
+  expirar y está limitado a 600 solicitudes por minuto.
+- Mapa de roles VLUX a alcances: un token nunca puede hacer más que su usuario.
+- Emisión y revocación desde **Ajustes → API VLUX**, sin entrar al shell.
+- OpenAPI publicado en `/vlux/api/v1/openapi.json` con la versión del addon.
+- Límite de solicitudes unificado (`vlux.rate.limit`) para API y Owner.
+- **Criterio de aceptación cumplido:** un cliente sin sesión de Odoo se
+  autentica con `GET /me`, es rechazado fuera de su alcance (403) y el contrato
+  está cubierto por 11 pruebas que fallan si cambia.
 
 ### Fase B — Datos de la tienda
 - Catálogo con sincronización incremental: cursor `(write_date, id)`, páginas
@@ -127,10 +133,10 @@ Cuatro fases. Cada una entra a `main` con sus pruebas y no rompe nada existente.
 
 ## 9. Orden recomendado
 
-1. **Paralelo inmediato:** carga masiva de catálogo y corte de caja (operación),
-   con la Fase A de la API (contrato y autenticación).
-2. **Después:** Fase B (catálogo por API) y modo sin internet del POS de Odoo.
-3. **Luego:** Fase C (venta por API) y, con ella, el POS VLUX mínimo.
-4. **Al final:** Fase D, paridad de hardware y CFDI.
+1. ~~Fase A de la API (contrato y autenticación).~~ **Hecha.**
+2. **En curso:** carga masiva de catálogo y corte de caja (operación).
+3. **Después:** Fase B (catálogo por API) y modo sin internet del POS de Odoo.
+4. **Luego:** Fase C (venta por API) y, con ella, el POS VLUX mínimo.
+5. **Al final:** Fase D, paridad de hardware y CFDI.
 
 `PRODUCTION_GO=NOT_YET` hasta cerrar lo de la sección 6 y validar en tienda.

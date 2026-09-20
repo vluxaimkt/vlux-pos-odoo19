@@ -53,7 +53,7 @@ class TestVluxOwnerSecurity(TransactionCase):
         self.assertTrue(user.has_group("vlux_owner.group_vlux_owner"))
 
     def test_rate_limit_blocks_excess_requests(self):
-        limiter = self.env["vlux.owner.rate.limit"].sudo()
+        limiter = self.env["vlux.rate.limit"].sudo()
 
         self.assertTrue(limiter.consume("test", self.env.user.id, 2, 60))
         self.assertTrue(limiter.consume("test", self.env.user.id, 2, 60))

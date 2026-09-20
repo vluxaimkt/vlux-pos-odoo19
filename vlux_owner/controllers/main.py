@@ -89,7 +89,7 @@ class VluxOwnerController(http.Controller):
                 {"ok": False, "error": "request_too_large"},
                 status=413,
             )
-        allowed = request.env["vlux.owner.rate.limit"].sudo().consume(
+        allowed = request.env["vlux.rate.limit"].sudo().consume(
             "shared_dashboard",
             request.env.user.id,
             30,

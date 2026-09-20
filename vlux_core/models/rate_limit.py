@@ -4,9 +4,15 @@ from datetime import timedelta
 from odoo import api, fields, models
 
 
-class VluxOwnerRateLimit(models.Model):
-    _name = "vlux.owner.rate.limit"
-    _description = "Límite de solicitudes de VLUX Owner"
+class VluxRateLimit(models.Model):
+    """Per-identity request budget shared by every VLUX surface.
+
+    The counter is updated with a single upsert, so two workers hitting the
+    same key at once cannot both pass a full window.
+    """
+
+    _name = "vlux.rate.limit"
+    _description = "Límite de solicitudes VLUX"
 
     key = fields.Char(required=True, index=True, readonly=True)
     window_start = fields.Datetime(required=True, readonly=True)
@@ -19,6 +25,7 @@ class VluxOwnerRateLimit(models.Model):
 
     @api.model
     def consume(self, scope, identity, limit, window_seconds):
+        """True while ``identity`` stays inside ``limit`` per ``window_seconds``."""
         identity = str(identity or "unknown")
         key = hashlib.sha256(f"{scope}:{identity}".encode("utf-8")).hexdigest()
         now = fields.Datetime.now()
