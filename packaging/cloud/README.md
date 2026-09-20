@@ -111,8 +111,16 @@ sudo vlux-cloud provision braille \
   --edition cloud_managed \
   --tls-mode public \
   --image ghcr.io/vluxaimkt/vlux-pos@sha256:<digest> \
-  --profile small
+  --profile small \
+  --country MX
 ```
+
+`--country` (default `MX`) loads that country's chart of accounts, taxes and
+currency right after the module install, while the database still has no
+journal entries and no POS payment methods. Odoo refuses to swap the chart of
+accounts afterwards, so a tenant provisioned without it stays on the generic
+US chart: prices in USD and a generic 15 % tax instead of IVA 16 %. Existing
+tenants keep whatever they have; re-provisioning never reloads it.
 
 Validates the slug and domain, runs the DNS preflight, creates the directories,
 generates secrets, renders the config and compose, starts PostgreSQL, waits for

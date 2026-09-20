@@ -774,6 +774,49 @@ def check_capacity_profiles(cli) -> None:
     )
 
 
+def check_localisation(cli) -> None:
+    """A provisioned tenant must get its country's chart of accounts and currency."""
+    check(cli.DEFAULT_COUNTRY == "MX", "LOCALISATION: the default country should be MX")
+    check(bool(cli.COUNTRY_RE.match("MX")) and not cli.COUNTRY_RE.match("mex"),
+          "LOCALISATION: the country code must be validated as two uppercase letters")
+
+    source = (CLOUD / "vlux_cloud.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    provision = next(
+        (node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "provision"),
+        None,
+    )
+    check(provision is not None, "LOCALISATION: provision not found")
+    if provision is not None:
+        calls = [
+            node.func.id for node in ast.walk(provision)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        ]
+        order = [calls.index(name) if name in calls else -1
+                 for name in ("install_addons", "configure_localisation", "create_owner")]
+        check(order[1] >= 0, "LOCALISATION: provision must call configure_localisation")
+        check(
+            all(index >= 0 for index in order) and order[0] < order[1] < order[2],
+            "LOCALISATION: it must run after the module install and before the Owner is created "
+            "(Odoo refuses to load a chart of accounts once entries or payment methods exist)",
+        )
+    localisation = next(
+        (node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "configure_localisation"),
+        None,
+    )
+    check(localisation is not None, "LOCALISATION: configure_localisation is missing")
+    if localisation is not None:
+        body = ast.get_source_segment(source, localisation) or ""
+        check("try_loading" in body, "LOCALISATION: the chart of accounts must be loaded")
+        check("install_demo=False" in body, "LOCALISATION: never load Odoo demo data into a tenant")
+        check("assert company.chart_template" in body,
+              "LOCALISATION: provisioning must fail loudly if no chart of accounts was loaded")
+
+    e2e = (ROOT / "scripts" / "release" / "cloud_e2e.sh").read_text(encoding="utf-8")
+    check("record LOCALISATION" in e2e and "MXN" in e2e and "amount = 16" in e2e,
+          "LOCALISATION: the cloud E2E must assert currency and the 16 % tax on a real tenant")
+
+
 def check_offsite_prefix(cli) -> None:
     """R2 keys: never tenants/tenants, whatever the operator's prefix."""
     cases = {
@@ -991,6 +1034,7 @@ def main() -> int:
     check_doctor(cli)
     check_capacity_profiles(cli)
     check_offsite_prefix(cli)
+    check_localisation(cli)
     check_staging_secret_scans()
 
     if FAILURES:
@@ -1009,6 +1053,7 @@ def main() -> int:
     print("DOCTOR_CONTRACT=PASS")
     print("CAPACITY_PROFILES=PASS")
     print("R2_PREFIX=PASS")
+    print("LOCALISATION=PASS")
     print("INVENTORY_E2E_STATIC_CHECK=PASS")
     print("CLOUDFLARE_TOKEN_LEAK_SCAN=PASS")
     print("R2_SECRET_LEAK_SCAN=PASS")

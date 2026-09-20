@@ -162,6 +162,13 @@ DEFAULT_PROFILE = "small"
 PROFILE_CHOICES = tuple(CAPACITY_PROFILES) + (LEGACY_PROFILE,)
 
 PRODUCTIVE_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog")
+# Country of the tenant company. Odoo would otherwise leave a new database on
+# the generic chart of accounts in USD, so a Mexican store would sell with a
+# 15 % generic tax instead of IVA 16 % and price in dollars. Loading the
+# localisation at provisioning time is the only moment where it is safe: it
+# needs a database with no journal entries and no POS payment methods yet.
+DEFAULT_COUNTRY = "MX"
+COUNTRY_RE = re.compile(r"^[A-Z]{2}$")
 OWNER_GROUP_XMLID = "vlux_core.group_vlux_owner"
 
 TENANT_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
@@ -1177,6 +1184,31 @@ def upgrade_addons(paths: TenantPaths, db_name: str) -> None:
     )
 
 
+def configure_localisation(paths: TenantPaths, db_name: str, country_code: str) -> None:
+    """Set the company country and load its chart of accounts (and currency).
+
+    Runs right after the module install, while the database has no journal
+    entries and no POS payment methods: Odoo refuses to swap the chart of
+    accounts once either exists, which is exactly the trap a tenant provisioned
+    without a country falls into.
+    """
+    script = (
+        "country = env['res.country'].sudo().search([('code', '=', "
+        + repr(country_code) + ")], limit=1)\n"
+        "assert country, 'unknown country code " + country_code + "'\n"
+        "company = env.ref('base.main_company').sudo()\n"
+        "company.country_id = country\n"
+        "env['account.chart.template'].sudo().try_loading(company=company, install_demo=False)\n"
+        "env = env()  # the localisation module install replaces the registry\n"
+        "company = env.ref('base.main_company').sudo()\n"
+        "assert company.chart_template, 'no chart of accounts was loaded'\n"
+        "print('VLUX_LOCALISATION=' + company.country_id.code + ',' + company.chart_template + ',' + company.currency_id.name)\n"
+        "env.cr.commit()\n"
+    )
+    info("Applying the " + country_code + " localisation (chart of accounts, taxes, currency)")
+    odoo_run(paths, ["shell", "-d", db_name, "--no-http"], input_text=script, timeout=1800)
+
+
 def create_owner(paths: TenantPaths, db_name: str, owner_email: str, company_name: str | None) -> None:
     """Replace the default admin login with a named Owner and a random password.
 
@@ -1513,6 +1545,9 @@ def provision(args: argparse.Namespace) -> int:
     db_name = existing.get("database", {}).get("name") or db_identifier(tenant)
     db_user = existing.get("database", {}).get("role") or db_identifier(tenant)
     db_host = args.db_host or existing.get("database", {}).get("host") or "postgres"
+    country = (args.country or existing.get("localisation", {}).get("country") or DEFAULT_COUNTRY).upper()
+    if not COUNTRY_RE.match(country):
+        fail("--country must be a two-letter ISO code, for example MX")
     app_image = args.image or existing.get("image", {}).get("reference") or DEFAULT_APP_IMAGE
     postgres_image = args.postgres_image or POSTGRES_IMAGE
     # New tenants get DEFAULT_PROFILE; tenants created before profiles existed
@@ -1567,6 +1602,7 @@ def provision(args: argparse.Namespace) -> int:
     first_init = not database_initialised(paths)
     if first_init:
         install_addons(paths, db_name)
+        configure_localisation(paths, db_name, country)
         create_owner(paths, db_name, owner_email, args.company_name)
     else:
         info("Database already initialised: skipping module install and Owner creation.")
@@ -1632,6 +1668,7 @@ def provision(args: argparse.Namespace) -> int:
             "python_version": PYTHON_VERSION,
         },
         "capacity": capacity_metadata(capacity),
+        "localisation": {"country": country},
         "odoo": {
             "workers": workers,
             "max_cron_threads": max_cron,
@@ -1679,6 +1716,7 @@ def provision(args: argparse.Namespace) -> int:
         "max_cron_threads": max_cron,
         "capacity_profile": capacity["profile"],
         "capacity_warning": capacity_warning,
+        "country": country,
         "image": app_image,
         "image_digest": metadata["image"]["digest"],
         "owner_email": owner_email,
@@ -4230,6 +4268,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--postgres-image", default=None)
     p.add_argument("--db-host", default=None, help="Point at managed PostgreSQL instead of the tenant container.")
     p.add_argument("--company-name", default=None)
+    p.add_argument(
+        "--country", default=None,
+        help="Two-letter country of the store: loads its chart of accounts, taxes and currency "
+        "on first provisioning (default " + DEFAULT_COUNTRY + "). Existing tenants keep theirs.",
+    )
     p.add_argument(
         "--profile", choices=PROFILE_CHOICES, default=None,
         help="Capacity profile (small, medium, large). New tenants default to "
