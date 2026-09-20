@@ -125,6 +125,7 @@ class VluxOwnerController(http.Controller):
 
     @http.route("/vlux-owner/manifest.webmanifest", type="http", auth="public", methods=["GET"], sitemap=False)
     def manifest(self, **kwargs):
+        version = asset_version("vlux_owner")
         payload = {
             "name": "VLUX Owner",
             "short_name": "VLUX Owner",
@@ -135,16 +136,16 @@ class VluxOwnerController(http.Controller):
             "background_color": "#09080e",
             "theme_color": "#0d0a14",
             "icons": [
-                {"src": "/vlux_owner/static/img/icon-192.png", "sizes": "192x192", "type": "image/png"},
-                {"src": "/vlux_owner/static/img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+                {"src": f"/vlux_owner/static/img/icon-192.png?v={version}", "sizes": "192x192", "type": "image/png"},
+                {"src": f"/vlux_owner/static/img/icon-512.png?v={version}", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
             ],
         }
         return Response(json.dumps(payload), content_type="application/manifest+json")
 
     @http.route("/vlux-owner/sw.js", type="http", auth="public", methods=["GET"], sitemap=False)
     def service_worker(self, **kwargs):
-        with file_open("vlux_owner/static/src/sw.js", "rb") as stream:
-            content = stream.read()
+        with file_open("vlux_owner/static/src/sw.js", "r") as stream:
+            content = stream.read().replace("__VLUX_ASSET_VERSION__", asset_version("vlux_owner"))
         response = Response(content, content_type="application/javascript")
         response.headers["Service-Worker-Allowed"] = "/vlux-owner/"
         response.headers["Cache-Control"] = "no-cache"

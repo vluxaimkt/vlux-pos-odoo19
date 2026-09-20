@@ -24,3 +24,17 @@ class TestVluxOwnerAssets(HttpCase):
             body,
             "an unversioned app.js would be cached across releases",
         )
+
+    def test_service_worker_and_manifest_are_versioned(self):
+        version = get_manifest("vlux_owner")["version"]
+
+        worker = self.url_open("/vlux-owner/sw.js")
+        self.assertEqual(worker.status_code, 200)
+        self.assertNotIn("__VLUX_ASSET_VERSION__", worker.text, "the placeholder was not replaced")
+        self.assertIn(f'const ASSET_VERSION = "{version}"', worker.text)
+        self.assertIn(f"/vlux_owner/static/dist/assets/app.js?v=", worker.text)
+        self.assertNotIn('"/vlux_owner/static/dist/assets/app.js",', worker.text)
+
+        manifest = self.url_open("/vlux-owner/manifest.webmanifest").json()
+        for icon in manifest["icons"]:
+            self.assertIn(f"?v={version}", icon["src"])

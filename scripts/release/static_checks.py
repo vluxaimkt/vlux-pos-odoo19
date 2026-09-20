@@ -29,6 +29,18 @@ PRODUCT_ADDON_COPIES = {
     "scripts/windows/smoke_check.py": r"^mods = \[([^\]]*)\]",
     "scripts/release/cloud_e2e.sh": r'data\["modules_upgraded"\] == \[([^\]]*)\]',
 }
+# Pages we serve outside Odoo's asset bundles reference addon files by path.
+# Odoo sends those with a one-week Cache-Control, so a CDN (the Cloudflare
+# tunnel of a cloud tenant) and the phones would keep last release's file:
+# every reference must carry the addon version as ?v=.
+VERSIONED_ASSET_FILES = (
+    "vlux_mobile_scanner/views/scanner_templates.xml",
+    "vlux_owner/views/templates.xml",
+    "vlux_owner/static/src/sw.js",
+    "vlux_owner/controllers/main.py",
+    "vlux_mobile_scanner/controllers/main.py",
+)
+STATIC_URL_RE = re.compile(r"/vlux_[a-z_]+/static/[\w./-]+")
 PRODUCT_ADDON_MENTIONS = (
     "packaging/cloud/Dockerfile",
     "scripts/windows/02_stage_release.bat",
@@ -152,6 +164,19 @@ def check_obvious_secrets() -> None:
             fail(f"Possible hardcoded secret in {path}")
 
 
+def check_versioned_static_urls() -> None:
+    for rel in VERSIONED_ASSET_FILES:
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        for match in STATIC_URL_RE.finditer(text):
+            tail = text[match.end():match.end() + 6]
+            if tail.startswith("?v="):
+                continue
+            fail(
+                f"{rel}: {match.group(0)} is referenced without a ?v= cache buster; "
+                "an upgrade would keep serving the cached file"
+            )
+
+
 def check_product_addon_lists() -> None:
     expected = set(PRODUCT_ADDONS)
     for rel, pattern in PRODUCT_ADDON_COPIES.items():
@@ -180,6 +205,7 @@ def main() -> int:
     check_conflicting_files()
     check_obvious_secrets()
     check_product_addon_lists()
+    check_versioned_static_urls()
     print("Static checks passed.")
     return 0
 
