@@ -1,7 +1,7 @@
 {
     "name": "VLUX Core",
     "summary": "Roles, metadata y diagnostico base para VLUX POS",
-    "version": "19.0.1.3.0",
+    "version": "19.0.1.3.1",
     "category": "Point of Sale",
     "author": "VLUX",
     "license": "LGPL-3",

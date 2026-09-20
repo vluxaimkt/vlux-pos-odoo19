@@ -5,12 +5,12 @@
         "Empareja un telefono con una caja POS mediante codigo temporal y "
         "envia codigos de barras al flujo estandar de escaneo de Odoo POS."
     ),
-    "version": "19.0.2.0.0",
+    "version": "19.0.2.0.1",
     "category": "Sales/Point of Sale",
     "author": "VLUX",
     "website": "https://vlux.com.mx",
     "license": "LGPL-3",
-    "depends": ["point_of_sale", "bus", "web"],
+    "depends": ["vlux_core", "point_of_sale", "bus", "web"],
     "external_dependencies": {"python": ["qrcode"]},
     "data": [
         "security/ir.model.access.csv",
