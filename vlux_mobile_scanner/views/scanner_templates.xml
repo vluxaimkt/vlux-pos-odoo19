@@ -7,9 +7,9 @@
                 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
                 <meta name="theme-color" content="#101114"/>
                 <title>VLUX Mobile Scanner</title>
-                <link rel="stylesheet" href="/vlux_mobile_scanner/static/src/scanner/scanner.css"/>
-                <script defer="defer" src="/vlux_mobile_scanner/static/src/scanner/scanner_core.js"></script>
-                <script defer="defer" src="/vlux_mobile_scanner/static/src/scanner/scanner.js"></script>
+                <link rel="stylesheet" t-att-href="'/vlux_mobile_scanner/static/src/scanner/scanner.css?v=' + asset_version"/>
+                <script defer="defer" t-att-src="'/vlux_mobile_scanner/static/src/scanner/scanner_core.js?v=' + asset_version"/>
+                <script defer="defer" t-att-src="'/vlux_mobile_scanner/static/src/scanner/scanner.js?v=' + asset_version"/>
             </head>
             <body t-att-data-db="db_name" t-att-data-pair-code="pair_code" t-att-data-push-version="push_version">
                 <main class="vlux-app">

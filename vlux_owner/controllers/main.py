@@ -2,6 +2,7 @@ import json
 import logging
 
 from odoo import http
+from odoo.addons.vlux_core.controllers.assets import asset_version
 from odoo.exceptions import AccessError
 from odoo.http import Response, request
 from odoo.tools import file_open
@@ -51,7 +52,9 @@ class VluxOwnerController(http.Controller):
     @http.route("/vlux-owner/", type="http", auth="user", methods=["GET"], sitemap=False)
     def owner_app(self, **kwargs):
         self._ensure_owner_access()
-        return self._secure_html_response(request.render("vlux_owner.owner_app"))
+        return self._secure_html_response(
+            request.render("vlux_owner.owner_app", {"asset_version": asset_version("vlux_owner")})
+        )
 
     @http.route("/vlux_owner/api/dashboard", type="jsonrpc", auth="user", methods=["POST"], readonly=True)
     def dashboard(self, date=None, **kwargs):
