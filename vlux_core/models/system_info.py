@@ -6,7 +6,7 @@ from odoo.exceptions import AccessError
 _logger = logging.getLogger(__name__)
 
 
-VLUX_CORE_VERSION = "19.0.1.1.0"
+VLUX_CORE_VERSION = "19.0.1.2.0"
 VLUX_ADDON_PREFIX = "vlux_"
 VALID_EDITIONS = {"local_core", "local_complete", "cloud_managed"}
 # Addons que cada edición debe tener instalados para considerarse lista. Debe

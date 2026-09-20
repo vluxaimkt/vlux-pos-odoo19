@@ -891,6 +891,11 @@ def _doctor_raw(**overrides) -> dict:
             "reasons": [],
         },
         "host": {"cpus": 2, "memory_bytes": 4 * 1024 ** 3},
+        "hardware": {
+            "registers": 1, "receipt_printers": 1, "receipt_printers_unset": 0,
+            "order_printers": {"epson_epos": {"count": 1, "unconfigured": 0}},
+            "scanner_pairings": 1,
+        },
     }
     raw.update(overrides)
     return raw
@@ -954,6 +959,17 @@ def check_doctor(cli) -> None:
     check(status_of("ADDONS", modules=pending) == "FAIL", "DOCTOR: pending module upgrade must FAIL")
     missing = {"vlux_core": "installed"}
     check(status_of("ADDONS", modules=missing) == "FAIL", "DOCTOR: missing productive addon must FAIL")
+
+    no_peripherals = {"registers": 1, "receipt_printers": 0, "receipt_printers_unset": 0,
+                      "order_printers": {}, "scanner_pairings": 0}
+    check(status_of("HARDWARE", hardware=no_peripherals) == "OK",
+          "DOCTOR: a register without peripherals is not a failure")
+    half_configured = dict(no_peripherals, receipt_printers_unset=1)
+    check(status_of("HARDWARE", hardware=half_configured) == "WARN",
+          "DOCTOR: a printer left on its placeholder address must WARN")
+    order_unconfigured = dict(no_peripherals, order_printers={"epson_epos": {"count": 2, "unconfigured": 1}})
+    check(status_of("HARDWARE", hardware=order_unconfigured) == "WARN",
+          "DOCTOR: an unconfigured order printer must WARN")
 
     worst = evaluate(_doctor_raw(disk=low, pg_isready_exit=2))
     check(worst["status"] == "FAIL", "DOCTOR: overall status must be the worst section")

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+
+    <!--
+        The receipt already carries the company name, address, phone and VAT
+        (the RFC in Mexico). VLUX adds the tax regime next to it and prints the
+        legend at the very bottom, so a printed ticket is never mistaken for a
+        tax document.
+    -->
+    <t t-name="vlux_core.ReceiptFiscalRegime" t-inherit="point_of_sale.OrderReceipt" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('w-50')][hasclass('text-end')]//div[@t-if='company.vat']" position="after">
+            <div t-if="company.vlux_fiscal_regime" class="vlux-receipt-regime">
+                Régimen: <t t-out="company.vlux_fiscal_regime"/>
+            </div>
+        </xpath>
+        <xpath expr="//div[hasclass('footer-powered-by')]" position="before">
+            <div t-if="company.vlux_receipt_legend" class="vlux-receipt-legend text-center pt-2" style="font-size: 75%;">
+                <t t-out="company.vlux_receipt_legend"/>
+            </div>
+        </xpath>
+    </t>
+
+</templates>

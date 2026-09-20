@@ -3951,7 +3951,7 @@ def migration_verify(args: argparse.Namespace) -> int:
 
 DOCTOR_SECTIONS = (
     "ODOO", "POSTGRES", "DB_CONNECTIONS", "FILESTORE", "DISK", "EDGE",
-    "BACKUP_AGE", "OFFSITE", "WORKERS", "ADDONS", "VERSION",
+    "BACKUP_AGE", "OFFSITE", "WORKERS", "ADDONS", "HARDWARE", "VERSION",
 )
 DOCTOR_RANK = {"OK": 0, "WARN": 1, "FAIL": 2}
 DOCTOR_DISK_WARN_PCT = 15.0
@@ -4030,6 +4030,32 @@ def doctor_collect(layout: Layout, paths: TenantPaths) -> dict:
     ) or []:
         if len(row) == 2 and row[1].isdigit():
             connections[row[0]] = int(row[1])
+    hardware = {
+        "registers": _psql_int(paths, "SELECT count(*) FROM pos_config WHERE active") or 0,
+        "receipt_printers": _psql_int(
+            paths,
+            "SELECT count(*) FROM pos_config WHERE active AND coalesce(epson_printer_ip, '') "
+            "NOT IN ('', '0.0.0.0')",
+        ) or 0,
+        "receipt_printers_unset": _psql_int(
+            paths,
+            "SELECT count(*) FROM pos_config WHERE active AND coalesce(epson_printer_ip, '') = '0.0.0.0'",
+        ) or 0,
+        "order_printers": {},
+        "scanner_pairings": _psql_int(
+            paths,
+            "SELECT count(*) FROM vlux_mobile_scanner_pairing WHERE state = 'paired'",
+        ),
+    }
+    for row in _psql_rows(
+        paths,
+        "SELECT printer_type, count(*), "
+        "count(*) FILTER (WHERE coalesce(epson_printer_ip, '0.0.0.0') = '0.0.0.0' "
+        "AND coalesce(proxy_ip, '') = '') FROM pos_printer GROUP BY 1",
+    ) or []:
+        if len(row) == 3 and row[1].isdigit() and row[2].isdigit():
+            hardware["order_printers"][row[0]] = {"count": int(row[1]), "unconfigured": int(row[2])}
+
     modules = {}
     for row in _psql_rows(
         paths,
@@ -4084,6 +4110,7 @@ def doctor_collect(layout: Layout, paths: TenantPaths) -> dict:
             "database_bytes": _psql_int(paths, "SELECT pg_database_size(current_database())"),
         },
         "modules": modules,
+        "hardware": hardware,
         "filestore": {"files": filestore["files"], "bytes": filestore["bytes"]},
         "disk": disk,
         "edge": {
@@ -4214,6 +4241,22 @@ def doctor_evaluate(raw: dict) -> dict:
         "FAIL" if missing or pending else "OK",
         installed=sorted(name for name, state in modules.items() if state == "installed"),
         missing=missing, pending=pending,
+    )
+
+    # Peripherals are optional (a register can run on screen alone), but a
+    # printer left on its placeholder address is a store that will not print.
+    hardware = raw.get("hardware") or {}
+    order_printers = hardware.get("order_printers") or {}
+    unconfigured = (hardware.get("receipt_printers_unset") or 0) + sum(
+        entry.get("unconfigured", 0) for entry in order_printers.values()
+    )
+    sections["HARDWARE"] = _section(
+        "WARN" if unconfigured else "OK",
+        registers=hardware.get("registers"),
+        receipt_printers=hardware.get("receipt_printers"),
+        order_printers={name: entry.get("count") for name, entry in order_printers.items()},
+        unconfigured_printers=unconfigured,
+        mobile_scanner_pairings=hardware.get("scanner_pairings"),
     )
 
     sections["VERSION"] = _section(
