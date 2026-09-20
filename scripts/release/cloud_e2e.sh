@@ -118,6 +118,7 @@ vlux provision "$TENANT_A" \
   --owner-email "owner-a@vlux.lab" \
   --company-name "VLUX Lab A" \
   --edition cloud_managed \
+  --country MX \
   --tls-mode internal \
   --image "$APP_IMAGE" \
   --workers 2 \
@@ -468,6 +469,20 @@ owner_group="$(pg_query "$TENANT_A" "$DB_A" "SELECT count(*) FROM res_groups_use
 sudo test -f "${BASE}/tenants/${TENANT_A}/secrets/initial_owner_password" || die "initial owner password was not stored"
 record OWNER_BOOTSTRAP PASS
 record DEFAULT_ADMIN_CREDENTIALS REMOVED
+
+# ---------------------------------------------------------------------------
+step "Localisation: the tenant sells in its own country's currency and taxes"
+# ---------------------------------------------------------------------------
+# res_company keeps no country column: it comes from the company's partner.
+country="$(pg_query "$TENANT_A" "$DB_A" "SELECT c.code FROM res_company co JOIN res_partner p ON p.id = co.partner_id JOIN res_country c ON c.id = p.country_id WHERE co.id = 1")"
+[ "$country" = "MX" ] || die "the tenant company is not in MX (got '${country}')"
+chart="$(pg_query "$TENANT_A" "$DB_A" "SELECT chart_template FROM res_company WHERE id = 1")"
+[ "$chart" = "mx" ] || die "the Mexican chart of accounts was not loaded (got '${chart}')"
+currency="$(pg_query "$TENANT_A" "$DB_A" "SELECT cur.name FROM res_company co JOIN res_currency cur ON cur.id = co.currency_id WHERE co.id = 1")"
+[ "$currency" = "MXN" ] || die "the tenant company is not in MXN (got '${currency}')"
+iva="$(pg_query "$TENANT_A" "$DB_A" "SELECT count(*) FROM account_tax WHERE company_id = 1 AND type_tax_use = 'sale' AND amount = 16")"
+[ "$iva" != "0" ] || die "no 16 % sale tax (IVA) exists in the provisioned tenant"
+record LOCALISATION "MX/mx/MXN/IVA16"
 
 # ---------------------------------------------------------------------------
 step "Scanner and owner backend reachable over HTTPS"
