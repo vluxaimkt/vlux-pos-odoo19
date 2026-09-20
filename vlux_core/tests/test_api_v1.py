@@ -175,6 +175,42 @@ class TestVluxApiV1Contract(HttpCase, VluxApiCase):
 
         self.assertEqual((response.status_code, body["error"]), (429, "RATE_LIMITED"))
 
+    def test_usage_is_recorded_once_a_minute(self):
+        token = self.token.sudo()
+        token.last_used_at = False
+        self.env.flush_all()
+
+        self._get("/me", self.raw)
+        token.invalidate_recordset(["last_used_at"])
+        first = token.last_used_at
+        self.assertTrue(first, "the first call records the usage")
+
+        self._get("/me", self.raw)
+        token.invalidate_recordset(["last_used_at"])
+        self.assertEqual(token.last_used_at, first, "calls inside the minute stay read-only")
+
+        stale = first - timedelta(minutes=5)
+        token.last_used_at = stale
+        self.env.flush_all()
+        self._get("/me", self.raw)
+        token.invalidate_recordset(["last_used_at"])
+        self.assertGreaterEqual(token.last_used_at, first, "a stale timestamp is refreshed")
+
+    def test_rate_limit_counts_failed_requests_too(self):
+        """The counter commits on its own, so an errored request still counts."""
+        def boom(self, token, **kwargs):
+            raise RuntimeError("boom")
+
+        failing = api_controller.api_route("/me", "system:read")(boom)
+        with patch.object(api_controller, "RATE_LIMIT", 2):
+            with patch.object(api_controller.VluxApiV1, "me", failing),                     self.assertLogs("odoo.addons.vlux_core.controllers.api", "ERROR"):
+                response, body = self._get("/me", self.raw)
+                self.assertEqual(response.status_code, 500)
+                self._get("/me", self.raw)
+            response, body = self._get("/me", self.raw)
+
+        self.assertEqual((response.status_code, body["error"]), (429, "RATE_LIMITED"))
+
     def test_internal_errors_do_not_leak_details(self):
         def boom(self, token, **kwargs):
             raise RuntimeError("password=hunter2 at C:/secret")

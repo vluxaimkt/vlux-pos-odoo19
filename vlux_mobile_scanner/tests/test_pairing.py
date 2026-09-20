@@ -1,3 +1,4 @@
+import uuid
 from datetime import timedelta
 
 from psycopg2.errors import UniqueViolation
@@ -105,7 +106,17 @@ class TestVluxMobileScannerPairing(TransactionCase):
 
     def test_rate_limit_blocks_excess_requests(self):
         limiter = self.env["vlux.mobile.scanner.rate.limit"].sudo()
+        device = uuid.uuid4().hex  # the shared counter commits on its own
 
-        self.assertTrue(limiter.consume("test", "device", 2, 60))
-        self.assertTrue(limiter.consume("test", "device", 2, 60))
-        self.assertFalse(limiter.consume("test", "device", 2, 60))
+        self.assertTrue(limiter.consume("test", device, 2, 60))
+        self.assertTrue(limiter.consume("test", device, 2, 60))
+        self.assertFalse(limiter.consume("test", device, 2, 60))
+
+    def test_rate_limit_is_the_shared_one(self):
+        """Scanner scopes count in ``vlux.rate.limit`` under their own prefix."""
+        device = uuid.uuid4().hex
+        self.env["vlux.mobile.scanner.rate.limit"].sudo().consume("scan", device, 5, 60)
+
+        shared = self.env["vlux.rate.limit"].sudo()
+        self.assertFalse(shared.consume("scanner:scan", device, 1, 60))
+        self.assertTrue(shared.consume("scan", device, 1, 60))

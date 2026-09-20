@@ -1,3 +1,5 @@
+import uuid
+
 from odoo.tests.common import TransactionCase, tagged
 
 
@@ -54,7 +56,10 @@ class TestVluxOwnerSecurity(TransactionCase):
 
     def test_rate_limit_blocks_excess_requests(self):
         limiter = self.env["vlux.rate.limit"].sudo()
+        # The counter commits in a transaction of its own, so the identity must
+        # be unique per run or a re-run inside the window would start at 3.
+        identity = uuid.uuid4().hex
 
-        self.assertTrue(limiter.consume("test", self.env.user.id, 2, 60))
-        self.assertTrue(limiter.consume("test", self.env.user.id, 2, 60))
-        self.assertFalse(limiter.consume("test", self.env.user.id, 2, 60))
+        self.assertTrue(limiter.consume("test", identity, 2, 60))
+        self.assertTrue(limiter.consume("test", identity, 2, 60))
+        self.assertFalse(limiter.consume("test", identity, 2, 60))

@@ -1,10 +1,16 @@
-import hashlib
 from datetime import timedelta
 
 from odoo import api, fields, models
 
 
 class VluxMobileScannerRateLimit(models.Model):
+    """Request budget of the phone scanner.
+
+    Counting is delegated to the shared ``vlux.rate.limit`` (its own short
+    transaction survives concurrent bursts); this model only keeps its legacy
+    table so existing installations upgrade without a migration.
+    """
+
     _name = "vlux.mobile.scanner.rate.limit"
     _description = "Límite de solicitudes del escáner móvil"
 
@@ -19,30 +25,9 @@ class VluxMobileScannerRateLimit(models.Model):
 
     @api.model
     def consume(self, scope, identity, limit, window_seconds):
-        identity = str(identity or "unknown")
-        key = hashlib.sha256(f"{scope}:{identity}".encode("utf-8")).hexdigest()
-        now = fields.Datetime.now()
-        cutoff = now - timedelta(seconds=window_seconds)
-        self.env.cr.execute(
-            f"""
-            INSERT INTO {self._table}
-                        (key, window_start, request_count, create_date, write_date)
-                 VALUES (%s, %s, 1, %s, %s)
-            ON CONFLICT (key) DO UPDATE
-                    SET window_start = CASE
-                            WHEN {self._table}.window_start <= %s THEN %s
-                            ELSE {self._table}.window_start
-                        END,
-                        request_count = CASE
-                            WHEN {self._table}.window_start <= %s THEN 1
-                            ELSE {self._table}.request_count + 1
-                        END,
-                        write_date = %s
-            RETURNING request_count
-            """,
-            [key, now, now, now, cutoff, now, cutoff, now],
+        return self.env["vlux.rate.limit"].sudo().consume(
+            f"scanner:{scope}", identity, limit, window_seconds
         )
-        return self.env.cr.fetchone()[0] <= limit
 
     @api.autovacuum
     def _gc_old_windows(self):

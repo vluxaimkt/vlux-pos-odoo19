@@ -1,8 +1,11 @@
 import hashlib
 import secrets
+from datetime import timedelta
 
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
+
+from .rate_limit import own_transaction
 
 # Scopes are coarse on purpose: a caller either reads the catalog or it does
 # not. Finer permissions stay where Odoo already enforces them (the user's VLUX
@@ -118,9 +121,25 @@ class VluxApiToken(models.Model):
         self.write({"active": False})
 
     def touch(self):
-        """Record usage at most once a minute: the hot path stays read-only."""
+        """Record usage at most once a minute: the hot path stays read-only.
+
+        The write goes through a transaction of its own with the throttle in
+        the WHERE clause, so a burst of first requests on a fresh token (or on
+        a stale one) updates the row once and never fails on a concurrent
+        update; see :func:`own_transaction`.
+        """
         self.ensure_one()
         now = fields.Datetime.now()
         if self.last_used_at and (now - self.last_used_at).total_seconds() < 60:
             return
-        self.sudo().with_context(tracking_disable=True).write({"last_used_at": now})
+        with own_transaction(self.env) as cr:
+            cr.execute(
+                f"""
+                UPDATE {self._table}
+                   SET last_used_at = %s
+                 WHERE id = %s
+                   AND (last_used_at IS NULL OR last_used_at < %s)
+                """,
+                [now, self.id, now - timedelta(seconds=60)],
+            )
+        self.invalidate_recordset(["last_used_at"])
