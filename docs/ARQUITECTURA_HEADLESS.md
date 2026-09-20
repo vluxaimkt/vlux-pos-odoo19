@@ -4,7 +4,7 @@
 | --- | --- |
 | Estado | Aceptada (2026-09-18) |
 | Alcance | Dirección de producto a largo plazo para VLUX POS |
-| Relacionado | [Arquitectura](ARQUITECTURA.md), [Operabilidad y rendimiento](OPERABILIDAD_PERFORMANCE.md) |
+| Relacionado | [Arquitectura](ARQUITECTURA.md), [Operabilidad y rendimiento](OPERABILIDAD_PERFORMANCE.md), [Plan de iniciativas](PLAN_INICIATIVAS.md) |
 
 ## Contexto
 
