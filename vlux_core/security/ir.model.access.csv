@@ -10,3 +10,6 @@ access_product_template_vlux_auditor,product.template vlux auditor,product.model
 access_stock_picking_vlux_auditor,stock.picking vlux auditor,stock.model_stock_picking,vlux_core.group_vlux_auditor,1,0,0,0
 access_stock_move_vlux_auditor,stock.move vlux auditor,stock.model_stock_move,vlux_core.group_vlux_auditor,1,0,0,0
 access_stock_quant_vlux_auditor,stock.quant vlux auditor,stock.model_stock_quant,vlux_core.group_vlux_auditor,1,0,0,0
+access_vlux_api_token_system,vlux.api.token system,model_vlux_api_token,base.group_system,1,1,1,1
+access_vlux_rate_limit_system,vlux.rate.limit system,model_vlux_rate_limit,base.group_system,1,1,1,1
+access_vlux_api_token_new_system,vlux.api.token.new system,model_vlux_api_token_new,base.group_system,1,1,1,1

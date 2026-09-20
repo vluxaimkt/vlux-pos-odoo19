@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_vlux_api_token_list" model="ir.ui.view">
+        <field name="name">vlux.api.token.list</field>
+        <field name="model">vlux.api.token</field>
+        <field name="arch" type="xml">
+            <list string="Tokens de la API VLUX">
+                <field name="name"/>
+                <field name="user_id"/>
+                <field name="scopes"/>
+                <field name="token_prefix"/>
+                <field name="last_used_at"/>
+                <field name="expires_at"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="active" column_invisible="True"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_vlux_api_token_form" model="ir.ui.view">
+        <field name="name">vlux.api.token.form</field>
+        <field name="model">vlux.api.token</field>
+        <field name="arch" type="xml">
+            <form string="Token de la API VLUX">
+                <header>
+                    <button name="action_revoke" type="object" string="Revocar"
+                            class="btn-danger" invisible="not active"
+                            confirm="El dispositivo que use este token dejará de funcionar de inmediato. ¿Revocarlo?"/>
+                    <widget name="web_ribbon" title="Revocado" bg_color="text-bg-danger" invisible="active"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="user_id" readonly="1"/>
+                            <field name="company_id" readonly="1" groups="base.group_multi_company"/>
+                            <field name="scopes" readonly="1"/>
+                        </group>
+                        <group>
+                            <field name="token_prefix"/>
+                            <field name="expires_at"/>
+                            <field name="last_used_at"/>
+                            <field name="active" invisible="1"/>
+                        </group>
+                    </group>
+                    <div class="text-muted">
+                        El token completo solo se muestra al emitirlo: aquí se guarda
+                        únicamente su huella, por lo que no puede recuperarse. Si se
+                        perdió, revoca este token y emite uno nuevo.
+                    </div>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_vlux_api_token" model="ir.actions.act_window">
+        <field name="name">Tokens de la API</field>
+        <field name="res_model">vlux.api.token</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{'active_test': False}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Emite el primer token de la API</p>
+            <p>Cada caja o interfaz VLUX se autentica con su propio token, revocable por separado.</p>
+        </field>
+    </record>
+
+    <record id="view_vlux_api_token_new_form" model="ir.ui.view">
+        <field name="name">vlux.api.token.new.form</field>
+        <field name="model">vlux.api.token.new</field>
+        <field name="arch" type="xml">
+            <form string="Nuevo token de la API">
+                <group invisible="raw_token">
+                    <field name="name" placeholder="Caja 1 — tablet"/>
+                    <field name="user_id"/>
+                    <field name="expires_at"/>
+                    <field name="allowed_scopes" string="Permitidos por su rol"/>
+                </group>
+                <group string="Alcances" invisible="raw_token">
+                    <group>
+                        <field name="scope_system_read"/>
+                        <field name="scope_catalog_read"/>
+                        <field name="scope_catalog_write"/>
+                    </group>
+                    <group>
+                        <field name="scope_orders_write"/>
+                        <field name="scope_session_manage"/>
+                        <field name="scope_dashboard_read"/>
+                    </group>
+                </group>
+                <div invisible="not raw_token">
+                    <div class="alert alert-warning" role="alert">
+                        Copia el token ahora. No se guarda en la base de datos y no
+                        volverá a mostrarse; si se pierde, revócalo y emite otro.
+                    </div>
+                    <group>
+                        <field name="raw_token" readonly="1" widget="CopyClipboardChar"/>
+                    </group>
+                </div>
+                <footer>
+                    <button name="action_issue" type="object" string="Emitir token"
+                            class="btn-primary" invisible="raw_token"/>
+                    <button string="Cancelar" class="btn-secondary" special="cancel"
+                            invisible="raw_token"/>
+                    <button string="Listo" class="btn-primary" special="cancel"
+                            invisible="not raw_token"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_vlux_api_token_new" model="ir.actions.act_window">
+        <field name="name">Nuevo token de la API</field>
+        <field name="res_model">vlux.api.token.new</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <menuitem id="menu_vlux_api" name="API VLUX"
+              parent="base.menu_administration" sequence="90"
+              groups="base.group_system"/>
+    <menuitem id="menu_vlux_api_token_new" name="Emitir token"
+              parent="menu_vlux_api" action="action_vlux_api_token_new" sequence="10"/>
+    <menuitem id="menu_vlux_api_token" name="Tokens de la API"
+              parent="menu_vlux_api" action="action_vlux_api_token" sequence="20"/>
+
+</odoo>

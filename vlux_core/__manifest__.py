@@ -1,7 +1,7 @@
 {
     "name": "VLUX Core",
     "summary": "Roles, metadata y diagnostico base para VLUX POS",
-    "version": "19.0.1.2.0",
+    "version": "19.0.1.3.0",
     "category": "Point of Sale",
     "author": "VLUX",
     "license": "LGPL-3",
@@ -11,6 +11,7 @@
         "security/ir.model.access.csv",
         "data/config_parameter_data.xml",
         "views/res_company_views.xml",
+        "views/api_token_views.xml",
     ],
     "assets": {
         "point_of_sale._assets_pos": [
