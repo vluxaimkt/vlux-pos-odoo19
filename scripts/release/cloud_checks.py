@@ -800,17 +800,34 @@ def check_localisation(cli) -> None:
             "LOCALISATION: it must run after the module install and before the Owner is created "
             "(Odoo refuses to load a chart of accounts once entries or payment methods exist)",
         )
-    localisation = next(
-        (node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "configure_localisation"),
-        None,
-    )
-    check(localisation is not None, "LOCALISATION: configure_localisation is missing")
-    if localisation is not None:
-        body = ast.get_source_segment(source, localisation) or ""
-        check("try_loading" in body, "LOCALISATION: the chart of accounts must be loaded")
-        check("install_demo=False" in body, "LOCALISATION: never load Odoo demo data into a tenant")
-        check("assert company.chart_template" in body,
-              "LOCALISATION: provisioning must fail loudly if no chart of accounts was loaded")
+    # The script runs inside the tenant's Odoo: compile it here and check the
+    # call shape, instead of finding a typo 40 minutes into the cloud E2E.
+    script = cli.localisation_script("MX")
+    try:
+        script_tree = ast.parse(script)
+    except SyntaxError as exc:
+        FAILURES.append("LOCALISATION: the generated script does not compile: " + str(exc))
+        script_tree = None
+    check("install_demo=False" in script, "LOCALISATION: never load Odoo demo data into a tenant")
+    check("assert company.chart_template" in script,
+          "LOCALISATION: provisioning must fail loudly if no chart of accounts was loaded")
+    if script_tree is not None:
+        loads = [
+            node for node in ast.walk(script_tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "try_loading"
+        ]
+        check(len(loads) == 1, "LOCALISATION: the script must load the chart of accounts once")
+        if loads:
+            # Odoo 19: try_loading(template_code, company, install_demo=False)
+            check(
+                len(loads[0].args) >= 1,
+                "LOCALISATION: try_loading needs the template code as its first positional argument",
+            )
+            check(
+                any(kw.arg == "company" for kw in loads[0].keywords),
+                "LOCALISATION: try_loading must target the tenant company explicitly",
+            )
 
     e2e = (ROOT / "scripts" / "release" / "cloud_e2e.sh").read_text(encoding="utf-8")
     check("record LOCALISATION" in e2e and "MXN" in e2e and "amount = 16" in e2e,

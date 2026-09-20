@@ -1184,6 +1184,27 @@ def upgrade_addons(paths: TenantPaths, db_name: str) -> None:
     )
 
 
+def localisation_script(country_code: str) -> str:
+    """Odoo shell script (stdin) that applies a country's chart of accounts."""
+    return (
+        "country = env['res.country'].sudo().search([('code', '=', "
+        + repr(country_code) + ")], limit=1)\n"
+        "assert country, 'unknown country code " + country_code + "'\n"
+        "company = env.ref('base.main_company').sudo()\n"
+        "company.country_id = country\n"
+        "Chart = env['account.chart.template'].sudo()\n"
+        # try_loading takes the template code positionally in Odoo 19.
+        "template = Chart._guess_chart_template(country)\n"
+        "assert template, 'no chart of accounts is available for " + country_code + "'\n"
+        "Chart.try_loading(template, company=company, install_demo=False)\n"
+        "env = env()  # the localisation module install replaces the registry\n"
+        "company = env.ref('base.main_company').sudo()\n"
+        "assert company.chart_template, 'no chart of accounts was loaded'\n"
+        "print('VLUX_LOCALISATION=' + company.country_id.code + ',' + company.chart_template + ',' + company.currency_id.name)\n"
+        "env.cr.commit()\n"
+    )
+
+
 def configure_localisation(paths: TenantPaths, db_name: str, country_code: str) -> None:
     """Set the company country and load its chart of accounts (and currency).
 
@@ -1192,19 +1213,7 @@ def configure_localisation(paths: TenantPaths, db_name: str, country_code: str) 
     accounts once either exists, which is exactly the trap a tenant provisioned
     without a country falls into.
     """
-    script = (
-        "country = env['res.country'].sudo().search([('code', '=', "
-        + repr(country_code) + ")], limit=1)\n"
-        "assert country, 'unknown country code " + country_code + "'\n"
-        "company = env.ref('base.main_company').sudo()\n"
-        "company.country_id = country\n"
-        "env['account.chart.template'].sudo().try_loading(company=company, install_demo=False)\n"
-        "env = env()  # the localisation module install replaces the registry\n"
-        "company = env.ref('base.main_company').sudo()\n"
-        "assert company.chart_template, 'no chart of accounts was loaded'\n"
-        "print('VLUX_LOCALISATION=' + company.country_id.code + ',' + company.chart_template + ',' + company.currency_id.name)\n"
-        "env.cr.commit()\n"
-    )
+    script = localisation_script(country_code)
     info("Applying the " + country_code + " localisation (chart of accounts, taxes, currency)")
     odoo_run(paths, ["shell", "-d", db_name, "--no-http"], input_text=script, timeout=1800)
 
