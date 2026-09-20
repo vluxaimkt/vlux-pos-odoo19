@@ -473,7 +473,8 @@ record DEFAULT_ADMIN_CREDENTIALS REMOVED
 # ---------------------------------------------------------------------------
 step "Localisation: the tenant sells in its own country's currency and taxes"
 # ---------------------------------------------------------------------------
-country="$(pg_query "$TENANT_A" "$DB_A" "SELECT c.code FROM res_company co JOIN res_country c ON c.id = co.country_id WHERE co.id = 1")"
+# res_company keeps no country column: it comes from the company's partner.
+country="$(pg_query "$TENANT_A" "$DB_A" "SELECT c.code FROM res_company co JOIN res_partner p ON p.id = co.partner_id JOIN res_country c ON c.id = p.country_id WHERE co.id = 1")"
 [ "$country" = "MX" ] || die "the tenant company is not in MX (got '${country}')"
 chart="$(pg_query "$TENANT_A" "$DB_A" "SELECT chart_template FROM res_company WHERE id = 1")"
 [ "$chart" = "mx" ] || die "the Mexican chart of accounts was not loaded (got '${chart}')"
