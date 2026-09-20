@@ -76,6 +76,10 @@ def authenticate(required_scope):
             "FORBIDDEN_SCOPE", "El token no tiene el alcance %s." % required_scope, 403
         )
     token.touch()
+    # From here on the request *is* that user: Odoo's own record rules and
+    # access rights apply, so an endpoint never has to be trusted to check
+    # them itself. The scope only narrows what the user may already do.
+    request.update_env(user=token.user_id.id)
     return token
 
 
@@ -110,11 +114,12 @@ class VluxApiV1(http.Controller):
     @api_route("/me", scope="system:read")
     def me(self, token, **kwargs):
         """Who the caller is, what it may do, and against which store."""
-        company = token.company_id
+        user = request.env.user
+        company = request.env.company
         return {
             "api_version": API_VERSION,
             "token": {"name": token.name, "prefix": token.token_prefix, "scopes": token.scopes.split()},
-            "user": {"id": token.user_id.id, "name": token.user_id.name, "login": token.user_id.login},
+            "user": {"id": user.id, "name": user.name, "login": user.login},
             "company": {
                 "id": company.id,
                 "name": company.name,

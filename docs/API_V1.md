@@ -50,8 +50,10 @@ Garantías, heredadas del emparejamiento del escáner que ya opera en staging:
   para entrar.
 - El texto plano se muestra **una vez**, al emitirlo. Si se pierde, se revoca y
   se emite otro.
-- Un token **nunca puede hacer más que el usuario detrás de él**: los alcances
-  se limitan al rol VLUX de ese usuario y Odoo sigue aplicando sus permisos.
+- Un token **nunca puede hacer más que el usuario detrás de él**: la petición se
+  ejecuta *como* ese usuario, así que las reglas de registro y los permisos de
+  Odoo se aplican igual que en la pantalla; el alcance solo estrecha lo que ese
+  usuario ya podía hacer. Los alcances, además, se limitan a su rol VLUX.
 - Expiración opcional, revocación inmediata y `last_used_at` para detectar
   dispositivos olvidados.
 

@@ -136,7 +136,9 @@ class TestVluxApiV1Contract(HttpCase, VluxApiCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(body["ok"])
         self.assertEqual(body["data"]["token"]["scopes"], ["dashboard:read", "system:read"])
+        # The endpoint ran as the token's user, not as the public user.
         self.assertEqual(body["data"]["user"]["login"], "api-contract-owner")
+        self.assertEqual(body["data"]["company"]["id"], self.owner.company_id.id)
         self.assertEqual(body["data"]["company"]["currency"], self.env.company.currency_id.name)
         self.assertEqual(response.headers["X-Vlux-Api-Version"], "v1")
         self.assertEqual(response.headers["X-Request-Id"], body["request_id"])
