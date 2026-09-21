@@ -36,6 +36,7 @@ dashboard has "today" data. Approximate cost on a 2 vCPU host: ~55 products/s,
 | `bench_scanner.py` | HTTP requests per scan, scan→result latency, lost/duplicated scans, throughput | yes |
 | `bench_startup.py` | Time to `/vlux/health`, idle RSS, idle PostgreSQL connections | spawns one |
 | `bench_api_burst.py` | API v1 under a concurrent burst: status histogram, latency, whether the 600/min budget held with zero 500s | yes |
+| `bench_catalog_sync.py` | API v1 catalog feed: pages, latency and SQL queries per page for a full sync, exactness of an incremental sync (changes + deletions); `--base-url` adds end-to-end HTTP latency | no (`--base-url` needs one) |
 
 `bench_scanner.py` plays both sides of the protocol: the phone (strategies
 `v1`, `batch`, `push`) and the POS (ORM acknowledgements after

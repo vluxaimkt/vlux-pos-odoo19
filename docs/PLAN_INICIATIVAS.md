@@ -31,7 +31,7 @@ disciplina de pruebas y despliegue existe. Lo que falta es el **contrato**.
 | --- | --- | --- |
 | ~~B1~~ | ~~No hay espacio de nombres versionado ni formato único de error~~ (cerrada en Fase A) | Cada interfaz nueva inventa su propio contrato y se rompe en cada actualización de Odoo |
 | ~~B2~~ | ~~No hay autenticación de cliente propia~~ (cerrada en Fase A; falta migrar Owner a ella) | Sin login propio no hay interfaz propia |
-| B3 | No hay sincronización de catálogo con cursor ni bajas explícitas | Una caja propia no puede mantener su copia local al día |
+| ~~B3~~ | ~~No hay sincronización de catálogo con cursor ni bajas explícitas~~ (cerrada en Fase B) | Una caja propia no puede mantener su copia local al día |
 | B4 | No hay envío de órdenes por API | Sin esto no hay venta desde una interfaz propia |
 | B5 | No hay apertura ni cierre de caja por API | No se puede operar un día completo |
 | B6 | No hay cálculo de precios e impuestos expuesto | El total cobrado podría no coincidir con el contabilizado |
@@ -60,14 +60,18 @@ Documentada en [API_V1.md](API_V1.md).
   autentica con `GET /me`, es rechazado fuera de su alcance (403) y el contrato
   está cubierto por 11 pruebas que fallan si cambia.
 
-### Fase B — Datos de la tienda
-- Catálogo con sincronización incremental: cursor `(write_date, id)`, páginas
-  acotadas y **bajas explícitas** (archivados o retirados del POS).
-- Clientes, listas de precios, impuestos y configuración de la caja.
-- Alta rápida de productos expuesta como endpoint.
-- **Criterio de aceptación:** un cliente sincroniza 10 000 productos por páginas,
-  se desconecta, vuelve y recibe solo los cambios y las bajas. Medido con
-  presupuesto de tiempo y de consultas.
+### Fase B — Datos de la tienda — **entregada** (`vlux_core 19.0.1.4.0`, `vlux_pos_catalog 19.0.1.2.0`)
+- Catálogo con sincronización incremental: cursor opaco `(vlux_sync_date, id)`
+  (el sello avanza con la variante o su plantilla), páginas acotadas y
+  **bajas explícitas**: archivados y retirados del POS llegan con sus banderas,
+  los borrados de verdad como lápidas (`vlux.catalog.tombstone`, 90 días).
+- Clientes (feed con cursor), listas de precios, impuestos, categorías y
+  `/store/config`.
+- Alta rápida de productos como `POST /catalog/products`.
+- **Criterio de aceptación cumplido:** 10 000 productos en 21 páginas de 500,
+  p95 = 121 ms por página, 10 consultas por página constantes; tras editar 50 y
+  borrar 5, la sincronización incremental entrega exactamente esos 50 y 5
+  (`tools/perf/bench_catalog_sync.py`). Contrato en `docs/API_V1.md` §4.1.
 
 ### Fase C — Operación de venta
 - Apertura y cierre de caja, con control de efectivo.
