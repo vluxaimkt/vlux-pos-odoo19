@@ -13,3 +13,4 @@ access_stock_quant_vlux_auditor,stock.quant vlux auditor,stock.model_stock_quant
 access_vlux_api_token_system,vlux.api.token system,model_vlux_api_token,base.group_system,1,1,1,1
 access_vlux_rate_limit_system,vlux.rate.limit system,model_vlux_rate_limit,base.group_system,1,1,1,1
 access_vlux_api_token_new_system,vlux.api.token.new system,model_vlux_api_token_new,base.group_system,1,1,1,1
+access_vlux_catalog_tombstone_system,vlux.catalog.tombstone system,model_vlux_catalog_tombstone,base.group_system,1,1,1,1

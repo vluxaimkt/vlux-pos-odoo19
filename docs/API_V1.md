@@ -33,8 +33,18 @@ Códigos de error del contrato:
 | `MISSING_TOKEN` | 401 | Falta `Authorization: Bearer <token>` |
 | `INVALID_TOKEN` | 401 | Token desconocido, revocado, expirado o de un usuario desactivado |
 | `FORBIDDEN_SCOPE` | 403 | El token no tiene el alcance que el endpoint exige |
+| `FORBIDDEN` | 403 | El alcance basta pero Odoo niega el permiso al usuario del token (grupo, compañía, regla de registro) |
+| `NOT_FOUND` | 404 | El registro no existe |
+| `VALIDATION_ERROR` | 400 | Datos o parámetros inválidos; `message` explica cuál |
+| `INVALID_JSON` | 400 | El cuerpo no es un objeto JSON |
+| `INVALID_CURSOR` | 400 | El cursor no fue emitido por este servidor |
+| `RESYNC_REQUIRED` | 409 | El cursor es más viejo que el historial de bajas (90 días): sincronizar desde cero |
+| `CONFLICT` | 409 | La operación choca con un registro existente; `details` lo describe |
 | `RATE_LIMITED` | 429 | Más de 600 solicitudes por minuto con el mismo token |
 | `INTERNAL_ERROR` | 500 | Fallo del servidor; el detalle queda en el registro, nunca en la respuesta |
+
+Un error puede traer además `details` (objeto) con datos útiles para el
+cliente, por ejemplo el producto existente en un `CONFLICT` de código de barras.
 
 ## 3. Autenticación
 
@@ -99,6 +109,14 @@ print(raw)   # única vez
 | --- | --- | --- | --- |
 | GET | `/me` | `system:read` | Identidad del token, sus alcances y la tienda contra la que opera |
 | GET | `/openapi.json` | público | El contrato completo, para generar un cliente |
+| GET | `/store/config` | `system:read` | Compañía, datos fiscales, moneda, impuestos por defecto y cajas con sus métodos de pago |
+| GET | `/catalog/products` | `catalog:read` | **Feed** de variantes vendibles con cursor y bajas |
+| GET | `/catalog/customers` | `catalog:read` | **Feed** de clientes con cursor y bajas |
+| GET | `/catalog/pos-categories` | `catalog:read` | Categorías del punto de venta (instantánea) |
+| GET | `/catalog/categories` | `catalog:read` | Categorías internas de producto (instantánea) |
+| GET | `/catalog/taxes` | `catalog:read` | Impuestos de venta de la compañía (instantánea) |
+| GET | `/catalog/pricelists` | `catalog:read` | Listas de precios con sus reglas (instantánea) |
+| POST | `/catalog/products` | `catalog:write` | Alta rápida de un producto vendible (mismas reglas que el diálogo del POS) |
 
 `/me` es también la prueba de vida que debe ejecutar una caja al arrancar:
 confirma token, tienda, moneda y hora del servidor.
@@ -107,8 +125,83 @@ confirma token, tienda, moneda y hora del servidor.
 curl -s https://tienda.vlux.com.mx/vlux/api/v1/me -H "Authorization: Bearer $VLUX_TOKEN"
 ```
 
-Las fases B, C y D añaden catálogo con sincronización incremental, venta,
-apertura y cierre de caja, y métricas (ver [PLAN_INICIATIVAS.md](PLAN_INICIATIVAS.md)).
+La petición se ejecuta en la **compañía del token**: una caja solo ve los
+productos, clientes, impuestos y cajas de su tienda, aunque el usuario tenga
+acceso a varias compañías en Odoo.
+
+### 4.1 Sincronización incremental (feeds)
+
+Una caja VLUX guarda una copia local del catálogo y pide "lo que cambió desde
+mi cursor". Los dos feeds (`/catalog/products`, `/catalog/customers`) comparten
+el mismo protocolo:
+
+```
+GET /catalog/products?cursor=<opaco>&limit=500
+→ {"items": [...], "deleted": [id, ...], "next_cursor": "...", "has_more": true, "server_time": "..."}
+```
+
+1. Sin `cursor` se empieza desde cero: se piden páginas hasta que `has_more`
+   sea `false`, aplicando cada una y guardando **siempre** `next_cursor`.
+2. A partir de ahí, cada llamada con el último cursor devuelve solo los
+   registros cambiados después de él (`items`, con sus banderas) y los ids
+   borrados de verdad en ese tramo (`deleted`). El cliente aplica los
+   `items`, luego borra los `deleted`, luego guarda `next_cursor`.
+3. Repetir una página con el mismo cursor devuelve lo mismo: un reintento
+   nunca duplica ni pierde nada.
+
+Reglas que hacen esto fiable:
+
+- **Orden estable** por `(sello, id)`. En productos el sello es
+  `vlux_sync_date`, que avanza cuando cambia la variante **o su plantilla**
+  (nombre, precio, impuestos, categorías, imagen, archivado…); el
+  `write_date` de Odoo no sirve porque renombrar una plantilla no toca sus
+  variantes. En clientes el sello es `write_date`.
+- **Bajas explícitas.** Archivar un producto o quitarlo del POS lo entrega con
+  `active`/`available_in_pos` en `false`; solo un borrado real llega en
+  `deleted`, gracias a una lápida (`vlux.catalog.tombstone`) escrita al
+  borrar. Las lápidas se conservan 90 días; un cursor más viejo recibe
+  `RESYNC_REQUIRED` y debe empezar de cero.
+- **Ventana de asentamiento de 30 s.** Los sellos tienen precisión de un
+  segundo y otra petición puede estar escribiendo en paralelo, así que una
+  página nunca incluye lo escrito en los últimos 30 s: llega en la siguiente
+  llamada. Una transacción que dure más de 30 s (una importación masiva en
+  una sola transacción) podría quedar fuera; la importación estándar de Odoo
+  confirma por lotes y no lo sufre.
+- `limit` por defecto 500, máximo 1000. Cada página cuesta un número
+  constante de consultas SQL (10) sea cual sea su posición.
+
+Un producto del feed:
+
+```json
+{"id": 512, "template_id": 480, "name": "Playera (M)", "barcode": "7501234567890",
+ "default_code": null, "list_price": 189.0, "currency_id": 33, "tax_ids": [4],
+ "pos_category_ids": [2], "category_id": 1, "uom": {"id": 1, "name": "Unidades"},
+ "type": "consu", "is_storable": true, "attributes": [{"attribute": "Talla", "value": "M"}],
+ "active": true, "available_in_pos": true, "sale_ok": true, "company_id": 2,
+ "sync_date": "2026-09-21T16:40:12.000000Z"}
+```
+
+`list_price` es el precio de lista de la variante en la moneda de la compañía
+(sin impuestos ni lista de precios); las listas de precios se aplican encima con
+`/catalog/pricelists`. Las existencias **no** forman parte del catálogo.
+
+Medido en `tools/perf/bench_catalog_sync.py` con 10 000 productos: 21 páginas
+de 500, p95 = 121 ms por página en proceso (283 ms extremo a extremo por HTTP
+en el host de desarrollo), 10 consultas por página constantes, y la
+sincronización incremental entrega exactamente los cambios y las bajas.
+
+### 4.2 Alta rápida
+
+`POST /catalog/products` con cuerpo JSON: `config_id` (caja) y `name`,
+`barcode`, `list_price`; opcionales `default_code`, `is_storable`,
+`initial_qty`, `pos_categ_id`, `categ_id`, `taxes_ids`, `image` (base64).
+Aplica las mismas reglas que el diálogo del POS: el usuario del token necesita
+el grupo de alta rápida y ser operador de POS, la caja debe ser de su compañía
+y tener una sesión abierta (el stock inicial entra a la ubicación de esa
+caja). Un código ya usado responde `CONFLICT` con `details.existing`.
+
+Las fases C y D añaden venta, apertura y cierre de caja y métricas (ver
+[PLAN_INICIATIVAS.md](PLAN_INICIATIVAS.md)).
 
 ## 5. Límites de uso
 
@@ -144,3 +237,12 @@ almacenamiento hasheado, alcances limitados por rol, token expirado, revocado o
 de usuario desactivado, forma de `/me` y sus cabeceras, token nunca devuelto en
 la respuesta, autenticación ausente o inválida, alcance insuficiente, límite de
 uso, fuga de detalles en un error interno, y el propio OpenAPI.
+
+`vlux_core/tests/test_api_catalog.py` cubre la fase B: el sello de
+sincronización avanza con la plantilla y con la variante, las lápidas al borrar
+variantes, plantillas y clientes, la sincronización completa por páginas sin
+huecos ni duplicados, la incremental con renombrado, archivado, retiro del POS
+y borrado, el reintento de página, cursores inválidos o caducos, alcance y
+compañía, las instantáneas y `/store/config`.
+`vlux_pos_catalog/tests/test_api_quick_create.py` cubre el `POST`: alta,
+conflicto de código de barras, validación, alcance y permisos.
