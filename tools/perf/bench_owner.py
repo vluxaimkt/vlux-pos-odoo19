@@ -37,6 +37,7 @@ def main() -> int:
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--json", default="", help="Write the report to this file")
     parser.add_argument("--label", default="owner_dashboard")
+    parser.add_argument("--date", default="", help="Local day to measure (YYYY-MM-DD); default: today")
     parser.add_argument(
         "--cache",
         choices=("cold", "warm"),
@@ -53,7 +54,7 @@ def main() -> int:
     context = {}
     with environment(odoo, args.db, readonly=True) as env:
         service = env["vlux.owner.dashboard.service"]
-        today = service._local_date()
+        today = service._local_date(args.date or None)
         start_utc, end_utc = service._utc_bounds(today)
         context = {
             "orders_today": env["pos.order"].search_count([
@@ -70,7 +71,7 @@ def main() -> int:
                 service._clear_dashboard_cache()
             before_queries = env.cr.sql_log_count
             started = time.perf_counter()
-            payload = service.get_dashboard()
+            payload = service.get_dashboard(date=args.date or None)
             elapsed = time.perf_counter() - started
             if index >= args.warmup:
                 timings.append(elapsed * 1000.0)

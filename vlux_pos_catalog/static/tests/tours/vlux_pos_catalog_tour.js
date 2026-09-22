@@ -7,6 +7,8 @@ import { scan_barcode, negateStep } from "@point_of_sale/../tests/generic_helper
 const KNOWN_BARCODE = "7509990000011";
 const UNKNOWN_BARCODE = "7509990000028";
 const UNKNOWN_BARCODE_WITH_PHOTO = "7509990000035";
+// Exists in the catalog but is not sold in the POS: the register does not know it.
+const DUPLICATE_BARCODE = "7509990000042";
 
 function openRegister() {
     return [Chrome.startPoS(), Dialog.confirm("Open Register")].flat();
@@ -134,6 +136,29 @@ registry.category("web_tour.tours").add("VluxCatalogDeniedTour", {
                 trigger: ".o_notification:contains('Unknown Barcode')",
             },
             negateStep(dialogIsOpenFor(UNKNOWN_BARCODE)),
+            Chrome.endTour(),
+        ].flat(),
+});
+
+registry.category("web_tour.tours").add("VluxCatalogDuplicateBarcodeTour", {
+    steps: () =>
+        [
+            openRegister(),
+            scan_barcode(DUPLICATE_BARCODE),
+            dialogIsOpenFor(DUPLICATE_BARCODE),
+            fillQuickForm("Duplicado Tour", "5.00"),
+            confirmQuickForm(),
+            {
+                content: "the dialog stays open and names the product that already owns the barcode",
+                trigger: ".vlux-catalog-dialog:contains('Este codigo ya pertenece a un producto')",
+            },
+            {
+                content: "the existing product is offered instead of creating a second one",
+                trigger: ".vlux-catalog-dialog .vlux-catalog-use-existing",
+                run: "click",
+            },
+            negateStep(dialogIsOpenFor(DUPLICATE_BARCODE)),
+            ProductScreen.selectedOrderlineHas("Refresco Duplicado", 1),
             Chrome.endTour(),
         ].flat(),
 });

@@ -1,3 +1,5 @@
+import base64
+import io
 import json
 import time
 from datetime import datetime, timedelta
@@ -269,6 +271,119 @@ class TestVluxApiCatalog(HttpCase, VluxApiCase):
         register = next(item for item in data["registers"] if item["id"] == config.id)
         self.assertEqual(register["name"], "API Caja 1")
         self.assertIn("payment_methods", register)
+
+    def test_initial_sync_carries_no_deletions_until_it_completes(self):
+        """A client with nothing yet must not be told to forget things."""
+        gone = self._products(["Init borrado"], available_in_pos=False)[0]
+        gone.unlink()
+        self._products(["Init A", "Init B", "Init C"])
+        self.env.flush_all()
+        self._next_second()
+        cursor, pages = None, 0
+        while True:
+            response, body = self._get("/catalog/products", cursor=cursor, limit=2)
+            self.assertEqual(body["data"]["deleted"], [], "page %d of an initial sync" % (pages + 1))
+            cursor = body["data"]["next_cursor"]
+            pages += 1
+            if not body["data"]["has_more"]:
+                break
+        self.assertGreater(pages, 1)
+        # Once complete, the cursor is a normal one: later deletions do arrive.
+        later = self._products(["Init borrado 2"], available_in_pos=False)[0]
+        later_id = later.product_variant_id.id
+        later.unlink()
+        self.env.flush_all()
+        self._next_second()
+        response, body = self._get("/catalog/products", cursor=cursor)
+        self.assertEqual(body["data"]["deleted"], [later_id])
+
+    @staticmethod
+    def _png(color):
+        from PIL import Image
+
+        image = Image.new("RGB", (300, 200), color)
+        stream = io.BytesIO()
+        image.save(stream, format="PNG")
+        return base64.b64encode(stream.getvalue())
+
+    def _image(self, product_id, token=None, size=None, etag=None):
+        headers = {"Authorization": "Bearer " + (token or self.raw)}
+        if etag:
+            headers["If-None-Match"] = etag
+        url = API + "/catalog/products/%s/image" % product_id + ("?size=%s" % size if size else "")
+        return self.url_open(url, headers=headers)
+
+    def test_product_image_thumbnail_etag_and_304(self):
+        with_image, without = self._products(["Img con foto", "Img sin foto"])
+        with_image.image_1920 = self._png((200, 30, 30))
+        self.env.flush_all()
+        variant = with_image.product_variant_id
+
+        response = self._image(variant.id)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Content-Type"], "image/png")
+        self.assertIn("private", response.headers["Cache-Control"])
+        self.assertNotIn("no-store", response.headers["Cache-Control"])
+        self.assertTrue(response.headers.get("ETag"))
+        self.assertEqual(response.headers["X-Vlux-Api-Version"], "v1")
+        from PIL import Image
+        picture = Image.open(io.BytesIO(response.content))
+        self.assertLessEqual(max(picture.size), 256, "the default is the 256 px POS tile, not the original")
+        etag = response.headers["ETag"]
+
+        # The feed exposes the same version, with no bytes in it.
+        self._next_second()
+        items, _cursor, _pages = self._sync_all(limit=100)
+        item = next(i for i in items if i["id"] == variant.id)
+        self.assertEqual(etag, '"%s-256"' % item["image_version"])
+        self.assertIsNone(next(i for i in items if i["id"] == without.product_variant_id.id)["image_version"])
+        self.assertNotIn("image_1920", json.dumps(items))
+
+        response = self._image(variant.id, etag=etag)
+        self.assertEqual(response.status_code, 304)
+        self.assertEqual(response.content, b"")
+        self.assertEqual(response.headers["ETag"], etag)
+
+        response = self._image(variant.id, size=128)
+        self.assertEqual(response.status_code, 200)
+        self.assertLessEqual(max(Image.open(io.BytesIO(response.content)).size), 128)
+        self.assertNotEqual(response.headers["ETag"], etag, "each size has its own ETag")
+
+        # A new picture is a new version: the old ETag no longer matches.
+        with_image.image_1920 = self._png((30, 30, 200))
+        self.env.flush_all()
+        response = self._image(variant.id, etag=etag)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(response.headers["ETag"], etag)
+
+    def test_product_image_errors_are_explicit(self):
+        without = self._products(["Img nada"])[0]
+        self.env.flush_all()
+        response = self._image(without.product_variant_id.id)
+        self.assertEqual((response.status_code, json.loads(response.text)["error"]), (404, "NO_IMAGE"))
+
+        response = self._image(without.product_variant_id.id, size=999)
+        self.assertEqual((response.status_code, json.loads(response.text)["error"]), (400, "VALIDATION_ERROR"))
+
+        response = self._image(99999999)
+        self.assertEqual((response.status_code, json.loads(response.text)["error"]), (404, "NOT_FOUND"))
+
+        response = self._image("..%2F..%2Fetc%2Fpasswd")
+        self.assertEqual(response.status_code, 404, "only an integer id is routed")
+
+        response = self._image(without.product_variant_id.id, token=self.raw_no_scope)
+        self.assertEqual((response.status_code, json.loads(response.text)["error"]), (403, "FORBIDDEN_SCOPE"))
+
+        response = self.url_open(API + "/catalog/products/%s/image" % without.product_variant_id.id)
+        self.assertEqual((response.status_code, json.loads(response.text)["error"]), (401, "MISSING_TOKEN"))
+
+        foreign = self.env["product.template"].sudo().create({
+            "name": "Img ajena", "company_id": self.company_b.id, "list_price": 1.0, "image_1920": self._png((0, 0, 0)),
+        })
+        self.env.flush_all()
+        response = self._image(foreign.product_variant_id.id)
+        self.assertEqual((response.status_code, json.loads(response.text)["error"]), (404, "NOT_FOUND"),
+                         "another company's product must not even be acknowledged")
 
     def test_openapi_lists_the_catalog_endpoints(self):
         response = self.url_open(API + "/openapi.json")

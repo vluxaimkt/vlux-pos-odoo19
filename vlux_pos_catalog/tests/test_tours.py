@@ -19,6 +19,16 @@ class TestVluxCatalogTours(TestPointOfSaleHttpCommon):
             "sale_ok": True,
             "taxes_id": [(6, 0, [])],
         })
+        # Known to the catalog, not to the register: scanning it opens the quick
+        # form and saving must not create a second product.
+        cls.env["product.template"].create({
+            "name": "Refresco Duplicado",
+            "barcode": "7509990000042",
+            "list_price": 15.0,
+            "available_in_pos": False,
+            "sale_ok": True,
+            "taxes_id": [(6, 0, [])],
+        })
         cls.pos_admin.group_ids += cls.env.ref("vlux_core.group_vlux_administrator")
         cls.pos_user.group_ids += cls.env.ref("vlux_core.group_vlux_cashier")
 
@@ -47,6 +57,13 @@ class TestVluxCatalogTours(TestPointOfSaleHttpCommon):
             ("res_field", "=", "image_1920"),
         ])
         self.assertTrue(attachment.store_fname)
+
+    def test_duplicate_barcode_reuses_the_existing_product(self):
+        self.start_pos_tour("VluxCatalogDuplicateBarcodeTour", login="pos_admin")
+        products = self.env["product.product"].with_context(active_test=False).search([("barcode", "=", "7509990000042")])
+        self.assertEqual(len(products), 1, "a duplicate barcode must never create a second product")
+        self.assertEqual(products.name, "Refresco Duplicado")
+        self.assertTrue(products.available_in_pos, "using the existing product puts it back on sale in the POS")
 
     def test_cashier_without_permission_gets_standard_not_found(self):
         self.start_pos_tour("VluxCatalogDeniedTour", login="pos_user")

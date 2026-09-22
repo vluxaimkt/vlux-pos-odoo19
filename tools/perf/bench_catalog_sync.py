@@ -56,7 +56,7 @@ def _sync(env, api_catalog, limit, cursor=None):
     while True:
         queries_before = env.cr.sql_log_count
         started = time.perf_counter()
-        page = api_catalog._feed(env, "product.product", "vlux_sync_date", cursor, limit, api_catalog._product_payload)
+        page = api_catalog._feed(env, "product.product", "vlux_sync_date", cursor, limit, api_catalog._product_page)
         json.dumps(page, default=str)  # serialisation is part of the cost
         pages.append({
             "ms": (time.perf_counter() - started) * 1000,
