@@ -43,6 +43,7 @@ ERROR_CODES = {
     "INVALID_CURSOR": 400,
     "RESYNC_REQUIRED": 409,
     "CONFLICT": 409,
+    "NO_IMAGE": 404,
     "RATE_LIMITED": 429,
     "INTERNAL_ERROR": 500,
 }
@@ -112,19 +113,24 @@ def int_param(value, name, default=None, minimum=None, maximum=None):
 # A cursor is the position ``(timestamp, id)`` of the last record delivered,
 # encoded so a client cannot build one by hand and rely on its shape.
 
-def encode_cursor(stamp, record_id):
+def encode_cursor(stamp, record_id, initial=False):
+    """``initial`` marks a cursor inside a first full sync: deletions are
+    pointless for a client that has nothing yet, so they are skipped until
+    the initial sync completes."""
     payload = {"t": stamp.isoformat(timespec="microseconds"), "i": int(record_id)}
+    if initial:
+        payload["f"] = 1
     return base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
 
 
 def decode_cursor(cursor):
-    """Return ``(timestamp, id)``; an absent cursor means "from the start"."""
+    """Return ``(timestamp, id, initial)``; an absent cursor means "from the start"."""
     if not cursor:
-        return datetime.min, 0
+        return datetime.min, 0, True
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
         payload = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
-        return datetime.fromisoformat(payload["t"]), int(payload["i"])
+        return datetime.fromisoformat(payload["t"]), int(payload["i"]), bool(payload.get("f"))
     except (ValueError, KeyError, TypeError, AttributeError):
         raise VluxApiError("INVALID_CURSOR", "El cursor no es válido.")
 
@@ -186,6 +192,13 @@ def api_route(path, scope, methods=("GET",), summary=None, params=None):
             try:
                 token = authenticate(scope)
                 data = function(self, token, *args, **kwargs)
+                if isinstance(data, Response):
+                    # Binary endpoints (images) build their own response and
+                    # only borrow the request id and version headers.
+                    data.headers["X-Request-Id"] = request_id
+                    data.headers["X-Vlux-Api-Version"] = API_VERSION
+                    data.headers["X-Content-Type-Options"] = "nosniff"
+                    return data
                 return api_response({"ok": True, "data": data}, 200, request_id)
             except VluxApiError as error:
                 return api_error(error.code, error.message, error.status, request_id, error.details)

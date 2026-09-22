@@ -15,10 +15,12 @@ Records newer than ``SETTLE_SECONDS`` are held back until the next call, so a
 write that is still being committed by another worker cannot slip behind a
 cursor that already passed its stamp.
 """
+import base64
 from datetime import datetime, timedelta
 
 from odoo import fields, http
-from odoo.http import request
+from odoo.http import Response, request
+from odoo.tools.mimetypes import guess_mimetype
 
 from odoo.addons.vlux_core.controllers.api import (
     VluxApiError, api_route, decode_cursor, encode_cursor, int_param,
@@ -29,6 +31,9 @@ PAGE_DEFAULT = 500
 PAGE_MAX = 1000
 # Longest transaction we assume can be writing catalog rows concurrently.
 SETTLE_SECONDS = 30
+# Odoo keeps these thumbnails precomputed; 256 px is the POS tile.
+IMAGE_SIZES = (128, 256, 512, 1024)
+IMAGE_SIZE_DEFAULT = 256
 
 PAGE_PARAMS = [
     {"name": "cursor", "in": "query", "schema": {"type": "string"},
@@ -46,14 +51,16 @@ def _iso(value):
     return value.isoformat(timespec="microseconds") + "Z"
 
 
-def _feed(env, model, stamp_field, cursor, limit, serialize):
+def _feed(env, model, stamp_field, cursor, limit, serialize_page):
     """One page of ``model`` after ``cursor``, with the deletions of its span.
 
     Stamps have one-second precision (``fields.Datetime.now``), so the page
     only covers stamps strictly before the horizon second: a record written
     later in the same second cannot fall behind a cursor already placed there.
+    ``serialize_page`` turns the page's recordset into its JSON items, so it
+    can batch whatever lookups it needs.
     """
-    since_stamp, since_id = decode_cursor(cursor)
+    since_stamp, since_id, initial = decode_cursor(cursor)
     now = fields.Datetime.now()
     horizon = now - timedelta(seconds=SETTLE_SECONDS)
     fresh_start = since_stamp == datetime.min
@@ -88,20 +95,59 @@ def _feed(env, model, stamp_field, cursor, limit, serialize):
         next_stamp, next_id = horizon, 0
         deleted_until = (horizon, 0)
     deleted = []
-    if not fresh_start and deleted_until:
+    if not initial and deleted_until:
         deleted = env["vlux.catalog.tombstone"]._between(
             model, env.company, (since_stamp, since_id), deleted_until,
         )
     return {
-        "items": [serialize(record) for record in records],
+        "items": serialize_page(records),
         "deleted": deleted,
-        "next_cursor": encode_cursor(next_stamp, next_id),
+        "next_cursor": encode_cursor(next_stamp, next_id, initial=initial and has_more),
         "has_more": has_more,
         "server_time": _iso(now),
     }
 
 
-def _product_payload(product):
+def _image_versions(env, products):
+    """``{product id: version or None}`` from the stored image attachments.
+
+    The version is Odoo's own attachment checksum, so it changes exactly when
+    the picture does and doubles as the ETag of ``/catalog/products/<id>/image``.
+    Two queries per page, whatever the page size.
+    """
+    Attachment = env["ir.attachment"].sudo()
+    template_versions = {
+        row["res_id"]: row["checksum"]
+        for row in Attachment.search_read(
+            [("res_model", "=", "product.template"), ("res_field", "=", "image_1920"),
+             ("res_id", "in", products.product_tmpl_id.ids)],
+            ["res_id", "checksum"],
+        )
+    }
+    variant_versions = {
+        row["res_id"]: row["checksum"]
+        for row in Attachment.search_read(
+            [("res_model", "=", "product.product"), ("res_field", "=", "image_variant_1920"),
+             ("res_id", "in", products.ids)],
+            ["res_id", "checksum"],
+        )
+    }
+    return {
+        product.id: variant_versions.get(product.id) or template_versions.get(product.product_tmpl_id.id)
+        for product in products
+    }
+
+
+def _product_page(products):
+    versions = _image_versions(products.env, products)
+    return [_product_payload(product, versions.get(product.id)) for product in products]
+
+
+def _customer_page(partners):
+    return [_customer_payload(partner) for partner in partners]
+
+
+def _product_payload(product, image_version=None):
     # Template fields are read on the template on purpose: the variant's
     # related fields recompute through cache writes with access checks and
     # domain filtering, which is what made a 500-row page cost 380 ms.
@@ -131,6 +177,8 @@ def _product_payload(product):
         "available_in_pos": template.available_in_pos,
         "sale_ok": template.sale_ok,
         "company_id": template.company_id.id or None,
+        # Changes exactly when the picture does; null when there is none.
+        "image_version": image_version or None,
         "sync_date": _iso(product.vlux_sync_date),
     }
 
@@ -238,14 +286,53 @@ class VluxApiCatalog(http.Controller):
         variant's list price in the company currency; pricelists apply on top.
         """
         limit = int_param(limit, "limit", PAGE_DEFAULT, 1, PAGE_MAX)
-        return _feed(request.env, "product.product", "vlux_sync_date", cursor, limit, _product_payload)
+        return _feed(request.env, "product.product", "vlux_sync_date", cursor, limit, _product_page)
+
+    @api_route("/catalog/products/<int:product_id>/image", scope="catalog:read",
+               summary="Miniatura de un producto, con ETag",
+               params=[{"name": "size", "in": "query", "schema": {"type": "integer", "enum": list(IMAGE_SIZES), "default": IMAGE_SIZE_DEFAULT}}])
+    def product_image(self, token, product_id, size=None, **kwargs):
+        """The product picture at one of Odoo's precomputed sizes (default 256 px).
+
+        Binary response. ``ETag`` is the picture's version (the same value as
+        ``image_version`` in the feed); send it back in ``If-None-Match`` to
+        get ``304``. ``Cache-Control: private``: the device may cache it,
+        shared caches may not. ``NO_IMAGE`` (404) when the product has no
+        picture, ``NOT_FOUND`` when it does not exist or is not the caller's.
+        """
+        size = int_param(size, "size", IMAGE_SIZE_DEFAULT)
+        if size not in IMAGE_SIZES:
+            raise VluxApiError("VALIDATION_ERROR", "size debe ser uno de %s." % ", ".join(map(str, IMAGE_SIZES)))
+        # A plain search: record rules decide, and a foreign product simply
+        # does not exist for this token.
+        product = request.env["product.product"].with_context(active_test=False).search(
+            [("id", "=", product_id)], limit=1,
+        )
+        if not product:
+            raise VluxApiError("NOT_FOUND", "El producto no existe.")
+        version = _image_versions(request.env, product).get(product.id)
+        if not version:
+            raise VluxApiError("NO_IMAGE", "El producto no tiene imagen.")
+        etag = '"%s-%d"' % (version, size)
+        headers = {
+            "ETag": etag,
+            "Cache-Control": "private, max-age=86400, must-revalidate",
+            "Vary": "Authorization",
+        }
+        if etag in [value.strip() for value in request.httprequest.headers.get("If-None-Match", "").split(",")]:
+            return Response(status=304, headers=headers)
+        data = base64.b64decode(product["image_%d" % size] or b"")
+        if not data:
+            raise VluxApiError("NO_IMAGE", "El producto no tiene imagen.")
+        headers["Content-Type"] = guess_mimetype(data, default="image/png")
+        return Response(data, status=200, headers=headers)
 
     @api_route("/catalog/customers", scope="catalog:read", params=PAGE_PARAMS,
                summary="Clientes cambiados después del cursor, con bajas")
     def customers(self, token, cursor=None, limit=None, **kwargs):
         """Change feed of partners, ordered by ``(write_date, id)``."""
         limit = int_param(limit, "limit", PAGE_DEFAULT, 1, PAGE_MAX)
-        return _feed(request.env, "res.partner", "write_date", cursor, limit, _customer_payload)
+        return _feed(request.env, "res.partner", "write_date", cursor, limit, _customer_page)
 
     @api_route("/catalog/pos-categories", scope="catalog:read", summary="Categorías del punto de venta")
     def pos_categories(self, token, **kwargs):

@@ -117,6 +117,7 @@ print(raw)   # única vez
 | GET | `/catalog/taxes` | `catalog:read` | Impuestos de venta de la compañía (instantánea) |
 | GET | `/catalog/pricelists` | `catalog:read` | Listas de precios con sus reglas (instantánea) |
 | POST | `/catalog/products` | `catalog:write` | Alta rápida de un producto vendible (mismas reglas que el diálogo del POS) |
+| GET | `/catalog/products/<id>/image` | `catalog:read` | Miniatura del producto (binaria) con `ETag` y `304` |
 
 `/me` es también la prueba de vida que debe ejecutar una caja al arrancar:
 confirma token, tienda, moneda y hora del servidor.
@@ -142,6 +143,9 @@ GET /catalog/products?cursor=<opaco>&limit=500
 
 1. Sin `cursor` se empieza desde cero: se piden páginas hasta que `has_more`
    sea `false`, aplicando cada una y guardando **siempre** `next_cursor`.
+   Durante esa sincronización inicial `deleted` viene vacío (el cursor lleva
+   una marca interna de "inicial"): quien no tiene nada no necesita olvidar
+   nada. Al completarse, el cursor pasa a ser uno normal.
 2. A partir de ahí, cada llamada con el último cursor devuelve solo los
    registros cambiados después de él (`items`, con sus banderas) y los ids
    borrados de verdad en ese tramo (`deleted`). El cliente aplica los
@@ -184,6 +188,24 @@ Un producto del feed:
 `list_price` es el precio de lista de la variante en la moneda de la compañía
 (sin impuestos ni lista de precios); las listas de precios se aplican encima con
 `/catalog/pricelists`. Las existencias **no** forman parte del catálogo.
+
+`image_version` es la versión de la foto (el checksum del adjunto de Odoo) o
+`null` si no tiene; cambia exactamente cuando cambia la imagen y **nunca viaja
+base64 en el feed**. La imagen se descarga aparte:
+
+```
+GET /catalog/products/<id>/image?size=256        → 200 image/png|jpeg, ETag: "<image_version>-256"
+GET ... con If-None-Match: "<image_version>-256" → 304 sin cuerpo
+```
+
+Tamaños: 128, 256 (por defecto, la baldosa del POS), 512 y 1024: las
+miniaturas que Odoo ya tiene precalculadas en su filestore; nunca la original.
+`Cache-Control: private, max-age=86400, must-revalidate`: el dispositivo puede
+guardarla un día y revalidar con el `ETag`; Cloudflare y otras cachés
+compartidas no la guardan. Errores: `NO_IMAGE` (404) si el producto no tiene
+foto, `NOT_FOUND` (404) si no existe o es de otra compañía (no se distingue a
+propósito), `VALIDATION_ERROR` si el tamaño no es uno de los cuatro. Solo se
+enruta un id entero: no hay rutas ni nombres de archivo arbitrarios.
 
 Medido en `tools/perf/bench_catalog_sync.py` con 10 000 productos: 21 páginas
 de 500, p95 = 121 ms por página en proceso (283 ms extremo a extremo por HTTP
@@ -245,4 +267,8 @@ huecos ni duplicados, la incremental con renombrado, archivado, retiro del POS
 y borrado, el reintento de página, cursores inválidos o caducos, alcance y
 compañía, las instantáneas y `/store/config`.
 `vlux_pos_catalog/tests/test_api_quick_create.py` cubre el `POST`: alta,
-conflicto de código de barras, validación, alcance y permisos.
+conflicto de código de barras, validación, alcance y permisos. La imagen:
+miniatura de 256 px por defecto, `Content-Type`, `ETag` igual a
+`image_version`, `304`, ETag distinto por tamaño y por foto nueva, `NO_IMAGE`,
+tamaño inválido, id inexistente, id no numérico, alcance, sin token y producto
+de otra compañía. La sincronización inicial sin `deleted`.

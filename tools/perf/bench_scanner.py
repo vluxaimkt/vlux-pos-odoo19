@@ -260,7 +260,8 @@ def run_pipelined(client: PhoneClient, barcodes: list[str], timeout: float, scan
         while not done.is_set():
             try:
                 message = push.receive_text()
-            except RuntimeError:
+            except (RuntimeError, OSError):
+                # Closed by the server, or by the main thread once the run is over.
                 return
             if not message:
                 continue

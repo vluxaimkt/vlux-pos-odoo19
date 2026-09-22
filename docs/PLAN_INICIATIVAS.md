@@ -68,6 +68,8 @@ Documentada en [API_V1.md](API_V1.md).
 - Clientes (feed con cursor), listas de precios, impuestos, categorías y
   `/store/config`.
 - Alta rápida de productos como `POST /catalog/products`.
+- B.1: `image_version` en el feed y `GET /catalog/products/<id>/image`
+  (miniaturas de Odoo, `ETag`/`304`, caché privada).
 - **Criterio de aceptación cumplido:** 10 000 productos en 21 páginas de 500,
   p95 = 121 ms por página, 10 consultas por página constantes; tras editar 50 y
   borrar 5, la sincronización incremental entrega exactamente esos 50 y 5
