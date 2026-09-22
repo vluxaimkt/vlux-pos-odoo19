@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 
 const core = require(path.join(__dirname, "..", "..", "src", "scanner", "scanner_core.js"));
-const { ScanGate, PendingQueue, PollBackoff, retryDelayMs, newRequestId, cropPlan } = core;
+const { ScanGate, PendingQueue, PollBackoff, retryDelayMs, newRequestId, cropPlan, classifySendError } = core;
 
 test("a code held steadily in the frame is accepted exactly once", () => {
     const gate = new ScanGate({ gapMs: 400, minRepeatMs: 700 });
@@ -59,11 +59,16 @@ test("pending queue tracks order, retries, staleness and expiry", () => {
     assert.equal(queue.get("r1").status, "queued");
     assert.equal(queue.get("r1").attempts, 1);
 
-    assert.equal(queue.markSendFailed("r2"), true); // attempt 1 -> retry allowed
-    assert.equal(queue.markSendFailed("r2"), true); // attempt 2
-    assert.equal(queue.markSendFailed("r2"), false); // attempt 3 -> give up
+    // attempts count uploads started; a server failure keeps the count.
+    queue.markSent("r2", 6);
+    assert.equal(queue.markSendFailed("r2", "server"), true); // 1 of 3
+    queue.markSent("r2", 7);
+    assert.equal(queue.markSendFailed("r2", "server"), true); // 2 of 3
+    queue.markSent("r2", 8);
+    assert.equal(queue.markSendFailed("r2", "server"), false); // 3 of 3 -> give up
 
-    assert.deepEqual(queue.stale(3100, 3000), ["r1", "r2"]);
+    // only accepted scans can be stale; r2 was never accepted
+    assert.deepEqual(queue.stale(3100, 3000), ["r1"]);
     assert.deepEqual(queue.stale(2500, 3000), []);
 
     const resolved = queue.resolve("r1", { status: "delivered" });
@@ -72,8 +77,56 @@ test("pending queue tracks order, retries, staleness and expiry", () => {
     assert.equal(queue.resolve("missing"), null);
 
     const expired = queue.expire(40000, 30000);
-    assert.equal(expired.length, 1);
-    assert.equal(queue.size, 0);
+    assert.equal(expired.length, 0, "an unaccepted scan is never expired");
+    assert.equal(queue.size, 1);
+});
+
+test("a scan that could not be uploaded waits for the network without burning attempts", () => {
+    const queue = new PendingQueue({ maxAttempts: 2 });
+    queue.add("off1", "111", 0);
+    queue.add("off2", "222", 10);
+    for (let round = 0; round < 10; round += 1) {
+        queue.markSent("off1", 100 + round);
+        assert.equal(queue.markSendFailed("off1", "network"), true);
+    }
+    assert.equal(queue.get("off1").status, "offline");
+    assert.equal(queue.get("off1").sentAt, null);
+    assert.equal(queue.offlineCount, 1);
+    assert.deepEqual(queue.unsentIds(), ["off1", "off2"]);
+    assert.deepEqual(queue.queuedIds(), []);
+    // a 30 s outage must not expire it: expiry only applies to accepted scans
+    assert.equal(queue.expire(60000, 30000).length, 0);
+    // once accepted it becomes a normal queued scan
+    queue.markSent("off1", 60000);
+    assert.deepEqual(queue.queuedIds(), ["off1"]);
+    assert.deepEqual(queue.stale(63001, 3000), ["off1"]);
+});
+
+test("the queue survives a reload and in-flight scans are resent", () => {
+    const queue = new PendingQueue();
+    queue.add("a", "111", 0);
+    queue.add("b", "222", 1);
+    queue.markSent("a", 5);
+    queue.markSent("b", 6);
+    queue.markSendFailed("b", "network");
+    const restored = PendingQueue.restore(queue.serialize());
+    assert.deepEqual(restored.ids(), ["a", "b"]);
+    assert.equal(restored.get("a").status, "queued");
+    assert.equal(restored.get("b").status, "pending", "an offline scan is resent after a reload");
+    assert.deepEqual(restored.unsentIds(), ["b"]);
+    assert.equal(PendingQueue.restore("not json").size, 0);
+    assert.equal(PendingQueue.restore(null).size, 0);
+});
+
+test("upload failures are classified so only real rejections are final", () => {
+    assert.equal(classifySendError(new TypeError("Failed to fetch")), "network");
+    assert.equal(classifySendError({ status: 0 }), "network");
+    assert.equal(classifySendError({ status: 401 }), "session");
+    assert.equal(classifySendError({ status: 409 }), "closed");
+    assert.equal(classifySendError({ status: 400 }), "rejected");
+    assert.equal(classifySendError({ status: 429 }), "rejected");
+    assert.equal(classifySendError({ status: 500 }), "server");
+    assert.equal(classifySendError({ status: 502 }), "server");
 });
 
 test("poll back-off grows to the cap and resets on results", () => {

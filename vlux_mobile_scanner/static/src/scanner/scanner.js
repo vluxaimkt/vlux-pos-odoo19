@@ -1,7 +1,7 @@
 (() => {
     "use strict";
 
-    const { ScanGate, PendingQueue, PollBackoff, retryDelayMs, newRequestId, cropPlan } =
+    const { ScanGate, PendingQueue, PollBackoff, retryDelayMs, newRequestId, cropPlan, classifySendError } =
         window.VluxScannerCore;
 
     const body = document.body;
@@ -30,6 +30,8 @@
 
     const state = {
         token: sessionStorage.getItem(tokenKey) || "",
+        offlineFlushTimer: null,
+        offlineFlushing: false,
         posName: "",
         pushChannel: "",
         stream: null,
@@ -52,7 +54,16 @@
         context: null,
     };
     const gate = new ScanGate({ gapMs: 400, minRepeatMs: 700 });
-    const queue = new PendingQueue({ maxAttempts: 4 });
+    // Scans survive a page reload: the queue lives next to the token.
+    const queueKey = `${tokenKey}:queue`;
+    const queue = PendingQueue.restore(sessionStorage.getItem(queueKey), { maxAttempts: 4 });
+    const OFFLINE_FLUSH_MS = 5000;
+    function persistQueue() {
+        try {
+            if (queue.size) sessionStorage.setItem(queueKey, queue.serialize());
+            else sessionStorage.removeItem(queueKey);
+        } catch { /* storage full or disabled: the in-memory queue still works */ }
+    }
     const backoff = new PollBackoff({ minMs: 300, maxMs: 1500 });
 
     // ------------------------------------------------------------------
@@ -128,11 +139,16 @@
     }
 
     function renderQueue() {
+        persistQueue();
         if (!el.queueBadge) return;
         const size = queue.size;
-        el.queueBadge.textContent = size ? `${size} en proceso` : "";
+        const offline = queue.offlineCount;
+        el.queueBadge.textContent = offline
+            ? `${offline} en espera · sin conexion`
+            : size ? `${size} en proceso` : "";
         el.queueBadge.classList.toggle("is-hidden", !size);
-        if (size) setConnection("sending", "Enviando");
+        if (offline) setConnection("offline", "Sin conexion");
+        else if (size) setConnection("sending", "Enviando");
         else if (state.token) setConnection("online", "Conectado");
     }
 
@@ -247,6 +263,9 @@
         state.token = "";
         state.pushChannel = "";
         sessionStorage.removeItem(tokenKey);
+        // Scans belong to the pairing that made them; a new register must not receive them.
+        for (const id of queue.ids()) queue.resolve(id);
+        persistQueue();
         if (state.heartbeatTimer) window.clearInterval(state.heartbeatTimer);
         showPairing();
         setResult("idle", "La vinculacion termino", "", "", "Vuelve a conectar el telefono con la caja.");
@@ -338,8 +357,9 @@
         for (const item of queue.expire(now, PENDING_TTL_MS)) {
             finishScan(item, "error", "Sin respuesta de la caja", "La caja no confirmo la lectura a tiempo.");
         }
-        // With a live push channel we only chase scans that look stuck.
-        const ids = state.socketReady ? queue.stale(now, PUSH_SAFETY_NET_MS) : queue.ids();
+        // With a live push channel we only chase scans that look stuck. Scans
+        // the server never accepted have nothing to poll for.
+        const ids = state.socketReady ? queue.stale(now, PUSH_SAFETY_NET_MS) : queue.queuedIds();
         let gotResult = false;
         if (ids.length) {
             try {
@@ -399,29 +419,67 @@
                 body: JSON.stringify({ barcode: item.barcode, request_id: item.requestId }),
             });
             backoff.reset();
+            renderQueue();
             schedulePoll(true);
         } catch (error) {
-            if (error.status === 401 || error.status === 409) {
+            const kind = classifySendError(error);
+            if (kind === "session") {
                 queue.resolve(item.requestId);
-                if (error.status === 401) dropSession();
-                else finishScan(item, "error", "Caja no disponible", error.message || "La caja no tiene sesion activa.");
+                dropSession();
                 return;
             }
-            if (error.status === 400 || error.status === 429) {
+            if (kind === "closed") {
+                queue.resolve(item.requestId);
+                finishScan(item, "error", "Caja no disponible", error.message || "La caja no tiene sesion activa.");
+                return;
+            }
+            if (kind === "rejected") {
                 queue.resolve(item.requestId);
                 finishScan(item, "error", "Lectura rechazada", error.message || "La caja rechazo el codigo.");
                 return;
             }
+            if (kind === "network") {
+                // No connection: the scan waits, in order, until it is back.
+                // The request_id makes the eventual resend idempotent.
+                queue.markSendFailed(item.requestId, "network");
+                setResult("sending", "Sin conexion", item.barcode, "", "La lectura se enviara al recuperar la red.");
+                renderQueue();
+                scheduleOfflineFlush();
+                return;
+            }
             setConnection("reconnecting", "Reconectando");
-            if (queue.markSendFailed(item.requestId)) {
+            if (queue.markSendFailed(item.requestId, "server")) {
                 window.setTimeout(() => {
                     if (queue.get(item.requestId)) sendScan(item);
                 }, retryDelayMs(item.attempts));
             } else {
                 queue.resolve(item.requestId);
-                finishScan(item, "error", "No fue posible enviar el codigo", "Comprueba la conexion e intenta nuevamente.");
+                finishScan(item, "error", "No fue posible enviar el codigo", "La caja no respondio; intenta nuevamente.");
             }
         }
+    }
+
+    /** Resend everything the server never accepted, oldest first, one at a time. */
+    async function flushOffline() {
+        state.offlineFlushTimer = null;
+        if (!state.token || state.offlineFlushing) return;
+        state.offlineFlushing = true;
+        try {
+            for (const id of queue.unsentIds()) {
+                const item = queue.get(id);
+                if (!item || item.status === "retry") continue;
+                await sendScan(item);
+                if (item.status === "offline") break; // still no network: stop and wait
+            }
+        } finally {
+            state.offlineFlushing = false;
+        }
+        if (queue.offlineCount) scheduleOfflineFlush();
+    }
+
+    function scheduleOfflineFlush() {
+        if (state.offlineFlushTimer) return;
+        state.offlineFlushTimer = window.setTimeout(flushOffline, OFFLINE_FLUSH_MS);
     }
 
     function submitBarcode(rawBarcode) {
@@ -605,6 +663,8 @@
         state.token = "";
         state.pushChannel = "";
         sessionStorage.removeItem(tokenKey);
+        for (const id of queue.ids()) queue.resolve(id);
+        persistQueue();
         showPairing();
         setResult("idle", "Esperando un codigo");
     }
@@ -624,7 +684,11 @@
     el.repeatButton?.addEventListener("click", () => { ensureAudioContext(); submitBarcode(state.lastBarcode); });
     el.disconnectButton.addEventListener("click", () => disconnect());
     window.addEventListener("pagehide", stopCamera);
-    window.addEventListener("online", () => { if (state.token) { heartbeat(); openSocket(); schedulePoll(true); } });
+    window.addEventListener("online", () => {
+        if (state.token) { heartbeat(); openSocket(); schedulePoll(true); flushOffline(); }
+    });
+    // After a reload, anything restored into the queue is resent right away.
+    if (state.token && queue.unsentIds().length) flushOffline();
     document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "visible" && state.token) { openSocket(); schedulePoll(true); }
     });
