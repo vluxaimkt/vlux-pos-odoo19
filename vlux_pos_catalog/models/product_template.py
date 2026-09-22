@@ -211,6 +211,16 @@ class ProductTemplate(models.Model):
     # ------------------------------------------------------------------
 
     @api.model
+    def vlux_pos_quick_create_allowed(self):
+        """Whether the *logged-in* user may quick-create.
+
+        The POS caches its loaded records per register, not per user, so the
+        ``res.users`` record it holds can belong to whoever opened the register
+        before; the UI asks the server instead of trusting that cache.
+        """
+        return self.env.user.has_group(QUICK_CREATE_GROUP)
+
+    @api.model
     def vlux_pos_quick_create_defaults(self, config_id):
         config = self._vlux_quick_create_config(config_id)
         company = config.company_id
