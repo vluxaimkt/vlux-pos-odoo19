@@ -19,14 +19,18 @@ class TestVluxCatalogTours(TestPointOfSaleHttpCommon):
             "sale_ok": True,
             "taxes_id": [(6, 0, [])],
         })
-        # Known to the catalog, not to the register: scanning it opens the quick
-        # form and saving must not create a second product.
+        # Archived: neither the register nor Odoo's server-side barcode fallback
+        # (active products only) knows it, so the quick form opens and saving
+        # must reuse it instead of creating a second product with the barcode.
+        # (A merely de-listed product is still found by that fallback and added
+        # as a plain known product, which is standard Odoo behaviour.)
         cls.env["product.template"].create({
             "name": "Refresco Duplicado",
             "barcode": "7509990000042",
             "list_price": 15.0,
-            "available_in_pos": False,
+            "available_in_pos": True,
             "sale_ok": True,
+            "active": False,
             "taxes_id": [(6, 0, [])],
         })
         cls.pos_admin.group_ids += cls.env.ref("vlux_core.group_vlux_administrator")
@@ -63,7 +67,7 @@ class TestVluxCatalogTours(TestPointOfSaleHttpCommon):
         products = self.env["product.product"].with_context(active_test=False).search([("barcode", "=", "7509990000042")])
         self.assertEqual(len(products), 1, "a duplicate barcode must never create a second product")
         self.assertEqual(products.name, "Refresco Duplicado")
-        self.assertTrue(products.available_in_pos, "using the existing product puts it back on sale in the POS")
+        self.assertTrue(products.active, "using the existing product brings it back from the archive")
 
     def test_cashier_without_permission_gets_standard_not_found(self):
         self.start_pos_tour("VluxCatalogDeniedTour", login="pos_user")

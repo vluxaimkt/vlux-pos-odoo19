@@ -7,7 +7,7 @@ import { scan_barcode, negateStep } from "@point_of_sale/../tests/generic_helper
 const KNOWN_BARCODE = "7509990000011";
 const UNKNOWN_BARCODE = "7509990000028";
 const UNKNOWN_BARCODE_WITH_PHOTO = "7509990000035";
-// Exists in the catalog but is not sold in the POS: the register does not know it.
+// Archived in the catalog: neither the register nor the server barcode fallback knows it.
 const DUPLICATE_BARCODE = "7509990000042";
 
 function openRegister() {
