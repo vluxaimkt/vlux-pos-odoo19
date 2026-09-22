@@ -1,8 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
+    <!-- Its own privilege on purpose: Odoo 19 renders every group of one
+         privilege as a single selector, so sharing the VLUX role privilege made
+         this permission look like a role and impossible to combine with Cashier
+         from the user form. -->
+    <record model="res.groups.privilege" id="res_groups_privilege_vlux_catalog">
+        <field name="name">VLUX Catálogo</field>
+        <field name="category_id" ref="vlux_core.module_category_vlux"/>
+        <field name="sequence">26</field>
+    </record>
+
     <record id="group_vlux_catalog_quick_create" model="res.groups">
-        <field name="name">VLUX Catalog: alta rapida en POS</field>
-        <field name="privilege_id" ref="vlux_core.res_groups_privilege_vlux"/>
+        <field name="name">Alta rápida de productos en el POS</field>
+        <field name="privilege_id" ref="res_groups_privilege_vlux_catalog"/>
         <field name="comment">Permite registrar productos nuevos desde el POS con el formulario rapido. No otorga administracion completa de productos.</field>
     </record>
 

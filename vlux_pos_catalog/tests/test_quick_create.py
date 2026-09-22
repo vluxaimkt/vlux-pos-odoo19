@@ -10,6 +10,21 @@ class TestVluxCatalogQuickCreate(VluxCatalogCase):
     # authorisation
     # ------------------------------------------------------------------
 
+    def test_permission_is_asked_to_the_server_for_the_logged_in_user(self):
+        Template = self.env["product.template"]
+        self.assertTrue(Template.with_user(self.owner).vlux_pos_quick_create_allowed())
+        self.assertTrue(Template.with_user(self.administrator).vlux_pos_quick_create_allowed())
+        self.assertTrue(Template.with_user(self.cashier_quick).vlux_pos_quick_create_allowed())
+        self.assertFalse(Template.with_user(self.cashier).vlux_pos_quick_create_allowed())
+        self.assertFalse(Template.with_user(self.auditor).vlux_pos_quick_create_allowed())
+
+    def test_quick_create_permission_is_its_own_privilege(self):
+        """It must render as a checkbox next to the VLUX role, not as a role."""
+        group = self.env.ref("vlux_pos_catalog.group_vlux_catalog_quick_create")
+        role = self.env.ref("vlux_core.group_vlux_cashier")
+        self.assertNotEqual(group.privilege_id, role.privilege_id)
+        self.assertEqual(len(group.privilege_id.group_ids), 1)
+
     def test_owner_and_administrator_can_create(self):
         for index, user in enumerate((self.owner, self.administrator)):
             result = self.quick_create(user, self.values(barcode=f"750100000010{index}"))

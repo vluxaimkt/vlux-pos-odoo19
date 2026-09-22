@@ -10,9 +10,24 @@ patch(PosStore.prototype, {
         // report "registration prompted" instead of a plain "not found".
         this.vluxCatalogPendingBarcode = null;
         this.vluxCatalogDefaults = null;
+        // The POS keeps its records in IndexedDB per register, not per user:
+        // after a user switch on the same device, this.user can still be the
+        // previous cashier. The server knows who is really logged in; the
+        // cached field is only the offline fallback.
+        this.vluxCatalogServerPermission = null;
+        try {
+            this.vluxCatalogServerPermission = Boolean(
+                await this.data.call("product.template", "vlux_pos_quick_create_allowed", [])
+            );
+        } catch {
+            this.vluxCatalogServerPermission = null;
+        }
     },
 
     get vluxCatalogCanQuickCreate() {
+        if (this.vluxCatalogServerPermission !== null) {
+            return this.vluxCatalogServerPermission;
+        }
         return Boolean(this.user?.vlux_catalog_can_quick_create);
     },
 
