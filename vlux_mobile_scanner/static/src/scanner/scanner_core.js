@@ -69,14 +69,75 @@
     }
 
     /**
+     * What to do with a failed scan upload.
+     *  - "network": the request never reached the server (offline, DNS, reset):
+     *    keep the scan and resend when the connection is back, forever.
+     *  - "server": the server answered 5xx: retry a bounded number of times.
+     *  - "session": 401, the pairing is gone.
+     *  - "closed": 409, the register's session is not active.
+     *  - "rejected": 400/429, the server refused this scan; do not retry.
+     */
+    function classifySendError(error) {
+        const status = Number(error && error.status);
+        if (!status) {
+            return "network";
+        }
+        if (status === 401) {
+            return "session";
+        }
+        if (status === 409) {
+            return "closed";
+        }
+        if (status === 400 || status === 429) {
+            return "rejected";
+        }
+        return "server";
+    }
+
+    /**
      * Local queue of scans awaiting a POS result.
      * Keeps insertion order so the UI can show "3 pending" and the history in
-     * the order the cashier scanned.
+     * the order the cashier scanned. Statuses:
+     *  - "pending": created, not sent yet;
+     *  - "queued": accepted by the server, waiting for the register's result;
+     *  - "offline": could not reach the server, waiting for the connection;
+     *  - "retry": the server failed, another attempt is scheduled.
+     * `attempts` counts uploads actually started, so a bounded retry budget
+     * only applies to server failures; an offline scan never burns it.
      */
     class PendingQueue {
         constructor(options = {}) {
             this.maxAttempts = options.maxAttempts ?? 4;
             this.items = new Map();
+        }
+
+        /** Rebuild a queue from `serialize()` output (a page reload must not lose scans). */
+        static restore(json, options = {}) {
+            const queue = new PendingQueue(options);
+            let rows = [];
+            try {
+                rows = JSON.parse(json || "[]");
+            } catch {
+                rows = [];
+            }
+            for (const row of Array.isArray(rows) ? rows : []) {
+                if (row && row.requestId && row.barcode) {
+                    queue.items.set(row.requestId, {
+                        requestId: String(row.requestId),
+                        barcode: String(row.barcode),
+                        createdAt: Number(row.createdAt) || 0,
+                        sentAt: row.sentAt ? Number(row.sentAt) : null,
+                        attempts: Number(row.attempts) || 0,
+                        // Whatever was in flight is unknown after a reload: resend it.
+                        status: row.status === "queued" ? "queued" : "pending",
+                    });
+                }
+            }
+            return queue;
+        }
+
+        serialize() {
+            return JSON.stringify(Array.from(this.items.values()));
         }
 
         add(requestId, barcode, now) {
@@ -113,15 +174,39 @@
             return item;
         }
 
-        /** Record a failed send; returns true when another attempt is allowed. */
-        markSendFailed(requestId) {
+        /**
+         * Record a failed send; returns true when another attempt is allowed.
+         * `kind` is "network" (keep forever, no budget used) or "server".
+         */
+        markSendFailed(requestId, kind = "server") {
             const item = this.items.get(requestId);
             if (!item) {
                 return false;
             }
-            item.attempts += 1;
+            if (kind === "network") {
+                item.status = "offline";
+                item.sentAt = null;
+                return true;
+            }
             item.status = "retry";
             return item.attempts < this.maxAttempts;
+        }
+
+        /** Ids never accepted by the server yet, oldest first. */
+        unsentIds() {
+            return this.ids().filter((id) => {
+                const status = this.items.get(id).status;
+                return status === "offline" || status === "pending" || status === "retry";
+            });
+        }
+
+        /** Ids the server accepted and whose result is still awaited. */
+        queuedIds() {
+            return this.ids().filter((id) => this.items.get(id).status === "queued");
+        }
+
+        get offlineCount() {
+            return this.ids().filter((id) => this.items.get(id).status === "offline").length;
         }
 
         resolve(requestId, result) {
@@ -133,15 +218,20 @@
             return { ...item, result };
         }
 
-        /** Ids waiting longer than `olderThanMs` (used for the push safety net). */
+        /** Accepted scans waiting for a result longer than `olderThanMs` (push safety net). */
         stale(now, olderThanMs) {
-            return this.ids().filter((id) => now - this.items.get(id).createdAt >= olderThanMs);
+            return this.queuedIds().filter((id) => now - this.items.get(id).sentAt >= olderThanMs);
         }
 
+        /**
+         * Drop accepted scans the register never answered within `ttlMs` of
+         * their upload. Scans that could not be uploaded are never expired
+         * here: they wait for the connection.
+         */
         expire(now, ttlMs) {
             const expired = [];
             for (const [id, item] of this.items) {
-                if (now - item.createdAt >= ttlMs) {
+                if (item.status === "queued" && item.sentAt && now - item.sentAt >= ttlMs) {
                     this.items.delete(id);
                     expired.push(item);
                 }
@@ -230,5 +320,5 @@
         };
     }
 
-    return { ScanGate, PendingQueue, PollBackoff, retryDelayMs, newRequestId, cropPlan };
+    return { ScanGate, PendingQueue, PollBackoff, retryDelayMs, newRequestId, cropPlan, classifySendError };
 });

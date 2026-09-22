@@ -108,7 +108,7 @@ Si `is_storable` y `initial_qty > 0`, se aplica un ajuste de inventario
 de origen del tipo de operación de la caja (o el stock del almacén de la
 compañía), con historial de movimientos.
 
-## Scanner V2 (`vlux_mobile_scanner` 19.0.2.0.0)
+## Scanner V2 (`vlux_mobile_scanner` 19.0.2.1.0)
 
 Se conservan tokens hasheados, pairing temporal, `request_id` único, rate limit
 persistente, sesión POS, bus nativo `pos.config._notify`, ACK, revocación y
@@ -160,8 +160,15 @@ VLUX). Sin eso el cliente cae automáticamente al polling batch.
     quieto ante la cámara se acepta exactamente una vez; retirarlo y volver a
     enfocarlo cuenta como otro scan. Entradas manuales y el botón *+1 Repetir*
     saltan la compuerta (intención explícita).
-  - `PendingQueue`: cola local ordenada con reintentos (máx. 4, backoff 400 ms →
-    4 s) y expiración (30 s).
+  - `PendingQueue`: cola local ordenada. Un fallo del servidor (5xx) reintenta
+    con backoff 400 ms → 4 s hasta 4 envíos; un fallo **de red** no gasta
+    intentos: la lectura queda "en espera · sin conexión" y se reenvía al
+    volver la red (evento `online` o cada 5 s) mientras viva el token (8 h).
+    La expiración (30 s) sólo aplica a lecturas que el servidor ya aceptó y
+    la caja no respondió. La cola se guarda en `sessionStorage` junto al
+    token: una recarga no pierde lecturas, y el `request_id` idempotente
+    garantiza que un reenvío nunca duplica. Se vacía al terminar o cambiar
+    el emparejamiento (las lecturas pertenecen a su caja).
   - `PollBackoff`: 300 ms → ×1.6 → 1500 ms; se reinicia al recibir resultados y
     se detiene con la cola vacía. Con push activo sólo se consultan scans
     pendientes >3 s (red de seguridad cada 2 s).
