@@ -72,7 +72,11 @@ class TestVluxCatalogTours(TestPointOfSaleHttpCommon):
     def test_register_day_refund_and_close(self):
         """Sale, partial refund from the order list and closing, with the VLUX patches loaded."""
         self.start_pos_tour("VluxRegisterDayTour", login="pos_admin")
-        session = self.env["pos.session"].search([("config_id", "=", self.main_pos_config.id)], order="id desc", limit=1)
+        # After closing, the page reloads and Odoo opens a fresh session: take
+        # the one that holds the day's orders.
+        session = self.env["pos.session"].search(
+            [("config_id", "=", self.main_pos_config.id), ("order_ids", "!=", False)], order="id desc", limit=1
+        )
         self.assertEqual(session.state, "closed")
         orders = session.order_ids.sorted("id")
         self.assertEqual(len(orders), 2)
