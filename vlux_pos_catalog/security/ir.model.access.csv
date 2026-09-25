@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_vlux_catalog_import_admin,vlux.catalog.import administrator,model_vlux_catalog_import,vlux_core.group_vlux_administrator,1,1,1,1
+access_vlux_catalog_import_inventory,vlux.catalog.import inventory,model_vlux_catalog_import,vlux_core.group_vlux_inventory_operator,1,1,1,0
+access_vlux_catalog_import_error_admin,vlux.catalog.import.error administrator,model_vlux_catalog_import_error,vlux_core.group_vlux_administrator,1,1,1,1
+access_vlux_catalog_import_error_inventory,vlux.catalog.import.error inventory,model_vlux_catalog_import_error,vlux_core.group_vlux_inventory_operator,1,1,1,1

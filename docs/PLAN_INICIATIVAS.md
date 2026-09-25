@@ -110,7 +110,7 @@ Documentada en [API_V1.md](API_V1.md).
 
 | Qué | Por qué no puede esperar |
 | --- | --- |
-| Carga masiva de catálogo | Ninguna tienda arranca capturando miles de productos a mano |
+| ~~Carga masiva de catálogo~~ (entregada: `docs/IMPORTAR_CATALOGO.md`) | Ninguna tienda arranca capturando miles de productos a mano |
 | Impresión de tickets y cajón | Sin ticket no hay venta mostrador (software ya preparado) |
 | Corte de caja y devoluciones | Operación diaria del negocio |
 | Modo sin internet del POS de Odoo | Protege a las tiendas hasta que exista el POS propio |
