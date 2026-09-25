@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="vlux_catalog_import_view_form" model="ir.ui.view">
+        <field name="name">vlux.catalog.import.form</field>
+        <field name="model">vlux.catalog.import</field>
+        <field name="arch" type="xml">
+            <form string="Importar catálogo">
+                <header>
+                    <button name="action_validate" type="object" string="Validar archivo" class="btn-primary"
+                            invisible="state not in ('draft', 'validated')"/>
+                    <button name="action_import" type="object" string="Importar" class="btn-primary"
+                            invisible="state != 'validated' or rows_valid == 0"
+                            confirm="Se crearán y actualizarán los productos válidos. Las filas con error se omiten. ¿Continuar?"/>
+                    <button name="action_refresh" type="object" string="Actualizar avance"
+                            invisible="state not in ('queued', 'running')"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,validated,running,done"/>
+                </header>
+                <sheet>
+                    <div class="alert alert-info" role="alert" invisible="state != 'draft'">
+                        <a href="/vlux_pos_catalog/import/template.xlsx">Descarga la plantilla</a>
+                        (incluye los impuestos y categorías de tu empresa), llénala y súbela aquí.
+                        Cada producto se identifica por su <b>código de barras</b> (o por su referencia si no tiene).
+                        Si ya existe se actualiza; si no, se crea. Una celda vacía deja ese dato como está.
+                    </div>
+                    <div class="alert alert-warning" role="alert" invisible="state not in ('queued', 'running')">
+                        La importación corre en segundo plano. Puedes cerrar esta pantalla; pulsa
+                        <b>Actualizar avance</b> para ver cuántas filas van.
+                    </div>
+                    <group>
+                        <group>
+                            <field name="file" filename="name" readonly="state not in ('draft', 'validated')"/>
+                            <field name="name" invisible="1"/>
+                            <field name="create_missing_categories" readonly="state not in ('draft', 'validated')"/>
+                            <field name="location_id" readonly="state not in ('draft', 'validated')"
+                                   options="{'no_create': True}"/>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                        </group>
+                        <group invisible="state == 'draft'">
+                            <field name="rows_total"/>
+                            <field name="rows_valid"/>
+                            <field name="rows_to_create" invisible="state not in ('validated', 'queued')"/>
+                            <field name="rows_to_update" invisible="state not in ('validated', 'queued')"/>
+                            <field name="progress" widget="progressbar" invisible="state not in ('queued', 'running', 'done')"/>
+                            <field name="created_count" invisible="state not in ('running', 'done')"/>
+                            <field name="updated_count" invisible="state not in ('running', 'done')"/>
+                            <field name="unchanged_count" invisible="state not in ('running', 'done')"/>
+                            <field name="stock_count" invisible="state not in ('running', 'done')"/>
+                            <field name="duration_seconds" invisible="state != 'done'"/>
+                        </group>
+                    </group>
+                    <field name="failure" invisible="not failure" readonly="1"/>
+                    <field name="error_count" invisible="1"/>
+                    <separator string="Errores" invisible="error_count == 0"/>
+                    <field name="error_ids" invisible="error_count == 0">
+                        <list create="0" delete="0" limit="200">
+                            <field name="row"/>
+                            <field name="column"/>
+                            <field name="message"/>
+                        </list>
+                    </field>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="vlux_catalog_import_view_list" model="ir.ui.view">
+        <field name="name">vlux.catalog.import.list</field>
+        <field name="model">vlux.catalog.import</field>
+        <field name="arch" type="xml">
+            <list string="Importaciones de catálogo">
+                <field name="create_date" string="Fecha"/>
+                <field name="name"/>
+                <field name="create_uid" string="Usuario"/>
+                <field name="rows_total"/>
+                <field name="created_count"/>
+                <field name="updated_count"/>
+                <field name="error_count"/>
+                <field name="state" widget="badge"
+                       decoration-success="state == 'done'" decoration-info="state in ('queued', 'running')"
+                       decoration-danger="state == 'failed'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="vlux_catalog_import_action" model="ir.actions.act_window">
+        <field name="name">Importar catálogo</field>
+        <field name="res_model">vlux.catalog.import</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Carga tu catálogo desde Excel</p>
+            <p>Descarga la plantilla, llénala con tus productos y súbela. Se valida fila por fila antes de importar.</p>
+        </field>
+    </record>
+
+    <menuitem id="menu_vlux_catalog_import"
+              name="Importar catálogo"
+              parent="point_of_sale.pos_config_menu_catalog"
+              action="vlux_catalog_import_action"
+              groups="vlux_core.group_vlux_administrator,vlux_core.group_vlux_inventory_operator"
+              sequence="90"/>
+</odoo>

@@ -24,4 +24,10 @@
     <record id="vlux_core.group_vlux_inventory_operator" model="res.groups">
         <field name="implied_ids" eval="[(4, ref('vlux_pos_catalog.group_vlux_catalog_quick_create'))]"/>
     </record>
+
+    <record id="vlux_catalog_import_company_rule" model="ir.rule">
+        <field name="name">Importaciones de catálogo: sólo de mis empresas</field>
+        <field name="model_id" ref="model_vlux_catalog_import"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+    </record>
 </odoo>
