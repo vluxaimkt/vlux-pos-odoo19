@@ -9,7 +9,7 @@ import { scan_barcode } from "@point_of_sale/../tests/generic_helpers/utils";
 
 // The cashier's day with the VLUX patches loaded: sell in cash, refund part
 // of the ticket from the order list, pay the refund back in cash and close
-// the register. The Python side checks the money and the stock.
+// the register counting the drawer. The Python side checks the money and the stock.
 registry.category("web_tour.tours").add("VluxRegisterDayTour", {
     steps: () =>
         [
@@ -35,10 +35,13 @@ registry.category("web_tour.tours").add("VluxRegisterDayTour", {
             ReceiptScreen.isShown(),
             ReceiptScreen.clickNextOrder(),
 
+            // Float 0 + 2 x 12 sold - 1 x 12 refunded = 12 in the drawer.
             Chrome.clickMenuOption("Close Register"),
+            ProductScreen.closeWithCashAmount("12"),
+            ProductScreen.cashDifferenceIs("0.00"),
             {
-                content: "close the register: sale and refund cancel out, nothing to count",
-                trigger: "button:contains(close register)",
+                content: "close the register with the exact count",
+                trigger: ".modal .modal-footer .btn:contains(close register)",
                 run: "click",
                 expectUnloadPage: true,
             },
