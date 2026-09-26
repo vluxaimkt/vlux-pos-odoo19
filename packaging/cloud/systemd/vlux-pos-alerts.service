@@ -1,0 +1,21 @@
+[Unit]
+Description=VLUX POS health alerts (doctor on every tenant, changes to Telegram)
+Documentation=file:///opt/vlux/cloud/README.md
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# The bot token is read from a root-only file inside /srv/vlux-pos/secrets:
+# it is never on the command line, in the environment or in the journal.
+ExecStart=/opt/vlux/cloud/vlux-cloud alerts run
+TimeoutStartSec=600
+User=root
+Group=root
+Nice=10
+ProtectHome=yes
+ProtectSystem=full
+ReadWritePaths=/srv/vlux-pos
+NoNewPrivileges=yes
+PrivateTmp=yes
+SyslogIdentifier=vlux-pos-alerts

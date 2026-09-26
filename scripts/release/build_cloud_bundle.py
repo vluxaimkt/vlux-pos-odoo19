@@ -40,6 +40,8 @@ PAYLOAD = (
     ("templates/odoo.conf.tmpl", 0o644),
     ("systemd/vlux-pos-backup@.service", 0o644),
     ("systemd/vlux-pos-backup@.timer", 0o644),
+    ("systemd/vlux-pos-alerts.service", 0o644),
+    ("systemd/vlux-pos-alerts.timer", 0o644),
 )
 
 FORBIDDEN_DIR_NAMES = {".git", "__pycache__", "secrets", "filestore", "backups", "certificates"}

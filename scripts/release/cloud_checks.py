@@ -453,6 +453,12 @@ SAMPLE_ARGV = {
     "migration_verify": ["migration", "verify", "tenant-a", "b.tar.gz"],
     "retention_command": ["retention", "tenant-a"],
     "doctor": ["doctor", "tenant-a"],
+    "schedule_install": ["schedule", "install"],
+    "schedule_status": ["schedule", "status"],
+    "alerts_configure": ["alerts", "configure", "--telegram-token-file", "/tmp/t", "--chat-id", "123"],
+    "alerts_chats": ["alerts", "chats"],
+    "alerts_test": ["alerts", "test"],
+    "alerts_run": ["alerts", "run", "--dry-run"],
 }
 # Extra argv per handler: every handler must also accept these.
 PROFILE_ARGV = {
@@ -891,6 +897,7 @@ def _doctor_raw(**overrides) -> dict:
             "reasons": [],
         },
         "host": {"cpus": 2, "memory_bytes": 4 * 1024 ** 3},
+        "pos_sessions": {"stuck_opening": 0, "open_too_long": 0, "oldest_open_hours": 5},
         "hardware": {
             "registers": 1, "receipt_printers": 1, "receipt_printers_unset": 0,
             "order_printers": {"epson_epos": {"count": 1, "unconfigured": 0}},
@@ -971,6 +978,20 @@ def check_doctor(cli) -> None:
     check(status_of("HARDWARE", hardware=order_unconfigured) == "WARN",
           "DOCTOR: an unconfigured order printer must WARN")
 
+    stuck = {"stuck_opening": 1, "open_too_long": 0, "oldest_open_hours": 0}
+    check(status_of("POS_SESSIONS", pos_sessions=stuck) == "WARN",
+          "DOCTOR: a session stuck opening must WARN (the POS keeps loading)")
+    forgotten = {"stuck_opening": 0, "open_too_long": 1, "oldest_open_hours": 80}
+    check(status_of("POS_SESSIONS", pos_sessions=forgotten) == "WARN",
+          "DOCTOR: a session open for days must WARN")
+    unscheduled = dict(_doctor_raw()["backup"], schedule="missing")
+    check(status_of("BACKUP_AGE", backup=unscheduled) == "WARN",
+          "DOCTOR: a tenant without a scheduled daily backup must WARN")
+    check(status_of("BACKUP_AGE", backup=dict(unscheduled, data_class="REAL_CLIENT_DATA")) == "FAIL",
+          "DOCTOR: real client data without a scheduled backup must FAIL")
+    check(status_of("BACKUP_AGE", backup=dict(unscheduled, schedule="unknown")) == "OK",
+          "DOCTOR: no systemd (CI, dev box) must not be judged")
+
     worst = evaluate(_doctor_raw(disk=low, pg_isready_exit=2))
     check(worst["status"] == "FAIL", "DOCTOR: overall status must be the worst section")
 
@@ -994,6 +1015,67 @@ def check_doctor(cli) -> None:
             not called & {"offsite_config", "secret", "read_secret"},
             "DOCTOR: doctor_collect must not read credentials",
         )
+
+
+def check_alerts(cli) -> None:
+    """When `vlux-cloud alerts run` speaks, and that it never leaks the bot token."""
+    import datetime as dt
+
+    now = dt.datetime(2026, 9, 26, 12, 0, tzinfo=dt.timezone.utc)
+    healthy = cli.doctor_evaluate(_doctor_raw())
+    low = cli.doctor_evaluate(_doctor_raw(disk={"total_bytes": 100, "free_bytes": 10}))
+    down = cli.doctor_evaluate(_doctor_raw(pg_isready_exit=2))
+
+    state, events = cli.alerts_diff({}, {"a": healthy}, now, 6)
+    check(events == [], "ALERTS: a healthy first run must stay silent")
+    state, events = cli.alerts_diff(state, {"a": low}, now, 6)
+    check([(e["section"], e["kind"]) for e in events] == [("DISK", "new")], "ALERTS: a new problem is announced once")
+    state2, events = cli.alerts_diff(state, {"a": low}, now + dt.timedelta(minutes=15), 6)
+    check(events == [], "ALERTS: the same problem 15 minutes later must not repeat")
+    state3, events = cli.alerts_diff(state2, {"a": low}, now + dt.timedelta(hours=6, minutes=1), 6)
+    check([e["kind"] for e in events] == ["reminder"], "ALERTS: a persisting problem is reminded after 6 h")
+    state4, events = cli.alerts_diff(state3, {"a": healthy}, now + dt.timedelta(hours=7), 6)
+    check([(e["section"], e["kind"]) for e in events] == [("DISK", "recovered")], "ALERTS: recovery is announced")
+    _state, events = cli.alerts_diff(state4, {"a": down}, now + dt.timedelta(hours=8), 6)
+    check({e["section"] for e in events} == {"POSTGRES"} and events[0]["status"] == "FAIL",
+          "ALERTS: a FAIL is announced as FAIL")
+    first_run_broken, events = cli.alerts_diff({}, {"a": low}, now, 6)
+    check([e["kind"] for e in events] == ["new"], "ALERTS: a first run reports what is already wrong")
+
+    message = cli.alerts_message(events, "host-a")
+    check("Tienda a" in message and "Disco" in message, "ALERTS: the message names the store and the section in Spanish")
+    check(cli._alert_reason_es("2 register session(s) open for more than 36 h: close the day's cash")
+          == "2 sesión(es) de caja abierta(s) hace más de 36 h: falta hacer el corte",
+          "ALERTS: doctor reasons reach the owner in Spanish")
+
+    token = "123456789:" + "A" * 35
+    import urllib.error
+    original = cli.urllib.request.urlopen
+
+    def refuse(request, timeout=0):
+        raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized " + request.full_url, {}, io.BytesIO(b"{}"))
+
+    cli.urllib.request.urlopen = refuse
+    try:
+        cli.telegram_call(token, "sendMessage", {"chat_id": "1", "text": "x"})
+        check(False, "ALERTS: a refused call must raise")
+    except cli.AlertDeliveryError as error:
+        check(token not in str(error) and "bot" not in str(error).lower(),
+              "ALERTS: a delivery error must never carry the token or the URL")
+    finally:
+        cli.urllib.request.urlopen = original
+
+    units = cli.render_units(cli.Path("/srv/vlux-pos"), None)
+    check(set(units) == {"vlux-pos-backup@.service", "vlux-pos-backup@.timer",
+                         "vlux-pos-alerts.service", "vlux-pos-alerts.timer"},
+          "ALERTS: schedule renders the backup and alert units")
+    check(all("/opt/vlux/cloud/vlux-cloud" not in text for text in units.values()),
+          "ALERTS: units must point at this host's CLI, not a fixed path")
+    check("alerts run" in units["vlux-pos-alerts.service"], "ALERTS: the alert unit runs `alerts run`")
+    check("OnUnitActiveSec=15min" in units["vlux-pos-alerts.timer"], "ALERTS: alerts run every 15 minutes")
+    for text in units.values():
+        check("token" not in text.lower() or "root-only" in text.lower(),
+              "ALERTS: no unit may carry a token")
 
 
 def check_staging_secret_scans() -> None:
@@ -1065,6 +1147,7 @@ def main() -> int:
     check_tunnel(cli, rendered)
     check_machine_json_contract()
     check_doctor(cli)
+    check_alerts(cli)
     check_capacity_profiles(cli)
     check_offsite_prefix(cli)
     check_localisation(cli)
@@ -1084,6 +1167,7 @@ def main() -> int:
     print("CLOUDFLARE_TUNNEL_STATIC_CHECK=PASS")
     print("MACHINE_JSON_OUTPUT=PASS")
     print("DOCTOR_CONTRACT=PASS")
+    print("ALERTS_CONTRACT=PASS")
     print("CAPACITY_PROFILES=PASS")
     print("R2_PREFIX=PASS")
     print("LOCALISATION=PASS")

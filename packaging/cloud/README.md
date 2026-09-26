@@ -236,6 +236,39 @@ verified with a `HEAD` before the backup is recorded as off-site.
 }
 ```
 
+### Alerts (Telegram)
+
+Backups and health checks protect a store only if they run by themselves and
+someone hears when they fail. `vlux-cloud alerts run` evaluates `doctor` for
+every tenant every 15 minutes (systemd timer) and sends a Telegram message
+**only when a section changes state** (new problem, worse, better, resolved),
+plus a reminder every 6 hours while a problem persists. It also watches the
+registers: a session stuck opening (the POS keeps loading with no error) or a
+session open for more than 36 hours.
+
+```bash
+# 1. In Telegram, talk to @BotFather: /newbot -> copy the token into a file
+#    readable only by root (never paste it in a chat or a ticket).
+sudo vlux-cloud alerts configure --telegram-token-file /root/telegram_token
+sudo shred -u /root/telegram_token              # the token now lives in secrets/
+# 2. Send any message to the bot (or add it to a group), then find the chat id:
+sudo vlux-cloud alerts chats
+sudo vlux-cloud alerts configure --chat-id <id>
+# 3. Check delivery and enable the timers:
+sudo vlux-cloud alerts test
+sudo vlux-cloud schedule install
+vlux-cloud alerts run --dry-run                  # what would be sent right now
+```
+
+The token is stored in `secrets/telegram_bot_token` (0600) and never appears in
+argv, output, the journal or error messages (a failed call reports only the
+HTTP status). A message that cannot be delivered keeps the previous state, so
+it is retried on the next run instead of being lost.
+
+A host cannot report its own death: pair this with an external uptime monitor
+(any free service that checks `https://<domain>/vlux/ready` every few minutes
+and notifies the same Telegram chat).
+
 ### Restore
 
 `restore` verifies every checksum, refuses a backup belonging to another

@@ -122,13 +122,20 @@ copy is never deleted to satisfy an upload.
 ## Automating it
 
 ```bash
-sudo install -d -m 0755 /opt/vlux/cloud
-sudo cp systemd/vlux-pos-backup@.service systemd/vlux-pos-backup@.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now vlux-pos-backup@cliente01.timer
+sudo vlux-cloud schedule install            # every tenant on this host
+sudo vlux-cloud schedule install --tenant cliente01
+vlux-cloud schedule status                  # exit 1 if a tenant has no daily backup
 systemctl list-timers 'vlux-pos-backup@*'
 journalctl -u vlux-pos-backup@cliente01.service
 ```
+
+`schedule install` renders the units with the path of the CLI installed on
+*this* host and its base directory, then enables the timer of every tenant.
+Copying the unit files by hand is not supported any more: the old instructions
+pointed at `/opt/vlux/cloud/vlux-cloud`, which does not exist on every host,
+and a unit that cannot start is a backup that silently never runs. `doctor`
+reports `BACKUP_AGE` as WARN (FAIL for real client data) when a tenant has no
+enabled daily backup.
 
 The unit runs at 02:30 with up to 45 minutes of jitter, is `Persistent=true` so
 a missed run catches up after a reboot, and reads every credential from the
