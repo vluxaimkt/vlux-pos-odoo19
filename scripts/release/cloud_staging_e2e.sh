@@ -191,7 +191,7 @@ docker run -d --name vlux-minio \
   --tmpfs /data \
   -e "ROOT_ACCESS_KEY=${MINIO_USER}" \
   -e "ROOT_SECRET_KEY=${MINIO_PASSWORD}" \
-  "$MINIO_IMAGE" posix /data >/dev/null
+  "$MINIO_IMAGE" --region auto posix /data >/dev/null  # R2 signs with region "auto"
 for _ in $(seq 1 30); do
   code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/ || true)"
   [ "$code" != "000" ] && break
