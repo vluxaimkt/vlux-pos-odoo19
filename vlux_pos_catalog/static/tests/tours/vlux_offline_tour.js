@@ -25,8 +25,7 @@ registry.category("web_tour.tours").add("VluxOfflineDayTour", {
             refresh(),
             Dialog.confirm("Continue with limited functionality"),
 
-            scan_barcode(KNOWN_BARCODE),
-            scan_barcode(KNOWN_BARCODE),
+            ProductScreen.addOrderline("Agua Tour 1L", "2"),
             ProductScreen.selectedOrderlineHas("Agua Tour 1L", 2),
             ProductScreen.clickPayButton(),
             PaymentScreen.clickPaymentMethod("Cash"),
