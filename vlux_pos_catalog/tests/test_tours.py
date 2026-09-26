@@ -88,6 +88,20 @@ class TestVluxCatalogTours(TestPointOfSaleHttpCommon):
         self.assertAlmostEqual(session.cash_register_difference, 0.0)
         self.assertEqual(session.move_id.state, "posted")
 
+    def test_offline_day_syncs_every_sale_once(self):
+        """Selling without internet, reloading offline, then syncing when it comes back."""
+        self.start_pos_tour("VluxOfflineDayTour", login="pos_admin")
+        session = self.main_pos_config.current_session_id
+        orders = session.order_ids.filtered(lambda order: order.state in ("paid", "done"))
+        self.assertEqual(len(orders), 2, "both offline sales reached the server")
+        self.assertEqual(len(set(orders.mapped("uuid"))), 2, "no sale synced twice")
+        self.assertEqual(sorted(orders.mapped("lines.qty")), [1, 2])
+        self.assertAlmostEqual(sum(orders.mapped("amount_total")), 36.0)
+        self.assertFalse(
+            self.env["product.product"].search([("barcode", "=", "7509990000059")]),
+            "nothing is created for a code scanned offline",
+        )
+
     def test_cashier_without_permission_gets_standard_not_found(self):
         self.start_pos_tour("VluxCatalogDeniedTour", login="pos_user")
         self.assertFalse(self.env["product.product"].search([("barcode", "=", "7509990000028")]))
