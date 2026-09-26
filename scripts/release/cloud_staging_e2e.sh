@@ -5,7 +5,7 @@
 #   * tunnel mode publishes nothing on the host
 #   * the tunnel token never reaches argv, env, inspect output or logs
 #   * cloudflared can reach the edge and nothing else
-#   * S3-compatible backup, off-site upload and restore-from-S3 work (MinIO)
+#   * S3-compatible backup, off-site upload and restore-from-S3 work (VersityGW S3 lab)
 #   * a tenant migrates to a second, independently namespaced host with its
 #     database, filestore and record counts intact
 #   * the write freeze actually stops writes during a cutover
@@ -30,7 +30,9 @@ OUT_DIR="${REPO}/dist/cloud"
 RESULTS="${OUT_DIR}/staging-results.env"
 SUMMARY="${OUT_DIR}/staging-e2e-summary.json"
 
-MINIO_IMAGE="quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e"
+MINIO_IMAGE="versity/versitygw:v1.0.16@sha256:605de57c0cdc297fc5bc905ece592965d542d8df70d6eedf755734c80f2eb797"
+# MinIO stopped publishing images (quay.io and Docker Hub answer "unauthorized" since 2025);
+# VersityGW is an S3 gateway over a directory: same SigV4 API for the CLI's S3 client.
 MINIO_BUCKET="vlux-pos-backups"
 MINIO_USER="vluxminio"
 MINIO_PASSWORD="vlux-minio-lab-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
@@ -182,18 +184,20 @@ vlux_a tunnel stop >/dev/null 2>&1 || true
 record CLOUDFLARE_TUNNEL_STATIC_CHECK PASS
 
 # ---------------------------------------------------------------------------
-step "MinIO as the S3-compatible off-site target"
+step "S3 lab target (VersityGW) as the off-site target"
 # ---------------------------------------------------------------------------
 docker run -d --name vlux-minio \
-  -p 127.0.0.1:9000:9000 \
-  -e "MINIO_ROOT_USER=${MINIO_USER}" \
-  -e "MINIO_ROOT_PASSWORD=${MINIO_PASSWORD}" \
-  "$MINIO_IMAGE" server /data >/dev/null
+  -p 127.0.0.1:9000:7070 \
+  --tmpfs /data \
+  -e "ROOT_ACCESS_KEY=${MINIO_USER}" \
+  -e "ROOT_SECRET_KEY=${MINIO_PASSWORD}" \
+  "$MINIO_IMAGE" posix /data >/dev/null
 for _ in $(seq 1 30); do
-  curl -fsS "http://127.0.0.1:9000/minio/health/live" >/dev/null 2>&1 && break
+  code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/ || true)"
+  [ "$code" != "000" ] && break
   sleep 2
 done
-curl -fsS "http://127.0.0.1:9000/minio/health/live" >/dev/null || die "MinIO did not become ready"
+[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/ || true)" != "000" ] || die "S3 lab target did not become ready"
 
 AK_FILE="$(mktemp)"; SK_FILE="$(mktemp)"
 printf '%s' "$MINIO_USER" > "$AK_FILE"

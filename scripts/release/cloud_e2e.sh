@@ -25,7 +25,9 @@ UNKNOWN_DOMAIN="unknown.vlux.lab"
 DB_A="vlux_tenant_a"
 DB_B="vlux_tenant_b"
 
-MINIO_IMAGE="quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e"
+MINIO_IMAGE="versity/versitygw:v1.0.16@sha256:605de57c0cdc297fc5bc905ece592965d542d8df70d6eedf755734c80f2eb797"
+# MinIO stopped publishing images (quay.io and Docker Hub answer "unauthorized" since 2025);
+# VersityGW is an S3 gateway over a directory: same SigV4 API for the CLI's S3 client.
 MINIO_BUCKET="vlux-cloud-backups"
 MINIO_USER="vluxminio"
 MINIO_PASSWORD="vlux-minio-lab-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
@@ -506,18 +508,20 @@ docker exec "vlux-${TENANT_A}-app" sh -c 'echo drill > /var/lib/vlux-pos/vlux-dr
   || die "drill partner was not created"
 
 # ---------------------------------------------------------------------------
-step "Off-site S3 target (MinIO)"
+step "Off-site S3 target (S3 lab: VersityGW)"
 # ---------------------------------------------------------------------------
 docker run -d --name vlux-minio \
-  -p 127.0.0.1:9000:9000 \
-  -e "MINIO_ROOT_USER=${MINIO_USER}" \
-  -e "MINIO_ROOT_PASSWORD=${MINIO_PASSWORD}" \
-  "$MINIO_IMAGE" server /data >/dev/null
+  -p 127.0.0.1:9000:7070 \
+  --tmpfs /data \
+  -e "ROOT_ACCESS_KEY=${MINIO_USER}" \
+  -e "ROOT_SECRET_KEY=${MINIO_PASSWORD}" \
+  "$MINIO_IMAGE" posix /data >/dev/null
 for _ in $(seq 1 30); do
-  if curl -fsS "http://127.0.0.1:9000/minio/health/live" >/dev/null 2>&1; then break; fi
+  code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/ || true)"
+  [ "$code" != "000" ] && break
   sleep 2
 done
-curl -fsS "http://127.0.0.1:9000/minio/health/live" >/dev/null || die "MinIO did not become ready"
+[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/ || true)" != "000" ] || die "S3 lab target did not become ready"
 
 python3 - "$CLI" "$MINIO_BUCKET" "$MINIO_USER" "$MINIO_PASSWORD" <<'PY'
 import hashlib, importlib.util, sys
