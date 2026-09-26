@@ -11,8 +11,8 @@ const KNOWN_BARCODE = "7509990000011";
 const UNKNOWN_OFFLINE_BARCODE = "7509990000059";
 
 // The store loses its internet after opening the register: the cashier keeps
-// selling with the (USB) scanner, an unknown code gets a clear message instead
-// of a broken form, the page is even reloaded while offline, and every sale
+// selling with the (USB) scanner even after reloading the page offline, an
+// unknown code gets a clear message instead of a broken form, and every sale
 // reaches the server exactly once when the connection comes back.
 registry.category("web_tour.tours").add("VluxOfflineDayTour", {
     steps: () =>
@@ -20,6 +20,10 @@ registry.category("web_tour.tours").add("VluxOfflineDayTour", {
             Chrome.startPoS(),
             Dialog.confirm("Open Register"),
             OfflineUtil.setOfflineMode(),
+            // The page is reloaded without internet; Odoo warns once and the
+            // register keeps working from what it had loaded.
+            refresh(),
+            Dialog.confirm("Continue with limited functionality"),
 
             scan_barcode(KNOWN_BARCODE),
             scan_barcode(KNOWN_BARCODE),
@@ -40,9 +44,6 @@ registry.category("web_tour.tours").add("VluxOfflineDayTour", {
                 trigger: ".vlux-catalog-dialog",
             }),
 
-            // Reloading the page while offline keeps the register usable.
-            refresh(),
-            Dialog.confirm("Continue with limited functionality"),
             scan_barcode(KNOWN_BARCODE),
             ProductScreen.selectedOrderlineHas("Agua Tour 1L", 1),
             ProductScreen.clickPayButton(),
