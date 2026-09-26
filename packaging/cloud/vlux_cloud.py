@@ -470,6 +470,8 @@ class Layout:
         self.tenants = base / "tenants"
         self.host_state = base / "host.json"
         self.offsite_config = base / "offsite.json"
+        self.alerts_config = base / "alerts.json"
+        self.alerts_state = base / "alerts-state.json"
         self.secrets = base / "secrets"
         self.tunnel = base / "tunnel"
 
@@ -3951,8 +3953,13 @@ def migration_verify(args: argparse.Namespace) -> int:
 
 DOCTOR_SECTIONS = (
     "ODOO", "POSTGRES", "DB_CONNECTIONS", "FILESTORE", "DISK", "EDGE",
-    "BACKUP_AGE", "OFFSITE", "WORKERS", "ADDONS", "HARDWARE", "VERSION",
+    "BACKUP_AGE", "OFFSITE", "WORKERS", "ADDONS", "HARDWARE", "POS_SESSIONS", "VERSION",
 )
+# A register whose session never finished opening leaves the POS spinning
+# with no error (the "POS FANY" case); one open for days means nobody closed
+# the day's cash.
+DOCTOR_STUCK_OPENING_MIN = 30
+DOCTOR_SESSION_OPEN_HOURS = 36
 DOCTOR_RANK = {"OK": 0, "WARN": 1, "FAIL": 2}
 DOCTOR_DISK_WARN_PCT = 15.0
 DOCTOR_DISK_FAIL_PCT = 5.0
@@ -4056,6 +4063,24 @@ def doctor_collect(layout: Layout, paths: TenantPaths) -> dict:
         if len(row) == 3 and row[1].isdigit() and row[2].isdigit():
             hardware["order_printers"][row[0]] = {"count": int(row[1]), "unconfigured": int(row[2])}
 
+    pos_sessions = {
+        "stuck_opening": _psql_int(
+            paths,
+            "SELECT count(*) FROM pos_session WHERE state = 'opening_control' AND start_at IS NULL "
+            "AND create_date < now() AT TIME ZONE 'UTC' - interval '%d minutes'" % DOCTOR_STUCK_OPENING_MIN,
+        ),
+        "open_too_long": _psql_int(
+            paths,
+            "SELECT count(*) FROM pos_session WHERE state IN ('opened', 'closing_control') "
+            "AND start_at < now() AT TIME ZONE 'UTC' - interval '%d hours'" % DOCTOR_SESSION_OPEN_HOURS,
+        ),
+        "oldest_open_hours": _psql_int(
+            paths,
+            "SELECT coalesce(max(extract(epoch FROM now() AT TIME ZONE 'UTC' - start_at) / 3600), 0)::int "
+            "FROM pos_session WHERE state IN ('opened', 'closing_control') AND start_at IS NOT NULL",
+        ),
+    }
+
     modules = {}
     for row in _psql_rows(
         paths,
@@ -4118,7 +4143,8 @@ def doctor_collect(layout: Layout, paths: TenantPaths) -> dict:
             "route_present": paths.caddy_route.exists(),
             "tunnel": tunnel_state(layout) if edge_mode == "cloudflare_tunnel" else None,
         },
-        "backup": backup_protection(layout, paths, metadata),
+        "backup": dict(backup_protection(layout, paths, metadata), schedule=backup_schedule_state(paths.name)),
+        "pos_sessions": pos_sessions,
         "host": {"cpus": os.cpu_count(), "memory_bytes": _host_memory_bytes()},
     }
 
@@ -4200,6 +4226,9 @@ def doctor_evaluate(raw: dict) -> dict:
 
     backup = raw["backup"]
     local_reasons = [reason for reason in backup["reasons"] if "off-site" not in reason]
+    # "unknown" = no systemd here (CI container, dev box): nothing to judge.
+    if backup.get("schedule") in ("disabled", "missing"):
+        local_reasons.append("no automatic daily backup is scheduled (vlux-cloud schedule install)")
     if not local_reasons:
         backup_status = "OK"
     elif backup["data_class"] == "REAL_CLIENT_DATA":
@@ -4208,7 +4237,7 @@ def doctor_evaluate(raw: dict) -> dict:
         backup_status = "WARN"
     sections["BACKUP_AGE"] = _section(
         backup_status, last_backup=backup["last_backup"], local_archives=backup["local_archives"],
-        data_class=backup["data_class"], reasons=local_reasons,
+        data_class=backup["data_class"], schedule=backup.get("schedule", "unknown"), reasons=local_reasons,
     )
     offsite_reasons = [reason for reason in backup["reasons"] if "off-site" in reason]
     sections["OFFSITE"] = _section(
@@ -4259,6 +4288,24 @@ def doctor_evaluate(raw: dict) -> dict:
         mobile_scanner_pairings=hardware.get("scanner_pairings"),
     )
 
+    sessions = raw.get("pos_sessions") or {}
+    session_reasons = []
+    if sessions.get("stuck_opening"):
+        session_reasons.append(
+            "%d register session(s) stuck opening for more than %d min: the POS keeps loading"
+            % (sessions["stuck_opening"], DOCTOR_STUCK_OPENING_MIN)
+        )
+    if sessions.get("open_too_long"):
+        session_reasons.append(
+            "%d register session(s) open for more than %d h: close the day's cash"
+            % (sessions["open_too_long"], DOCTOR_SESSION_OPEN_HOURS)
+        )
+    sections["POS_SESSIONS"] = _section(
+        "WARN" if session_reasons else "OK",
+        stuck_opening=sessions.get("stuck_opening"), open_too_long=sessions.get("open_too_long"),
+        oldest_open_hours=sessions.get("oldest_open_hours"), reasons=session_reasons,
+    )
+
     sections["VERSION"] = _section(
         "OK", cloud_version=meta["cloud_version"], cli_version=CLOUD_VERSION,
         edition=meta["edition"], **meta["image"],
@@ -4279,6 +4326,373 @@ def doctor(args: argparse.Namespace) -> int:
     report["checked_at"] = utc_iso()
     print(json.dumps(report, indent=2, sort_keys=True))
     return DOCTOR_RANK[report["status"]]
+
+
+
+# --------------------------------------------------------------------------
+# Scheduling (systemd timers) and alerts (Telegram)
+# --------------------------------------------------------------------------
+#
+# Backups and health checks only protect a store if they run on their own
+# and somebody hears about it when they do not. `schedule install` renders
+# the systemd units with the path of *this* CLI (a unit pointing at a path
+# that does not exist on the host is a backup that never runs), enables the
+# daily backup of every tenant and, once alerts are configured, the 15-minute
+# alert check. `alerts run` evaluates `doctor` for every tenant and sends a
+# Telegram message only when a section changes state, plus a reminder while
+# a problem persists. The bot token lives in a root-only file and never
+# appears in argv, logs, output or error messages.
+
+SYSTEMD_DIR = Path("/etc/systemd/system")
+UNIT_BACKUP = "vlux-pos-backup@"
+UNIT_ALERTS = "vlux-pos-alerts"
+ALERT_REMINDER_HOURS = 6
+TELEGRAM_API = "https://api.telegram.org"
+TELEGRAM_MAX_CHARS = 3900  # Telegram rejects messages above 4096
+ALERT_ICONS = {"OK": "✅", "WARN": "⚠️", "FAIL": "🔴"}
+ALERT_LABELS = {"OK": "OK", "WARN": "AVISO", "FAIL": "FALLA"}
+
+
+def cli_path() -> str:
+    """Absolute path of the command that systemd must run."""
+    found = shutil.which("vlux-cloud")
+    if found:
+        return found
+    return sys.executable + " " + str(Path(__file__).resolve())
+
+
+def systemctl(*args: str, check: bool = False) -> subprocess.CompletedProcess:
+    return run(["systemctl", *args], check=check, capture=True)
+
+
+def systemd_available() -> bool:
+    return shutil.which("systemctl") is not None and Path("/run/systemd/system").is_dir()
+
+
+def backup_schedule_state(tenant: str) -> str:
+    """enabled | disabled | missing | unknown (no systemd on this machine)."""
+    if not systemd_available():
+        return "unknown"
+    output = systemctl("is-enabled", UNIT_BACKUP + tenant + ".timer").stdout or ""
+    state = (output.decode("utf-8", "replace") if isinstance(output, bytes) else output).strip()
+    if state in ("enabled", "static", "enabled-runtime"):
+        return "enabled"
+    if state in ("disabled", "masked"):
+        return "disabled"
+    return "missing"
+
+
+def render_units(base_dir: Path, host_id: str | None) -> dict[str, str]:
+    """Unit files with this host's CLI path and base directory."""
+    command = cli_path() + " --base-dir " + str(base_dir)
+    if host_id:
+        command += " --host-id " + host_id
+    source = Path(__file__).resolve().parent / "systemd"
+    units = {}
+    for name in (UNIT_BACKUP + ".service", UNIT_BACKUP + ".timer", UNIT_ALERTS + ".service", UNIT_ALERTS + ".timer"):
+        text = (source / name).read_text(encoding="utf-8")
+        units[name] = text.replace("/opt/vlux/cloud/vlux-cloud", command).replace(
+            "ReadWritePaths=/srv/vlux-pos", "ReadWritePaths=" + str(base_dir)
+        )
+    return units
+
+
+def schedule_install(args: argparse.Namespace) -> int:
+    require_root()
+    if not systemd_available():
+        fail("systemd is not running on this machine; timers cannot be installed.")
+    layout = Layout.load(Path(args.base_dir), args.host_id)
+    for name, text in render_units(layout.base, args.host_id).items():
+        write_file(SYSTEMD_DIR / name, text, 0o644)
+    systemctl("daemon-reload", check=True)
+    tenants = [validate_tenant(args.tenant)] if args.tenant else layout.known_tenants()
+    enabled = []
+    for tenant in tenants:
+        systemctl("enable", "--now", UNIT_BACKUP + tenant + ".timer", check=True)
+        enabled.append(UNIT_BACKUP + tenant + ".timer")
+    alerts = "not configured (vlux-cloud alerts configure)"
+    if layout.alerts_config.exists():
+        systemctl("enable", "--now", UNIT_ALERTS + ".timer", check=True)
+        enabled.append(UNIT_ALERTS + ".timer")
+        alerts = "enabled"
+    print(json.dumps({"installed_units": sorted(render_units(layout.base, args.host_id)),
+                      "enabled_timers": enabled, "alerts": alerts, "cli": cli_path()},
+                     indent=2, sort_keys=True))
+    return 0
+
+
+def schedule_status(args: argparse.Namespace) -> int:
+    layout = Layout.load(Path(args.base_dir), args.host_id)
+    rows = {tenant: backup_schedule_state(tenant) for tenant in layout.known_tenants()}
+    alerts = "unknown"
+    if systemd_available():
+        state = systemctl("is-enabled", UNIT_ALERTS + ".timer").stdout
+        state = state.decode() if isinstance(state, bytes) else (state or "")
+        alerts = state.strip() or "missing"
+    print(json.dumps({"backup_timers": rows, "alerts_timer": alerts,
+                      "alerts_configured": layout.alerts_config.exists()}, indent=2, sort_keys=True))
+    return 0 if all(state in ("enabled", "unknown") for state in rows.values()) else 1
+
+
+# --- Telegram ---------------------------------------------------------------
+
+class AlertDeliveryError(Exception):
+    """Sending failed. The message never contains the bot token or the URL."""
+
+
+def _telegram_token(layout: Layout) -> str:
+    config = read_json(layout.alerts_config) if layout.alerts_config.exists() else {}
+    token_file = Path(config.get("token_file") or (layout.secrets / "telegram_bot_token"))
+    if not token_file.is_file():
+        fail("Alerts are not configured: run vlux-cloud alerts configure.")
+    return token_file.read_text(encoding="utf-8").strip()
+
+
+def telegram_call(token: str, method: str, payload: dict | None = None, timeout: int = 20) -> dict:
+    url = TELEGRAM_API + "/bot" + token + "/" + method
+    data = json.dumps(payload or {}).encode("utf-8")
+    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        try:
+            description = json.loads(error.read().decode("utf-8")).get("description", "")
+        except Exception:  # noqa: BLE001
+            description = ""
+        # Never str(error): it can carry the URL, and the URL carries the token.
+        raise AlertDeliveryError("Telegram answered HTTP %d %s" % (error.code, description[:120])) from None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        raise AlertDeliveryError("Telegram is unreachable from this host") from None
+    if not body.get("ok"):
+        raise AlertDeliveryError("Telegram refused the call: " + str(body.get("description", ""))[:120])
+    return body.get("result") or {}
+
+
+def telegram_send(token: str, chat_id: str, text: str) -> None:
+    for start in range(0, len(text), TELEGRAM_MAX_CHARS):
+        telegram_call(token, "sendMessage", {
+            "chat_id": chat_id, "text": text[start:start + TELEGRAM_MAX_CHARS],
+            "disable_web_page_preview": True,
+        })
+
+
+def alerts_configure(args: argparse.Namespace) -> int:
+    require_root()
+    layout = Layout.load(Path(args.base_dir), args.host_id)
+    ensure_dir(layout.secrets, 0o700)
+    token_file = layout.secrets / "telegram_bot_token"
+    if args.telegram_token_file:
+        source = Path(args.telegram_token_file)
+        if not source.is_file():
+            fail("Token file not found: " + str(source))
+        token = source.read_text(encoding="utf-8").strip()
+        if not re.fullmatch(r"\d{5,}:[A-Za-z0-9_-]{30,}", token):
+            fail("That file does not look like a Telegram bot token (digits:letters).")
+        write_file(token_file, token, 0o600)
+    if not token_file.exists():
+        fail("Provide --telegram-token-file the first time.")
+    token = token_file.read_text(encoding="utf-8").strip()
+    bot = telegram_call(token, "getMe")
+    config = read_json(layout.alerts_config) if layout.alerts_config.exists() else {}
+    config.update({
+        "provider": "telegram",
+        "token_file": str(token_file),
+        "bot_username": bot.get("username"),
+        "reminder_hours": args.reminder_hours or config.get("reminder_hours", ALERT_REMINDER_HOURS),
+        "configured_at": utc_iso(),
+    })
+    if args.chat_id:
+        config["chat_id"] = str(args.chat_id)
+    write_json(layout.alerts_config, config, mode=0o600)
+    shown = {k: v for k, v in config.items() if k != "token_file"}
+    shown["token"] = "stored root-only, never echoed"
+    print(json.dumps(shown, indent=2, sort_keys=True))
+    if not config.get("chat_id"):
+        info("Now send any message to @%s from Telegram and run: vlux-cloud alerts chats" % bot.get("username"))
+    return 0
+
+
+def alerts_chats(args: argparse.Namespace) -> int:
+    """Chats that recently wrote to the bot, to find the chat id to configure."""
+    require_root()
+    layout = Layout.load(Path(args.base_dir), args.host_id)
+    updates = telegram_call(_telegram_token(layout), "getUpdates", {"limit": 50})
+    chats = {}
+    for update in updates if isinstance(updates, list) else []:
+        chat = (update.get("message") or update.get("channel_post") or {}).get("chat") or {}
+        if chat.get("id") is not None:
+            chats[str(chat["id"])] = {
+                "chat_id": str(chat["id"]), "type": chat.get("type"),
+                "title": chat.get("title") or " ".join(filter(None, [chat.get("first_name"), chat.get("last_name")])),
+                "username": chat.get("username"),
+            }
+    print(json.dumps({"chats": list(chats.values())}, indent=2, sort_keys=True, ensure_ascii=False))
+    return 0
+
+
+def _alerts_target(layout: Layout) -> tuple[str, str, dict]:
+    if not layout.alerts_config.exists():
+        fail("Alerts are not configured: run vlux-cloud alerts configure.")
+    config = read_json(layout.alerts_config)
+    if not config.get("chat_id"):
+        fail("No chat id yet: run vlux-cloud alerts chats, then alerts configure --chat-id <id>.")
+    return _telegram_token(layout), config["chat_id"], config
+
+
+def alerts_test(args: argparse.Namespace) -> int:
+    require_root()
+    layout = Layout.load(Path(args.base_dir), args.host_id)
+    token, chat_id, _config = _alerts_target(layout)
+    host = socket.gethostname()
+    telegram_send(token, chat_id, "✅ VLUX POS: prueba de alertas desde %s. Si lees esto, los avisos llegan." % host)
+    print(json.dumps({"sent": True, "chat_id": chat_id}, indent=2))
+    return 0
+
+
+def alerts_diff(previous: dict, reports: dict, now: _dt.datetime, reminder_hours: float) -> tuple[dict, list]:
+    """Pure: compare doctor reports with the last known state.
+
+    ``previous`` = {tenant: {section: {"status", "since", "notified_at"}}}.
+    ``reports`` = {tenant: doctor report}. Returns (new_state, events) where an
+    event is {"tenant", "section", "kind": new|worse|recovered|reminder,
+    "status", "previous", "detail", "since"}. A first run only reports what is
+    already wrong; OK sections stay silent.
+    """
+    state, events = {}, []
+    for tenant, report in sorted(reports.items()):
+        before = previous.get(tenant, {})
+        state[tenant] = {}
+        for section, data in report.get("sections", {}).items():
+            status = data.get("status", "FAIL")
+            old = before.get(section)
+            detail = _alert_detail(data)
+            entry = {"status": status, "since": now.isoformat(), "notified_at": None}
+            if old and old.get("status") == status:
+                entry["since"] = old.get("since") or entry["since"]
+                entry["notified_at"] = old.get("notified_at")
+                if status != "OK" and old.get("notified_at"):
+                    last = _dt.datetime.fromisoformat(old["notified_at"])
+                    if (now - last).total_seconds() >= reminder_hours * 3600:
+                        events.append({"tenant": tenant, "section": section, "kind": "reminder", "status": status,
+                                       "previous": status, "detail": detail, "since": entry["since"]})
+                        entry["notified_at"] = now.isoformat()
+            else:
+                old_status = (old or {}).get("status", "OK")
+                if status == "OK" and old_status != "OK":
+                    kind = "recovered"
+                elif status != "OK" and DOCTOR_RANK[status] > DOCTOR_RANK.get(old_status, 0):
+                    kind = "new" if old_status == "OK" else "worse"
+                elif status != "OK":
+                    kind = "better"  # FAIL -> WARN: still worth knowing
+                else:
+                    kind = None
+                if kind:
+                    events.append({"tenant": tenant, "section": section, "kind": kind, "status": status,
+                                   "previous": old_status, "detail": detail, "since": entry["since"]})
+                    entry["notified_at"] = now.isoformat()
+            state[tenant][section] = entry
+    return state, events
+
+
+ALERT_SECTIONS_ES = {
+    "ODOO": "Odoo", "POSTGRES": "Base de datos", "DB_CONNECTIONS": "Conexiones a la base",
+    "FILESTORE": "Archivos (fotos, adjuntos)", "DISK": "Disco", "EDGE": "Acceso público",
+    "BACKUP_AGE": "Respaldos", "OFFSITE": "Respaldo externo (R2)", "WORKERS": "Capacidad del servidor",
+    "ADDONS": "Módulos VLUX", "HARDWARE": "Impresoras", "POS_SESSIONS": "Sesiones de caja",
+    "VERSION": "Versión", "DOCTOR": "Diagnóstico",
+}
+# doctor speaks English (it is an operator tool); the owner reads Spanish.
+ALERT_REASONS_ES = (
+    (r"no automatic daily backup is scheduled.*", "no hay respaldo diario programado"),
+    (r"(\d+) register session\(s\) open for more than (\d+) h.*",
+     r"\1 sesión(es) de caja abierta(s) hace más de \2 h: falta hacer el corte"),
+    (r"(\d+) register session\(s\) stuck opening for more than (\d+) min.*",
+     r"\1 sesión(es) de caja atorada(s) al abrir: el POS se queda cargando"),
+    (r"last backup is (\S+) old.*", r"el último respaldo tiene \1"),
+    (r"no backup.*", "no hay ningún respaldo"),
+    (r"no off-site storage is configured.*", "no hay respaldo externo configurado"),
+    (r"last off-site upload failed.*", "falló la última subida del respaldo a R2"),
+    (r"odoo is not answering.*", "Odoo no responde"),
+    (r"odoo is up but not ready to sell.*", "Odoo está arriba pero no puede vender"),
+)
+
+
+def _alert_reason_es(text: str) -> str:
+    for pattern, replacement in ALERT_REASONS_ES:
+        if re.fullmatch(pattern, text):
+            return re.sub(pattern, replacement, text)
+    return text
+
+
+def _alert_detail(section: dict) -> str:
+    reasons = section.get("reasons")
+    if reasons:
+        return "; ".join(_alert_reason_es(str(reason)) for reason in reasons)[:300]
+    for key in ("reason", "error"):
+        if section.get(key):
+            return _alert_reason_es(str(section[key]))[:300]
+    if "free_pct" in section:
+        return "%.1f %% libre" % (section["free_pct"] or 0)
+    if section.get("profile") == LEGACY_PROFILE:
+        return "la tienda no tiene perfil de capacidad asignado"
+    return ""
+
+
+def alerts_message(events: list, host: str) -> str:
+    lines = ["VLUX POS · " + host]
+    by_tenant: dict[str, list] = {}
+    for event in events:
+        by_tenant.setdefault(event["tenant"], []).append(event)
+    words = {"new": "", "worse": "empeoró: ", "better": "mejoró: ", "reminder": "sigue: ", "recovered": "se resolvió: "}
+    for tenant, tenant_events in by_tenant.items():
+        lines.append("")
+        lines.append("Tienda " + tenant)
+        for event in tenant_events:
+            icon = ALERT_ICONS.get(event["status"], "•")
+            label = ALERT_LABELS.get(event["status"], event["status"])
+            section = ALERT_SECTIONS_ES.get(event["section"], event["section"])
+            text = "%s %s%s %s" % (icon, words.get(event["kind"], ""), section, label)
+            if event["detail"] and event["kind"] != "recovered":
+                text += " — " + event["detail"]
+            lines.append(text)
+    return "\n".join(lines)
+
+
+def alerts_run(args: argparse.Namespace) -> int:
+    layout = Layout.load(Path(args.base_dir), args.host_id)
+    if not args.dry_run:
+        require_root()
+    reports = {}
+    for tenant in layout.known_tenants():
+        paths = layout.tenant(tenant)
+        try:
+            reports[tenant] = doctor_evaluate(doctor_collect(layout, paths))
+        except Exception as error:  # noqa: BLE001 - a crashing check is itself an alert
+            reports[tenant] = {"status": "FAIL", "sections": {
+                "DOCTOR": {"status": "FAIL", "error": type(error).__name__ + ": " + str(error)[:200]},
+            }}
+    config = read_json(layout.alerts_config) if layout.alerts_config.exists() else {}
+    previous = read_json(layout.alerts_state) if layout.alerts_state.exists() else {}
+    state, events = alerts_diff(previous, reports, utc_now(), float(config.get("reminder_hours", ALERT_REMINDER_HOURS)))
+    message = alerts_message(events, socket.gethostname()) if events else ""
+    delivered = False
+    if events and not args.dry_run:
+        token, chat_id, _config = _alerts_target(layout)
+        try:
+            telegram_send(token, chat_id, message)
+            delivered = True
+        except AlertDeliveryError as error:
+            # Keep the previous state so the same events are retried next run.
+            info("Alert not delivered: " + str(error))
+            print(json.dumps({"events": len(events), "delivered": False, "error": str(error)}, indent=2))
+            return 2
+    if not args.dry_run:
+        write_json(layout.alerts_state, state, mode=0o600)
+    print(json.dumps({"tenants": {t: r["status"] for t, r in reports.items()}, "events": events,
+                      "delivered": delivered, "dry_run": bool(args.dry_run),
+                      "message": message if args.dry_run else None}, indent=2, sort_keys=True, ensure_ascii=False))
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -4440,6 +4854,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=maintenance_command)
 
     # --- migration ----------------------------------------------------------
+    p = sub.add_parser("schedule", help="Install and inspect the backup and alert timers (systemd).")
+    schedule_sub = p.add_subparsers(dest="schedule_command", required=True)
+    q = schedule_sub.add_parser("install", help="Render the units for this host and enable the timers.")
+    q.add_argument("--tenant", help="Only this tenant's backup timer (default: every tenant).")
+    q.set_defaults(func=schedule_install)
+    q = schedule_sub.add_parser("status", help="Which tenants have their daily backup scheduled.")
+    q.set_defaults(func=schedule_status)
+
+    p = sub.add_parser("alerts", help="Health alerts to Telegram.")
+    alerts_sub = p.add_subparsers(dest="alerts_command", required=True)
+    q = alerts_sub.add_parser("configure", help="Store the bot token (root-only) and the chat id.")
+    q.add_argument("--telegram-token-file", help="File holding the bot token from @BotFather; copied, never echoed.")
+    q.add_argument("--chat-id", help="Chat that receives the alerts (see: alerts chats).")
+    q.add_argument("--reminder-hours", type=float, help="Repeat a persisting problem every N hours (default 6).")
+    q.set_defaults(func=alerts_configure)
+    q = alerts_sub.add_parser("chats", help="List chats that wrote to the bot, to find the chat id.")
+    q.set_defaults(func=alerts_chats)
+    q = alerts_sub.add_parser("test", help="Send a test message.")
+    q.set_defaults(func=alerts_test)
+    q = alerts_sub.add_parser("run", help="Run doctor on every tenant and send what changed.")
+    q.add_argument("--dry-run", action="store_true", help="Evaluate and print the message; send nothing, keep no state.")
+    q.set_defaults(func=alerts_run)
+
     p = sub.add_parser("migration", help="Move a tenant between hosts without data loss.")
     mig = p.add_subparsers(dest="migration_command", required=True)
 

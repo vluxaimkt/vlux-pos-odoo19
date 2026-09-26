@@ -24,6 +24,8 @@ SENSITIVE_RE = re.compile(
     r"(?m)^\s*([A-Za-z0-9_.-]*(password|passwd|secret|token|api[_-]?key)[A-Za-z0-9_.-]*)"
     r"\s*[:=]\s*(['\"][^'\"]{12,}|[A-Z0-9_./{}$-]{12,})"
 )
+# A Telegram bot token anywhere in a file, whatever the variable is called.
+TELEGRAM_TOKEN_RE = re.compile(r"(?<![0-9])[0-9]{8,10}:AA[A-Za-z0-9_-]{33}(?![A-Za-z0-9_-])")
 ALLOWLIST_MARKERS = (
     "REEMPLAZAR_",
     "SECRETO_",
@@ -69,6 +71,8 @@ def scan_text(paths: list[str]) -> None:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
+        if TELEGRAM_TOKEN_RE.search(text):
+            fail(f"Possible Telegram bot token in {relative}")
         for match in SENSITIVE_RE.finditer(text):
             line = match.group(0)
             if any(marker.lower() in line.lower() for marker in ALLOWLIST_MARKERS):
