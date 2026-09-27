@@ -11,7 +11,8 @@ const KNOWN_BARCODE = "7509990000011";
 const UNKNOWN_OFFLINE_BARCODE = "7509990000059";
 
 // The store loses its internet after opening the register: the cashier keeps
-// selling with the (USB) scanner even after reloading the page offline, an
+// selling with the (USB) scanner even after reloading the page offline (the
+// barcode rules come from this browser's copy, F26), an
 // unknown code gets a clear message instead of a broken form, and every sale
 // reaches the server exactly once when the connection comes back.
 registry.category("web_tour.tours").add("VluxOfflineDayTour", {
