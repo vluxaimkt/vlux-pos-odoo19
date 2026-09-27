@@ -1,4 +1,6 @@
 import { patch } from "@web/core/utils/patch";
+import { _t } from "@web/core/l10n/translation";
+import { ConnectionLostError } from "@web/core/network/rpc";
 import { ProductScreen } from "@point_of_sale/app/screens/product_screen/product_screen";
 
 patch(ProductScreen.prototype, {
@@ -6,17 +8,61 @@ patch(ProductScreen.prototype, {
      * Unknown barcode + quick-create permission -> open the registration
      * form instead of the generic "unknown barcode" toast. Known barcodes and
      * users without the permission follow the standard Odoo path untouched.
+     *
+     * Offline, a barcode the register has not loaded cannot be looked up on
+     * the server, and a product cannot be created there either: every
+     * cashier gets a clear message instead of a silent connection error.
      */
     async _barcodeProductAction(code) {
+        const offline = () => Boolean(this.pos.data?.network?.offline);
+        // Known offline, for every cashier: look only at what the register
+        // loaded. Odoo would ask the server and fail silently, leaving the
+        // cashier with no answer at all.
+        if (offline() && !this._vluxLoadedProduct(code)) {
+            return this._vluxOfflineUnknown(code);
+        }
         if (!this.pos.vluxCatalogCanQuickCreate) {
             return super._barcodeProductAction(code);
         }
-        const product = await this._getProductByBarcode(code);
+        let product;
+        try {
+            product = await this._getProductByBarcode(code);
+        } catch (error) {
+            // The connection dropped during the lookup itself.
+            if (error instanceof ConnectionLostError || offline()) {
+                return this._vluxOfflineUnknown(code);
+            }
+            throw error;
+        }
         if (product) {
             return super._barcodeProductAction(code);
         }
         this.sound.play("scan-error");
         // Deliberately not awaited: the barcode mutex must not wait for the cashier.
         this.pos.vluxCatalogOpenQuickCreate(code.base_code);
+    },
+
+    _vluxLoadedProduct(code) {
+        const models = this.pos.models;
+        return (
+            models["product.product"].getBy("barcode", code.base_code) ||
+            models["product.uom"]?.getBy("barcode", code.base_code)?.product_id
+        );
+    },
+
+    _vluxOfflineUnknown(code) {
+        // The message first: the error sound may need a file it cannot fetch offline.
+        this.notification.add(
+            _t(
+                "Sin conexión: el código %s no está en esta caja. Podrás registrarlo cuando vuelva el internet.",
+                code.base_code
+            ),
+            { type: "warning" }
+        );
+        try {
+            this.sound.play("scan-error");
+        } catch {
+            // no sound offline is fine
+        }
     },
 });

@@ -6,7 +6,7 @@
         "producto con un formulario minimo (codigo, nombre, precio, foto manual) y lo "
         "agrega a la orden sin recargar el POS. La autorizacion se valida en servidor."
     ),
-    "version": "19.0.1.3.1",
+    "version": "19.0.1.3.2",
     "category": "Sales/Point of Sale",
     "author": "VLUX",
     "website": "https://vlux.com.mx",

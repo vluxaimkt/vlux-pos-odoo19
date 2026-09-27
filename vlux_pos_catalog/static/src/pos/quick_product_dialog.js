@@ -1,10 +1,20 @@
 import { Component, onMounted, useRef, useState } from "@odoo/owl";
 import { Dialog } from "@web/core/dialog/dialog";
 import { _t } from "@web/core/l10n/translation";
+import { ConnectionLostError } from "@web/core/network/rpc";
 import { useService } from "@web/core/utils/hooks";
 import { usePos } from "@point_of_sale/app/hooks/pos_hook";
 import { useAsyncLockedMethod } from "@point_of_sale/app/hooks/hooks";
 import { prepareProductImage } from "./image_utils";
+
+// The register can lose its connection while the form is open: say so plainly
+// (nothing was saved) instead of showing the RPC layer's English message.
+function errorMessage(error, fallback) {
+    if (error instanceof ConnectionLostError) {
+        return _t("Sin conexión: no se guardó nada. Intenta de nuevo cuando vuelva el internet.");
+    }
+    return error?.data?.message || error?.message || fallback;
+}
 
 /**
  * Minimal product registration form shown when a scanned barcode is unknown.
@@ -54,7 +64,7 @@ export class QuickProductDialog extends Component {
                     this.state.pos_categ_id = String(defaults.pos_categ_id);
                 }
             } catch (error) {
-                this.state.error = error?.data?.message || error?.message || _t("No fue posible cargar los valores por defecto.");
+                this.state.error = errorMessage(error, _t("No fue posible cargar los valores por defecto."));
             } finally {
                 this.state.defaultsLoaded = true;
             }
@@ -179,7 +189,7 @@ export class QuickProductDialog extends Component {
             }
             this.state.error = _t("No fue posible registrar el producto.");
         } catch (error) {
-            this.state.error = error?.data?.message || error?.message || _t("No fue posible registrar el producto.");
+            this.state.error = errorMessage(error, _t("No fue posible registrar el producto."));
         } finally {
             this.state.saving = false;
         }
@@ -197,7 +207,7 @@ export class QuickProductDialog extends Component {
             });
             this.props.close();
         } catch (error) {
-            this.state.error = error?.data?.message || error?.message || _t("No fue posible usar el producto existente.");
+            this.state.error = errorMessage(error, _t("No fue posible usar el producto existente."));
         } finally {
             this.state.saving = false;
         }
