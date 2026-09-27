@@ -57,5 +57,20 @@ registry.category("web_tour.tours").add("VluxOfflineDayTour", {
 
             OfflineUtil.setOnlineMode(),
             Chrome.isSyncStatusConnected(),
+            {
+                content: "every paid sale made offline is synced (the queue drains asynchronously)",
+                trigger: "body",
+                run: async () => {
+                    const unsynced = () =>
+                        posmodel.models["pos.order"].filter((order) => order.isUnsyncedPaid).length;
+                    const deadline = Date.now() + 20000;
+                    while (unsynced() > 0 && Date.now() < deadline) {
+                        await new Promise((resolve) => setTimeout(resolve, 250));
+                    }
+                    if (unsynced() > 0) {
+                        throw new Error(`${unsynced()} paid order(s) still not synced after 20 s`);
+                    }
+                },
+            },
         ].flat(),
 });
