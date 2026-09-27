@@ -15,6 +15,7 @@ patch(ProductScreen.prototype, {
      */
     async _barcodeProductAction(code) {
         const offline = () => Boolean(this.pos.data?.network?.offline);
+        console.info("VLUX barcode action", code.base_code, "offline:", offline(), "loaded:", Boolean(this._vluxLoadedProduct(code))); // TEMP: CI diagnosis
         // Known offline, for every cashier: look only at what the register
         // loaded. Odoo would ask the server and fail silently, leaving the
         // cashier with no answer at all.
@@ -51,7 +52,8 @@ patch(ProductScreen.prototype, {
     },
 
     _vluxOfflineUnknown(code) {
-        this.sound.play("scan-error");
+        console.info("VLUX offline unknown barcode", code.base_code); // TEMP: CI diagnosis
+        // The message first: the error sound may need a file it cannot fetch offline.
         this.notification.add(
             _t(
                 "Sin conexión: el código %s no está en esta caja. Podrás registrarlo cuando vuelva el internet.",
@@ -59,5 +61,10 @@ patch(ProductScreen.prototype, {
             ),
             { type: "warning" }
         );
+        try {
+            this.sound.play("scan-error");
+        } catch {
+            // no sound offline is fine
+        }
     },
 });
