@@ -84,7 +84,13 @@ Cuando se sepa el modelo: si es térmica USB/red de 80 mm (Epson TM-T20 o
 compatible ESC/POS) se imprime desde el navegador con el diálogo de impresión;
 ajustar tamaño de papel y quitar márgenes una vez en el equipo de la caja.
 
-## 8. Modo sin internet
+## 8. Guía del cajero
+
+Imprimir [guia_cajero.html](guia_cajero.html) (2 hojas carta, instrucciones de
+PDF en el propio archivo), llenar al pie encargado, teléfono y página de la
+caja, y dejarla junto a la caja.
+
+## 9. Modo sin internet
 
 Explicar al cajero [MODO_SIN_INTERNET.md](MODO_SIN_INTERNET.md): puede seguir
 vendiendo con los productos cargados; no debe cerrar la pestaña ni borrar datos
