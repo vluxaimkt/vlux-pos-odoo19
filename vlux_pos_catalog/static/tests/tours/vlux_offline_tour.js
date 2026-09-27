@@ -32,6 +32,9 @@ registry.category("web_tour.tours").add("VluxOfflineDayTour", {
             PaymentScreen.clickValidate(),
             ReceiptScreen.isShown(),
             ReceiptScreen.clickNextOrder(),
+            // Offline the register passes through a feedback screen: the
+            // scanner only listens once the product screen is back.
+            ProductScreen.isShown(),
 
             scan_barcode(UNKNOWN_OFFLINE_BARCODE),
             {
