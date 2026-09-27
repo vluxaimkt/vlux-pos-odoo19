@@ -10,17 +10,19 @@ patch(ProductScreen.prototype, {
      * users without the permission follow the standard Odoo path untouched.
      *
      * Offline, a barcode the register has not loaded cannot be looked up on
-     * the server, and a product cannot be created there either: the cashier
-     * gets a clear message instead of a connection error.
+     * the server, and a product cannot be created there either: every
+     * cashier gets a clear message instead of a silent connection error.
      */
     async _barcodeProductAction(code) {
-        if (!this.pos.vluxCatalogCanQuickCreate) {
-            return super._barcodeProductAction(code);
-        }
         const offline = () => Boolean(this.pos.data?.network?.offline);
-        // Known offline: look only at what the register loaded, never at the server.
+        // Known offline, for every cashier: look only at what the register
+        // loaded. Odoo would ask the server and fail silently, leaving the
+        // cashier with no answer at all.
         if (offline() && !this._vluxLoadedProduct(code)) {
             return this._vluxOfflineUnknown(code);
+        }
+        if (!this.pos.vluxCatalogCanQuickCreate) {
+            return super._barcodeProductAction(code);
         }
         let product;
         try {
