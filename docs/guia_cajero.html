@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="es-MX">
+<head>
+<meta charset="utf-8">
+<title>Guía del cajero VLUX</title>
+<!-- Printable cashier guide (US Letter). Build the PDF with:
+     msedge --headless --print-to-pdf=guia_cajero.pdf --no-pdf-header-footer docs/guia_cajero.html
+     Button names follow Odoo 19 POS in es_MX (es_419 translations). -->
+<style>
+@page{size:letter;margin:11mm 12mm 10mm}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Segoe UI",Arial,sans-serif;font-size:11.3pt;line-height:1.3;color:#16222C}
+h1{font-size:19pt;margin:0 0 1mm}
+.sub{margin:0 0 3.5mm;color:#45535E;font-size:11.5pt}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:3.5mm}
+.box{border:1.4pt solid #0E6B66;border-radius:3mm;padding:2.8mm 4mm;break-inside:avoid}
+.box.warn{border-color:#A8481A}
+.box h2{font-size:13pt;margin:0 0 1.5mm;display:flex;align-items:center;gap:3mm}
+.box h2 .n{display:inline-grid;place-items:center;width:8mm;height:8mm;border-radius:50%;background:#0E6B66;color:#fff;font-size:12pt;flex:none}
+.box.warn h2 .n{background:#A8481A}
+ol,ul{margin:0;padding-left:5.5mm}
+li{margin:0 0 .8mm}
+b.btn{display:inline-block;border:1pt solid #16222C;border-radius:1.5mm;padding:0 1.6mm;font-weight:600;font-size:10pt;background:#F1F4F5;white-space:nowrap}
+.note{font-size:10.5pt;color:#45535E;margin:1.5mm 0 0}
+.full{grid-column:1/-1}
+.page2{break-before:page}
+.contact{border:1.4pt dashed #16222C;border-radius:3mm;padding:2.8mm 4mm;display:grid;grid-template-columns:1fr 1fr;gap:3mm 6mm;font-size:12pt}
+.line{border-bottom:1pt solid #16222C;min-height:6mm}
+table{border-collapse:collapse;width:100%;font-size:11.5pt}
+td{padding:1.4mm 2mm;border-top:1pt solid #C9D3D8;vertical-align:top}
+td:first-child{font-weight:600;width:42%}
+</style>
+</head>
+<body>
+
+<h1>Guía del cajero</h1>
+<p class="sub">Caja VLUX · Téngala junto a la caja. Los nombres en <b class="btn">recuadro</b> son los botones que verá en la pantalla.</p>
+
+<div class="grid">
+  <div class="box">
+    <h2><span class="n">1</span>Entrar a la caja</h2>
+    <ol>
+      <li>Abra <b>Google Chrome</b> y la página de su tienda (ya está guardada en favoritos).</li>
+      <li>En <b class="btn">Seleccionar cajero</b>, toque su nombre.</li>
+      <li><b class="btn">Escriba su NIP</b>: sus 4 números. Nadie más debe saberlo.</li>
+    </ol>
+    <p class="note">Si se aleja de la caja, toque <b class="btn">Bloquear</b> (el candado de arriba).</p>
+  </div>
+
+  <div class="box">
+    <h2><span class="n">2</span>Abrir la caja (al empezar)</h2>
+    <ol>
+      <li>Cuente el dinero del cajón (el fondo, por ejemplo $500).</li>
+      <li>Escríbalo en <b class="btn">Efectivo de apertura</b>.</li>
+      <li>Toque <b class="btn">Abrir caja registradora</b>.</li>
+    </ol>
+    <p class="note">Se hace una sola vez al día y necesita internet.</p>
+  </div>
+
+  <div class="box">
+    <h2><span class="n">3</span>Cobrar</h2>
+    <ol>
+      <li><b>Escanee</b> cada producto, o tóquelo en la pantalla.</li>
+      <li>¿Son varios iguales? Escanéelo otra vez, o toque el renglón, <b class="btn">Cant.</b> y el número.</li>
+      <li>¿Se equivocó? Toque el renglón y la tecla <b class="btn">⌫</b> para quitarlo.</li>
+      <li>Toque <b class="btn">Pago</b>.</li>
+      <li>Elija <b class="btn">Efectivo</b> o <b class="btn">Tarjeta</b>.</li>
+      <li>En efectivo, escriba con cuánto le pagaron: la pantalla le dice el <b>cambio</b>.</li>
+      <li>Toque <b class="btn">Validar</b>. Sale el ticket.</li>
+      <li>Toque <b class="btn">Nueva orden</b> para el siguiente cliente.</li>
+    </ol>
+  </div>
+
+  <div class="box">
+    <h2><span class="n">4</span>Pago con tarjeta</h2>
+    <ol>
+      <li>Primero cobre en la <b>terminal del banco</b> (la maquinita).</li>
+      <li>Espere a que diga <b>APROBADA</b> y entregue el comprobante.</li>
+      <li>Después, en la caja: <b class="btn">Pago</b> → <b class="btn">Tarjeta</b> → <b class="btn">Validar</b>.</li>
+    </ol>
+    <p class="note">Si la tarjeta es rechazada, no toque Validar: pida otra forma de pago.</p>
+    <h2 style="margin-top:3mm"><span class="n">5</span>Producto que no aparece</h2>
+    <ul>
+      <li>Si se abre un formulario: escriba el <b>nombre</b> y el <b>precio</b> y guárdelo. Queda registrado para siempre.</li>
+      <li>Si sólo sale un aviso: aparte el producto y avise al encargado.</li>
+    </ul>
+  </div>
+
+  <div class="box">
+    <h2><span class="n">6</span>Devolución</h2>
+    <ol>
+      <li>Toque <b class="btn">Órdenes</b> y busque el ticket (por hora o por número).</li>
+      <li>Tóquelo y elija <b class="btn">Reembolso</b>.</li>
+      <li>Marque qué productos y cuántos regresan.</li>
+      <li>Toque <b class="btn">Pago</b>, elija <b class="btn">Efectivo</b> y <b class="btn">Validar</b>.</li>
+      <li>Entregue el dinero al cliente.</li>
+    </ol>
+    <p class="note">No se puede devolver más de lo que se vendió en ese ticket.</p>
+  </div>
+
+  <div class="box warn">
+    <h2><span class="n">7</span>Si se va el internet</h2>
+    <ul>
+      <li><b>Siga cobrando normal.</b> Las ventas se guardan en la caja y se suben solas cuando regresa el internet.</li>
+      <li><b>No cierre Chrome</b>, no apague la computadora y no borre el historial.</li>
+      <li>Si la página se recarga, toque <b class="btn">Continuar con funcionalidad limitada</b>.</li>
+      <li>Sin internet <b>no</b> se pueden registrar productos nuevos ni hacer el corte.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="page2">
+<div class="grid">
+  <div class="box full">
+    <h2><span class="n">8</span>Corte de caja (al terminar el día)</h2>
+    <ol>
+      <li>Necesita internet. Toque el menú <b class="btn">☰</b> (arriba a la derecha) → <b class="btn">Cerrar caja registradora</b>.</li>
+      <li>Cuente <b>todo el efectivo</b> del cajón, billetes y monedas. Puede tocar el ícono de billetes para contar por denominación.</li>
+      <li>Escriba el total en <b class="btn">Contado</b>. La pantalla muestra si <b>falta o sobra</b> dinero.</li>
+      <li>Si la diferencia es <b>mayor a $30</b>, la caja no le deja cerrar: vuelva a contar. Si sigue igual, llame al encargado: él cierra con su NIP.</li>
+      <li>Toque <b class="btn">Cerrar sesión</b>. Imprima el reporte del día y entréguelo con el dinero.</li>
+    </ol>
+    <p class="note">El sistema guarda quién cerró, cuánto se contó y la diferencia. Mientras haya ventas sin subir (por falta de internet) espere a que regrese la conexión.</p>
+  </div>
+
+  <div class="box full">
+    <h2><span class="n">9</span>Problemas comunes</h2>
+    <table>
+      <tr><td>El lector no marca nada</td><td>Toque una vez la pantalla de la caja y vuelva a escanear. Revise que el cable esté conectado.</td></tr>
+      <tr><td>La impresora no imprime</td><td>Revise que esté encendida, con papel y la tapa cerrada. Para reimprimir: <b class="btn">Órdenes</b> → el ticket → <b class="btn">Imprimir recibo</b>.</td></tr>
+      <tr><td>La pantalla se quedó en blanco o congelada</td><td>Presione la tecla <b>F5</b>. No se pierde nada: las ventas ya están guardadas.</td></tr>
+      <tr><td>«NIP incorrecto»</td><td>Revise sus números. Si lo olvidó, el encargado se lo cambia.</td></tr>
+      <tr><td>El cliente pide factura</td><td>Por ahora la caja no factura: anote sus datos y el número de ticket, y páselos al encargado.</td></tr>
+      <tr><td>Retirar o meter efectivo del cajón</td><td>Sólo el encargado, desde <b class="btn">☰</b> → <b class="btn">Entrada/salida de efectivo</b>.</td></tr>
+    </table>
+  </div>
+
+  <div class="box full warn">
+    <h2><span class="n">!</span>Nunca</h2>
+    <ul>
+      <li>Nunca diga ni escriba su NIP. Cada venta queda a nombre de quien entró.</li>
+      <li>Nunca use el modo incógnito de Chrome ni borre el historial.</li>
+      <li>Nunca toque <b class="btn">Validar</b> antes de recibir el dinero o de que la terminal diga APROBADA.</li>
+    </ul>
+  </div>
+
+  <div class="full contact">
+    <div><b>Encargado:</b><div class="line"></div></div>
+    <div><b>Teléfono del encargado:</b><div class="line"></div></div>
+    <div><b>Soporte VLUX:</b><div class="line"></div></div>
+    <div><b>Página de la caja:</b><div class="line"></div></div>
+  </div>
+</div>
+</div>
+
+</body>
+</html>
