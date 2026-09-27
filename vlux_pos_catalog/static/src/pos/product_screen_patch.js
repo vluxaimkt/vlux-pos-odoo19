@@ -17,20 +17,18 @@ patch(ProductScreen.prototype, {
         if (!this.pos.vluxCatalogCanQuickCreate) {
             return super._barcodeProductAction(code);
         }
+        const offline = () => Boolean(this.pos.data?.network?.offline);
+        // Known offline: look only at what the register loaded, never at the server.
+        if (offline() && !this._vluxLoadedProduct(code)) {
+            return this._vluxOfflineUnknown(code);
+        }
         let product;
         try {
             product = await this._getProductByBarcode(code);
         } catch (error) {
-            if (error instanceof ConnectionLostError) {
-                this.sound.play("scan-error");
-                this.notification.add(
-                    _t(
-                        "Sin conexión: el código %s no está en esta caja. Podrás registrarlo cuando vuelva el internet.",
-                        code.base_code
-                    ),
-                    { type: "warning" }
-                );
-                return;
+            // The connection dropped during the lookup itself.
+            if (error instanceof ConnectionLostError || offline()) {
+                return this._vluxOfflineUnknown(code);
             }
             throw error;
         }
@@ -40,5 +38,24 @@ patch(ProductScreen.prototype, {
         this.sound.play("scan-error");
         // Deliberately not awaited: the barcode mutex must not wait for the cashier.
         this.pos.vluxCatalogOpenQuickCreate(code.base_code);
+    },
+
+    _vluxLoadedProduct(code) {
+        const models = this.pos.models;
+        return (
+            models["product.product"].getBy("barcode", code.base_code) ||
+            models["product.uom"]?.getBy("barcode", code.base_code)?.product_id
+        );
+    },
+
+    _vluxOfflineUnknown(code) {
+        this.sound.play("scan-error");
+        this.notification.add(
+            _t(
+                "Sin conexión: el código %s no está en esta caja. Podrás registrarlo cuando vuelva el internet.",
+                code.base_code
+            ),
+            { type: "warning" }
+        );
     },
 });
