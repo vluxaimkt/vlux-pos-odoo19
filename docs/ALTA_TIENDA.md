@@ -24,8 +24,14 @@ Los PIN y el JSON de la tienda **no se suben al repositorio ni se mandan por cha
 
 ```bash
 vlux-cloud provision <tenant> --domain <subdominio> --owner-email <correo> \
-  --country MX --data-class REAL_CLIENT_DATA --profile small --company-name "<Razón social>"
+  --country MX --data-class REAL_CLIENT_DATA --profile small --company-name "<Razón social>" \n  --image vlux-pos:0.0.0-cloud11
 ```
+
+`--image` es obligatorio mientras no publiquemos la imagen en un registro: sin
+él, `provision` intenta bajar `ghcr.io/vluxaimkt/vlux-pos` y falla con
+`error from registry: denied`. Usar la misma imagen local que tiene staging
+(`docker images | grep vlux-pos`, la más reciente). Si falló a medias, volver
+a correr el mismo comando: completa lo que falta.
 
 ## 2. Publicar el subdominio (lo hace una persona en Cloudflare)
 
