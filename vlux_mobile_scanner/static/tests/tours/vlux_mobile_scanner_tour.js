@@ -42,9 +42,9 @@ function sleep(ms) {
 }
 
 /** Pair a simulated phone and subscribe it to its push channel over the bus websocket. */
-async function pairPhone() {
+async function pairPhone({ anyRegister = false } = {}) {
     const pos = window.posmodel;
-    const pairing = await pos.vluxCreateMobilePairing();
+    const pairing = await pos.vluxCreateMobilePairing({ anyRegister });
     const paired = await postJson("/vlux/mobile/pair", { code: pairing.code });
     const phone = {
         token: paired.token,
@@ -121,6 +121,26 @@ registry.category("web_tour.tours").add("VluxScannerKnownBarcodeTour", {
             openRegister(),
             step("pair a phone", pairPhone),
             step("phone scans a known barcode", async () => {
+                const result = await scanFromPhone(KNOWN_BARCODE);
+                if (result.status !== "delivered" || result.result_code !== "ADDED_TO_CART") {
+                    throw new Error("unexpected result " + JSON.stringify(result));
+                }
+            }),
+            ProductScreen.selectedOrderlineHas("Agua Scanner 1L", 1),
+            Chrome.endTour(),
+        ].flat(),
+});
+
+// The owner's phone ran the POS and became the scanner: the pairing belongs to
+// "any register of the session", and this register (another device) takes it.
+registry.category("web_tour.tours").add("VluxScannerAnyRegisterTour", {
+    steps: () =>
+        [
+            openRegister(),
+            step("the owner's phone pairs for any register of the session", () =>
+                pairPhone({ anyRegister: true })
+            ),
+            step("the phone scans a known barcode", async () => {
                 const result = await scanFromPhone(KNOWN_BARCODE);
                 if (result.status !== "delivered" || result.result_code !== "ADDED_TO_CART") {
                     throw new Error("unexpected result " + JSON.stringify(result));

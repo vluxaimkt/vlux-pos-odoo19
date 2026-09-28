@@ -1,6 +1,9 @@
 import { patch } from "@web/core/utils/patch";
 import { PosStore } from "@point_of_sale/app/services/pos_store";
 
+// Same value as ANY_REGISTER_DEVICE in models/pairing.py.
+const ANY_REGISTER_DEVICE = "any-register";
+
 async function jsonRequest(url, options = {}) {
     const response = await fetch(url, {
         credentials: "same-origin",
@@ -35,13 +38,18 @@ patch(PosStore.prototype, {
         );
     },
 
-    async vluxCreateMobilePairing() {
+    /**
+     * ``anyRegister``: the phone asking runs the POS itself and is about to
+     * become the scanner, so the scans go to the session's register(s).
+     */
+    async vluxCreateMobilePairing({ anyRegister = false } = {}) {
         const response = await jsonRequest("/vlux/pos/pairing/create", {
             method: "POST",
             body: JSON.stringify({
                 pos_config_id: this.config.id,
                 pos_session_id: this.session.id,
                 device_identifier: this.device.identifier,
+                any_register: anyRegister,
             }),
         });
         return response.pairing;
@@ -90,7 +98,7 @@ patch(PosStore.prototype, {
             !payload ||
             payload.pos_config_id !== this.config.id ||
             payload.pos_session_id !== this.session.id ||
-            payload.device_identifier !== this.device.identifier
+            ![this.device.identifier, ANY_REGISTER_DEVICE].includes(payload.device_identifier)
         ) {
             return;
         }
