@@ -24,6 +24,7 @@ class TestVluxCreditRegister(TestPosHrHttpCommon):
             "vlux_credit_limit": 30.0,
         })
         cls.no_credit = cls.env["res.partner"].create({"name": "Cliente Sin Crédito"})
+        cls.new_customer = cls.env["res.partner"].create({"name": "Cliente Nuevo Crédito"})
 
     def test_credit_sales_at_the_register(self):
         self.start_pos_tour("VluxCreditRegisterTour", login="pos_admin")
@@ -37,3 +38,13 @@ class TestVluxCreditRegister(TestPosHrHttpCommon):
         self.assertAlmostEqual(on_credit.vlux_credit_prev_balance, 0.0)
         self.assertAlmostEqual(self.lupe.vlux_credit_balance, 18.0)
         self.assertFalse(orders.filtered(lambda order: order.partner_id == self.no_credit and order.state != "draft"))
+
+    def test_the_encargado_authorises_credit_at_the_register(self):
+        self.start_pos_tour("VluxCreditAuthorizeTour", login="pos_admin")
+
+        self.assertTrue(self.new_customer.vlux_credit_allowed)
+        self.assertEqual(self.new_customer.vlux_credit_limit, 100.0)
+        self.assertAlmostEqual(self.new_customer.vlux_credit_balance, 18.0)
+        sale = self.env["pos.order"].search([("partner_id", "=", self.new_customer.id)])
+        self.assertEqual(sale.employee_id, self.manager2)
+        self.assertFalse(sale.vlux_credit_flagged)

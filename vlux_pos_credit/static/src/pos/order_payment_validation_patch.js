@@ -53,4 +53,19 @@ patch(OrderPaymentValidation.prototype, {
         order.vlux_credit_prev_balance = status.balance;
         return true;
     },
+
+    async afterOrderValidation() {
+        // Keep the customer's balance on this register current (customer
+        // list, next sale) without reloading; the server holds the truth.
+        const order = this.order;
+        const partner = order.getPartner();
+        const amount = order.vluxCreditAmount;
+        if (partner && amount) {
+            const before = order.vluxIsCreditSale
+                ? order.vlux_credit_prev_balance || 0
+                : partner.vlux_credit_balance || 0;
+            partner.vlux_credit_balance = before + amount;
+        }
+        return await super.afterOrderValidation(...arguments);
+    },
 });

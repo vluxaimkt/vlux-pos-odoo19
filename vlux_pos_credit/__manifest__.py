@@ -7,7 +7,7 @@
         "el dueno venden a credito; una venta que rompe la regla se marca para el "
         "dueno, nunca se pierde."
     ),
-    "version": "19.0.1.1.0",
+    "version": "19.0.1.2.0",
     "category": "Sales/Point of Sale",
     "author": "VLUX",
     "website": "https://vlux.com.mx",

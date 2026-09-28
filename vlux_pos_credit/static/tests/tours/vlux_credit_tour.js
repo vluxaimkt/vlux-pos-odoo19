@@ -5,6 +5,7 @@ import * as PaymentScreen from "@point_of_sale/../tests/pos/tours/utils/payment_
 import * as ProductScreen from "@point_of_sale/../tests/pos/tours/utils/product_screen_util";
 import * as ReceiptScreen from "@point_of_sale/../tests/pos/tours/utils/receipt_screen_util";
 import * as PosHr from "@pos_hr/../tests/tours/utils/pos_hr_helpers";
+import * as PartnerList from "@point_of_sale/../tests/pos/tours/utils/partner_list_util";
 import { negate } from "@point_of_sale/../tests/generic_helpers/utils";
 
 /*
@@ -85,6 +86,81 @@ registry.category("web_tour.tours").add("VluxCreditRegisterTour", {
             PaymentScreen.clickValidate(),
             refusedWith("lo rebasa"),
             PaymentScreen.isShown(),
+            Chrome.endTour(),
+        ].flat(),
+});
+
+function searchCustomer(name) {
+    return {
+        content: `search customer "${name}"`,
+        trigger: ".modal-dialog .input-group input",
+        run: `edit ${name}`,
+    };
+}
+
+/*
+ * The encargado authorises a customer for credit from the register's customer
+ * list and sells to them on credit right away; a cashier sees what the
+ * customer owes but not the "Crédito…" option.
+ */
+registry.category("web_tour.tours").add("VluxCreditAuthorizeTour", {
+    steps: () =>
+        [
+            Chrome.clickBtn("Open Register"),
+            PosHr.loginScreenIsShown(),
+            PosHr.login("Test Manager 2", "5652"),
+            Dialog.confirm("Open Register"),
+
+            ProductScreen.clickPartnerButton(),
+            searchCustomer("Cliente Nuevo Crédito"),
+            PartnerList.clickPartnerOptions("Cliente Nuevo Crédito"),
+            PartnerList.clickDropDownItemText("Crédito…"),
+            {
+                content: "authorise credit",
+                trigger: ".vlux-credit-dialog #vluxCreditAllowed",
+                run: "click",
+            },
+            {
+                content: "limit 100",
+                trigger: ".vlux-credit-dialog #vluxCreditLimit",
+                run: "edit 100",
+            },
+            {
+                content: "save",
+                trigger: ".vlux-credit-save",
+                run: "click",
+            },
+            {
+                content: "the dialog closed after saving",
+                trigger: negate(".vlux-credit-dialog"),
+            },
+            PartnerList.clickPartner("Cliente Nuevo Crédito"),
+
+            sellOneAndPay(),
+            PaymentScreen.clickPaymentMethod("Crédito"),
+            PaymentScreen.clickValidate(),
+            ReceiptScreen.receiptIsThere(),
+            {
+                content: "sold on credit to the customer just authorised",
+                trigger: ".pos-receipt .vlux-receipt-sale:contains('VENTA A CRÉDITO')",
+            },
+            ReceiptScreen.clickNextOrder(),
+
+            // A cashier sees the debt, not the option.
+            PosHr.clickLockButton(),
+            PosHr.login("Pos Employee2", "1234"),
+            ProductScreen.clickPartnerButton(),
+            searchCustomer("Cliente Nuevo Crédito"),
+            {
+                content: "the customer list shows what the customer owes",
+                trigger: ".partner-info:contains('Cliente Nuevo Crédito') .vlux-partner-debt:contains('18.00')",
+            },
+            PartnerList.clickPartnerOptions("Cliente Nuevo Crédito"),
+            PartnerList.checkDropDownItemText("All Orders"),
+            {
+                content: "a cashier cannot authorise credit",
+                trigger: negate(".o-dropdown-item:contains('Crédito')"),
+            },
             Chrome.endTour(),
         ].flat(),
 });

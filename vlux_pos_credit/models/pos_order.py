@@ -8,8 +8,6 @@ that breaks a rule is flagged so the owner sees it.
 from odoo import api, fields, models
 from odoo.tools import float_compare
 
-MANAGER_GROUP = "point_of_sale.group_pos_manager"
-
 ISSUE_NOT_MANAGER = "Vendida a crédito por alguien que no es encargado ni dueño"
 ISSUE_NOT_AUTHORIZED = "El cliente no tiene crédito autorizado"
 ISSUE_OVER_LIMIT = "El saldo del cliente rebasó su límite de crédito"
@@ -43,20 +41,9 @@ class PosOrder(models.Model):
             )
 
     def _vlux_sold_by_manager(self):
-        """Whether the person at the register was the encargado or the owner.
-
-        With employee login (pos_hr) that is the order's employee: a manager of
-        the register (Odoo's "advanced" list) or linked to a POS manager user.
-        Without it, the logged-in user.
-        """
+        """Whether the encargado or the owner was at the register."""
         self.ensure_one()
-        config = self.session_id.config_id
-        employee = self.employee_id.sudo()
-        if config.module_pos_hr and employee:
-            return employee in config.advanced_employee_ids or bool(
-                employee.user_id and employee.user_id.has_group(MANAGER_GROUP)
-            )
-        return bool(self.user_id and self.user_id.has_group(MANAGER_GROUP))
+        return self.session_id.config_id._vlux_is_manager(self.employee_id, self.user_id)
 
     def _vlux_credit_issues(self):
         """Rules a sale on credit broke (empty list when none)."""

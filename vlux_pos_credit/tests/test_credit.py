@@ -6,6 +6,7 @@ the customer's receivable. Sales that break a rule (a cashier selling on
 credit, a customer without credit, a balance above the limit) are kept, never
 refused, and flagged for the owner.
 """
+from odoo.exceptions import AccessError, ValidationError
 from odoo.tests.common import tagged
 
 from odoo.addons.point_of_sale.tests.common import TestPoSCommon
@@ -140,6 +141,35 @@ class TestVluxCredit(TestPoSCommon):
         flagged = orders.filtered("vlux_credit_flagged")
         self.assertEqual(len(flagged), 1, "only the order that crossed 50 is flagged")
         self.assertAlmostEqual(flagged.vlux_credit_amount, 18.0)
+
+    def test_the_encargado_authorises_credit_from_the_register(self):
+        partner = self.env["res.partner"].create({"name": "Cliente Nuevo"})
+        status = self.env["res.partner"].vlux_pos_set_credit(
+            partner.id, True, 500, self.config.id, self.encargado.id
+        )
+        self.assertEqual(status, {"allowed": True, "limit": 500.0, "balance": 0.0})
+        self.assertTrue(partner.vlux_credit_allowed)
+        self.assertEqual(partner.vlux_credit_limit, 500.0)
+        self.assertIn("Encargado Crédito", partner.sudo().message_ids[:1].body, "who did it is on record")
+
+        # Withdrawing credit keeps the limit on file.
+        self.env["res.partner"].vlux_pos_set_credit(partner.id, False, 0, self.config.id, self.encargado.id)
+        self.assertFalse(partner.vlux_credit_allowed)
+        self.assertEqual(partner.vlux_credit_limit, 500.0)
+
+    def test_a_cashier_cannot_authorise_credit(self):
+        partner = self.env["res.partner"].create({"name": "Cliente Nuevo"})
+        with self.assertRaises(AccessError):
+            self.env["res.partner"].vlux_pos_set_credit(partner.id, True, 500, self.config.id, self.cajera.id)
+        with self.assertRaises(AccessError):
+            self.env["res.partner"].vlux_pos_set_credit(partner.id, True, 500, self.config.id, False)
+        self.assertFalse(partner.vlux_credit_allowed)
+
+    def test_the_limit_must_make_sense(self):
+        partner = self.env["res.partner"].create({"name": "Cliente Nuevo"})
+        for bad in (-1, "mil", 20_000_000):
+            with self.assertRaises(ValidationError):
+                self.env["res.partner"].vlux_pos_set_credit(partner.id, True, bad, self.config.id, self.encargado.id)
 
     def test_credit_fields_reach_the_register(self):
         fields = self.env["res.partner"]._load_pos_data_fields(self.config)
