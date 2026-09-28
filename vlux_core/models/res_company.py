@@ -24,4 +24,6 @@ class ResCompany(models.Model):
         return super()._load_pos_data_fields(config) + [
             "vlux_fiscal_regime",
             "vlux_receipt_legend",
+            # the receipt hides Odoo's "Your logo" placeholder
+            "uses_default_logo",
         ]

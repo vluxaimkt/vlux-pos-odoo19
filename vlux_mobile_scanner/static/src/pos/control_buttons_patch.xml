@@ -4,7 +4,7 @@
         <xpath expr="//button[contains(@class, 'more-btn')]" position="before">
             <button t-if="!props.showRemainingButtons and !this.pos.isSmallProductScreen" class="btn btn-secondary btn-lg vlux-mobile-scanner-button" t-on-click="openVluxMobileScannerPairing" title="Conectar escaner movil">
                 <i class="fa fa-mobile me-2"/>
-                <span>Escaner movil</span>
+                <span>Escáner móvil</span>
             </button>
         </xpath>
         <xpath expr="//div[contains(@class, 'control-buttons-modal')]" position="inside">

@@ -57,6 +57,14 @@ IVA); una caja con Efectivo y Tarjeta, entrada por empleado con PIN, límite de
 diferencia en el corte; los cajeros. Se puede correr otra vez: sólo cambia lo
 que sea distinto.
 
+**NIP obligatorio para todos.** Odoo deja elegir en la caja a cualquier
+empleado sin NIP; si el dueño no tiene NIP, cualquiera entra como gerente. El
+JSON lleva `owner_pin` (el empleado del usuario Owner), `managers` (encargados:
+cierran la caja, mueven efectivo, entran al backend) y `cashiers`. Si falta un
+NIP el script se detiene **sin guardar nada**. Con `logo` (ruta a PNG/JPG junto
+al JSON) el ticket lleva el logo; sin él, el nombre de la tienda. El código
+QR de "¿Necesita factura?" queda apagado salvo `"invoicing": true`.
+
 **El IVA incluido sólo se puede cambiar antes de la primera venta.** Si se
 olvida, un producto de $20 se cobra $23.20.
 
