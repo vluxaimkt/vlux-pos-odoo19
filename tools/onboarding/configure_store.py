@@ -130,17 +130,24 @@ cash = methods.filtered("is_cash_count")[:1]
 card = methods.filtered(lambda method: method.journal_id.type == "bank")[:1]
 if not cash or not card:
     raise SystemExit("La caja no tiene efectivo y tarjeta; revisar el plan contable de la empresa.")
-cash.name = "Efectivo"
-card.name = "Tarjeta"
+# Write only what differs: Odoo refuses to touch payment methods (and some
+# register settings) while a session is open, even to write the same value.
+for method, label in ((cash, "Efectivo"), (card, "Tarjeta")):
+    if method.name != label:
+        method.name = label
 limit = float(register.get("difference_limit", 30))
-config.write({
+wanted = {
     "name": name,
     "module_pos_hr": True,
     "iface_tax_included": "total",
     "set_maximum_difference": True,
     "amount_authorized_diff": limit,
-    "payment_method_ids": [(6, 0, (cash | card).ids)],
-})
+}
+changes = {field: value for field, value in wanted.items() if config[field] != value}
+if config.payment_method_ids != (cash | card):
+    changes["payment_method_ids"] = [(6, 0, (cash | card).ids)]
+if changes:
+    config.write(changes)
 report.append("caja %%s: Efectivo + Tarjeta, inicio por empleado, límite de arqueo $%%.2f" %% (name, limit))
 
 # --- people ------------------------------------------------------------------------
