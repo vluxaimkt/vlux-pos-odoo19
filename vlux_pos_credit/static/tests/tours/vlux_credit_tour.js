@@ -51,6 +51,7 @@ registry.category("web_tour.tours").add("VluxCreditRegisterTour", {
 
             // The encargado sells on credit to an authorised customer.
             PosHr.clickLockButton(),
+            Chrome.clickBtn("Unlock Register"),
             PosHr.login("Test Manager 2", "5652"),
             ProductScreen.clickPayButton(),
             PaymentScreen.clickPartnerButton(),
