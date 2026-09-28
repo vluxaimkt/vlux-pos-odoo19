@@ -72,6 +72,20 @@ class ResPartner(models.Model):
         return self.vlux_credit_limit - self.vlux_credit_balance
 
     @api.model
+    def vlux_pos_credit_status(self, partner_id):
+        """Credit of one customer as the register needs it, fresh from the server."""
+        partner = self.browse(int(partner_id)).exists()
+        if not partner:
+            return {"allowed": False, "limit": 0.0, "balance": 0.0}
+        partner.check_access("read")
+        partner = partner.sudo()
+        return {
+            "allowed": partner.vlux_credit_allowed,
+            "limit": partner.vlux_credit_limit,
+            "balance": partner.vlux_credit_balance,
+        }
+
+    @api.model
     def _load_pos_data_fields(self, config):
         return super()._load_pos_data_fields(config) + [
             "vlux_credit_allowed",
