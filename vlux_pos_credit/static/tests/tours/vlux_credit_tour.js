@@ -149,6 +149,7 @@ registry.category("web_tour.tours").add("VluxCreditAuthorizeTour", {
 
             // A cashier sees the debt, not the option.
             PosHr.clickLockButton(),
+            Chrome.clickBtn("Unlock Register"),
             PosHr.login("Pos Employee2", "1234"),
             ProductScreen.clickPartnerButton(),
             searchCustomer("Cliente Nuevo Crédito"),
