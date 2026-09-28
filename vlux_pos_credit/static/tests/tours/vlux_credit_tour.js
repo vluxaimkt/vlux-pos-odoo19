@@ -166,3 +166,62 @@ registry.category("web_tour.tours").add("VluxCreditAuthorizeTour", {
             Chrome.endTour(),
         ].flat(),
 });
+
+/*
+ * Doña Lupe buys on credit from the encargado, then pays everything back to a
+ * cashier: the abono ticket shows the account settled and the customer list
+ * stops showing a debt.
+ */
+registry.category("web_tour.tours").add("VluxCreditAbonoTour", {
+    steps: () =>
+        [
+            Chrome.clickBtn("Open Register"),
+            PosHr.loginScreenIsShown(),
+            PosHr.login("Test Manager 2", "5652"),
+            Dialog.confirm("Open Register"),
+            sellOneAndPay(),
+            PaymentScreen.clickPartnerButton(),
+            PaymentScreen.clickCustomer("Doña Lupe Crédito"),
+            PaymentScreen.clickPaymentMethod("Crédito"),
+            PaymentScreen.clickValidate(),
+            ReceiptScreen.receiptIsThere(),
+            ReceiptScreen.clickNextOrder(),
+
+            PosHr.clickLockButton(),
+            Chrome.clickBtn("Unlock Register"),
+            PosHr.login("Pos Employee2", "1234"),
+            ProductScreen.clickPartnerButton(),
+            searchCustomer("Doña Lupe Crédito"),
+            PartnerList.clickPartnerOptions("Doña Lupe Crédito"),
+            PartnerList.clickDropDownItemText("Abonar"),
+            {
+                content: "the dialog shows the debt",
+                trigger: ".vlux-abono-dialog .vlux-abono-debt:contains('18.00')",
+            },
+            {
+                content: "settle everything",
+                trigger: ".vlux-abono-settle",
+                run: "click",
+            },
+            {
+                content: "register the abono (cash is preselected)",
+                trigger: ".vlux-abono-register",
+                run: "click",
+            },
+            {
+                content: "the abono ticket shows the account settled",
+                trigger: ".vlux-abono-receipt:contains('CUENTA LIQUIDADA') .vlux-abono-new:contains('0.00')",
+            },
+            {
+                content: "close",
+                trigger: ".vlux-abono-close",
+                run: "click",
+            },
+            searchCustomer("Doña Lupe Crédito"),
+            {
+                content: "the customer no longer shows a debt",
+                trigger: negate(".vlux-partner-debt", ".partner-info:contains('Doña Lupe Crédito')"),
+            },
+            Chrome.endTour(),
+        ].flat(),
+});

@@ -48,3 +48,14 @@ class TestVluxCreditRegister(TestPosHrHttpCommon):
         sale = self.env["pos.order"].search([("partner_id", "=", self.new_customer.id)])
         self.assertEqual(sale.employee_id, self.manager2)
         self.assertFalse(sale.vlux_credit_flagged)
+
+    def test_a_cashier_receives_an_abono(self):
+        self.start_pos_tour("VluxCreditAbonoTour", login="pos_admin")
+
+        self.lupe.invalidate_recordset(["vlux_credit_balance"])
+        self.assertAlmostEqual(self.lupe.vlux_credit_balance, 0.0)
+        abono = self.env["pos.order"].search([("vlux_credit_abono", "=", True)])
+        self.assertEqual(len(abono), 1)
+        self.assertEqual(abono.employee_id, self.emp2, "the cashier who received it")
+        cash = abono.payment_ids.filtered(lambda payment: payment.payment_method_id.is_cash_count)
+        self.assertAlmostEqual(cash.amount, 18.0)

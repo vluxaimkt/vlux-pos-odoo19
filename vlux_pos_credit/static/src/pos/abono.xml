@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+
+    <t t-name="vlux_pos_credit.AbonoDialog">
+        <Dialog title="'Abono de ' + props.partner.name" size="'md'">
+            <div class="vlux-abono-dialog d-flex flex-column gap-3">
+                <t t-if="!state.ticket">
+                    <div class="d-flex justify-content-between fs-5">
+                        <span>Debe</span>
+                        <strong class="vlux-abono-debt" t-out="formatCurrency(debt)"/>
+                    </div>
+                    <div>
+                        <label class="form-label" for="vluxAbonoAmount">¿Cuánto paga?</label>
+                        <div class="input-group input-group-lg">
+                            <span class="input-group-text">$</span>
+                            <input id="vluxAbonoAmount" class="form-control" type="text" inputmode="decimal" placeholder="0.00" t-model="state.amount"/>
+                            <button class="btn btn-outline-primary vlux-abono-settle" t-on-click="settleAll">Liquidar todo</button>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="form-label">¿Cómo paga?</div>
+                        <div class="d-flex flex-wrap gap-2">
+                            <t t-foreach="methods" t-as="method" t-key="method.id">
+                                <button class="btn btn-lg vlux-abono-method"
+                                    t-att-class="state.methodId === method.id ? 'btn-primary' : 'btn-outline-secondary'"
+                                    t-on-click="() => state.methodId = method.id" t-esc="method.name"/>
+                            </t>
+                        </div>
+                    </div>
+                </t>
+                <t t-else="">
+                    <div class="alert alert-success mb-0 vlux-abono-done">
+                        Abono registrado. Ahora debe <strong t-out="formatCurrency(state.ticket.new_balance)"/>.
+                    </div>
+                    <div class="vlux-abono-preview border rounded p-2 bg-white">
+                        <VluxAbonoReceipt ticket="state.ticket"/>
+                    </div>
+                </t>
+                <div t-if="state.error" class="alert alert-warning mb-0" t-esc="state.error"/>
+            </div>
+            <t t-set-slot="footer">
+                <t t-if="!state.ticket">
+                    <button class="btn btn-primary btn-lg vlux-abono-register" t-on-click="register" t-att-disabled="state.saving">Registrar abono</button>
+                    <button class="btn btn-secondary btn-lg" t-on-click="props.close">Cancelar</button>
+                </t>
+                <t t-else="">
+                    <button class="btn btn-primary btn-lg vlux-abono-print" t-on-click="print">Imprimir ticket</button>
+                    <button class="btn btn-secondary btn-lg vlux-abono-close" t-on-click="props.close">Cerrar</button>
+                </t>
+            </t>
+        </Dialog>
+    </t>
+
+    <t t-name="vlux_pos_credit.AbonoReceipt">
+        <div class="pos-receipt vlux-abono-receipt p-2">
+            <div class="text-center fw-bold fs-5" t-out="company.name"/>
+            <div class="text-center fw-bold fs-4 border border-dark mt-2 py-1">ABONO A CUENTA</div>
+            <div class="text-center pt-2" style="font-size: 85%;">
+                <div>Folio <t t-out="props.ticket.reference"/></div>
+                <div t-out="date"/>
+                <div>Atendió: <t t-out="props.ticket.cashier"/></div>
+            </div>
+            <div class="pt-3">
+                <div class="d-flex"><span>Cliente</span><span class="ms-auto fw-bold" t-out="props.ticket.partner_name"/></div>
+                <div class="d-flex"><span>Saldo anterior</span><span class="ms-auto font-monospace" t-out="formatCurrency(props.ticket.previous_balance)"/></div>
+                <div class="d-flex"><span>Abono (<t t-out="props.ticket.method"/>)</span><span class="ms-auto font-monospace vlux-abono-amount" t-out="formatCurrency(props.ticket.amount)"/></div>
+                <div class="d-flex fw-bold"><span>Saldo nuevo</span><span class="ms-auto font-monospace vlux-abono-new" t-out="formatCurrency(props.ticket.new_balance)"/></div>
+            </div>
+            <div t-if="props.ticket.new_balance &lt;= 0" class="text-center fw-bold pt-2">CUENTA LIQUIDADA</div>
+            <div class="d-flex gap-2 pt-3" style="font-size: 75%;">
+                <div class="w-50 text-start">
+                    <div t-if="company.street" t-out="company.street"/>
+                    <div><t t-if="company.city" t-out="company.city"/><t t-if="company.zip" t-out="', ' + company.zip"/></div>
+                </div>
+                <div class="w-50 text-end">
+                    <div t-if="company.vat">RFC: <t t-out="company.vat"/></div>
+                    <div t-if="company.phone">Tel: <t t-out="company.phone"/></div>
+                </div>
+            </div>
+            <div t-if="company.vlux_receipt_legend" class="text-center pt-2" style="font-size: 75%;" t-out="company.vlux_receipt_legend"/>
+        </div>
+    </t>
+
+</templates>

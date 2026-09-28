@@ -171,6 +171,78 @@ class TestVluxCredit(TestPoSCommon):
             with self.assertRaises(ValidationError):
                 self.env["res.partner"].vlux_pos_set_credit(partner.id, True, bad, self.config.id, self.encargado.id)
 
+    # ------------------------------------------------------------------
+    # abonos
+    # ------------------------------------------------------------------
+
+    def _abono(self, session, amount, method=None, uuid="abono-1", employee=None):
+        return self.env["pos.session"].vlux_pos_register_abono(
+            session.id, self.customer.id, amount, (method or self.cash_pm1).id, uuid, (employee or self.cajera).id
+        )
+
+    def test_a_cash_abono_lowers_the_debt_and_enters_the_drawer(self):
+        session = self.open_new_session(opening_cash=500.0)
+        self._sell_on_credit(2, self.encargado)  # owes 36
+
+        ticket = self._abono(session, 20.0)
+
+        self.assertAlmostEqual(ticket["previous_balance"], 36.0)
+        self.assertAlmostEqual(ticket["amount"], 20.0)
+        self.assertAlmostEqual(ticket["new_balance"], 16.0)
+        self.assertEqual(ticket["cashier"], "Cajera Crédito", "any cashier may receive an abono")
+        self.customer.invalidate_recordset(["vlux_credit_balance"])
+        self.assertAlmostEqual(self.customer.vlux_credit_balance, 16.0)
+        abono = self.env["pos.order"].browse(ticket["order_id"])
+        self.assertTrue(abono.vlux_credit_abono)
+        self.assertFalse(abono.lines)
+        self.assertFalse(abono.vlux_credit_flagged)
+
+        # The 20 are in the drawer: 500 float + 20.
+        closing = session.get_closing_control_data()
+        self.assertAlmostEqual(closing["default_cash_details"]["amount"], 520.0)
+        session.post_closing_cash_details(520.0)
+        session.update_closing_control_state_session("")
+        result = session.close_session_from_ui()
+        self.assertTrue(result["successful"], result)
+        self.assertAlmostEqual(sum(session.move_id.line_ids.mapped("balance")), 0.0)
+        receivable = self.env["account.move.line"].search([
+            ("partner_id", "=", self.customer.id),
+            ("account_id", "=", self.customer.property_account_receivable_id.id),
+            ("parent_state", "=", "posted"),
+        ])
+        self.assertAlmostEqual(sum(receivable.mapped("balance")), 16.0, msg="the books agree: 36 - 20")
+
+    def test_a_card_abono_does_not_touch_the_drawer(self):
+        session = self.open_new_session(opening_cash=500.0)
+        self._sell_on_credit(2, self.encargado)
+        ticket = self._abono(session, 36.0, method=self.bank_pm1)
+
+        self.assertAlmostEqual(ticket["new_balance"], 0.0)
+        self.assertEqual(ticket["method"], self.bank_pm1.name)
+        self.assertAlmostEqual(session.get_closing_control_data()["default_cash_details"]["amount"], 500.0)
+
+    def test_a_retried_abono_is_registered_once(self):
+        session = self.open_new_session()
+        self._sell_on_credit(2, self.encargado)
+        first = self._abono(session, 10.0, uuid="retry-me")
+        again = self._abono(session, 10.0, uuid="retry-me")
+
+        self.assertEqual(first["order_id"], again["order_id"])
+        self.assertEqual(self.env["pos.order"].search_count([("vlux_credit_abono", "=", True)]), 1)
+        self.customer.invalidate_recordset(["vlux_credit_balance"])
+        self.assertAlmostEqual(self.customer.vlux_credit_balance, 26.0)
+
+    def test_an_abono_cannot_exceed_the_debt_or_be_on_credit(self):
+        session = self.open_new_session()
+        self._sell_on_credit(2, self.encargado)  # owes 36
+        with self.assertRaises(ValidationError):
+            self._abono(session, 40.0, uuid="too-much")
+        with self.assertRaises(ValidationError):
+            self._abono(session, 0.0, uuid="zero")
+        with self.assertRaises(ValidationError):
+            self._abono(session, 10.0, method=self.pay_later_pm, uuid="on-credit")
+        self.assertFalse(self.env["pos.order"].search([("vlux_credit_abono", "=", True)]))
+
     def test_credit_fields_reach_the_register(self):
         fields = self.env["res.partner"]._load_pos_data_fields(self.config)
         for name in ("vlux_credit_allowed", "vlux_credit_limit", "vlux_credit_balance"):

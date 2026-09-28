@@ -28,6 +28,10 @@ class PosOrder(models.Model):
         help="Saldo del cliente que la caja imprimió como 'saldo anterior'. Sólo para el "
         "ticket: el saldo real se calcula de los pagos.",
     )
+    vlux_credit_abono = fields.Boolean(
+        string="Abono a crédito", readonly=True, index=True,
+        help="Pago de un cliente a su cuenta de crédito, registrado en la caja.",
+    )
     vlux_credit_flagged = fields.Boolean(string="Crédito por revisar", readonly=True, index=True)
     vlux_credit_issues = fields.Text(string="Motivo de revisión (crédito)", readonly=True)
 
@@ -79,3 +83,23 @@ class PosOrder(models.Model):
         order_id = super()._process_order(order, existing_order)
         self.browse(order_id)._vlux_check_credit()
         return order_id
+
+    def _vlux_abono_payload(self):
+        """What the register prints on an abono ticket."""
+        self.ensure_one()
+        paid = self.payment_ids.filtered(lambda payment: payment.payment_method_id.type != "pay_later")[:1]
+        amount = paid.amount
+        previous = self.vlux_credit_prev_balance
+        return {
+            "order_id": self.id,
+            "uuid": self.uuid,
+            "reference": self.pos_reference,
+            "date": fields.Datetime.to_string(self.date_order),
+            "partner_id": self.partner_id.id,
+            "partner_name": self.partner_id.name,
+            "method": paid.payment_method_id.name,
+            "amount": amount,
+            "previous_balance": previous,
+            "new_balance": previous - amount,
+            "cashier": self.employee_id.name or self.user_id.name,
+        }
