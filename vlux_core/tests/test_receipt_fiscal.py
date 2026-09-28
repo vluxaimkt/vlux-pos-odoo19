@@ -7,6 +7,8 @@ class VluxFiscalCase:
     def _prepare_company(cls, env):
         company = env.company
         company.sudo().write({
+            "name": "VLUX Recibo Tienda",
+            "logo": False,
             "vat": "VLX010101AAA",
             "vlux_fiscal_regime": "601 - General de Ley Personas Morales",
         })
@@ -26,6 +28,7 @@ class TestVluxCompanyFiscalFields(TransactionCase, VluxFiscalCase):
 
         self.assertIn("vlux_fiscal_regime", fields)
         self.assertIn("vlux_receipt_legend", fields)
+        self.assertIn("uses_default_logo", fields)
         # The fields Odoo already prints must still be there.
         for field in ("vat", "street", "city", "zip", "phone"):
             self.assertIn(field, fields)

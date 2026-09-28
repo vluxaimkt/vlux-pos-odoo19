@@ -27,7 +27,7 @@ b.btn{display:inline-block;border:1pt solid #16222C;border-radius:1.5mm;padding:
 .contact{border:1.4pt dashed #16222C;border-radius:3mm;padding:2.8mm 4mm;display:grid;grid-template-columns:1fr 1fr;gap:3mm 6mm;font-size:12pt}
 .line{border-bottom:1pt solid #16222C;min-height:6mm}
 table{border-collapse:collapse;width:100%;font-size:11.5pt}
-td{padding:1.4mm 2mm;border-top:1pt solid #C9D3D8;vertical-align:top}
+td{padding:1mm 2mm;border-top:1pt solid #C9D3D8;vertical-align:top}
 td:first-child{font-weight:600;width:42%}
 </style>
 </head>
@@ -41,8 +41,8 @@ td:first-child{font-weight:600;width:42%}
     <h2><span class="n">1</span>Entrar a la caja</h2>
     <ol>
       <li>Abra <b>Google Chrome</b> y la página de su tienda (ya está guardada en favoritos).</li>
-      <li>En <b class="btn">Seleccionar cajero</b>, toque su nombre.</li>
-      <li><b class="btn">Escriba su NIP</b>: sus 4 números. Nadie más debe saberlo.</li>
+      <li>Toque <b class="btn">Abrir caja registradora</b>.</li>
+      <li>En <b class="btn">Escriba su NIP</b> ponga sus 4 números y presione <b>Enter</b>. La caja sabe quién es por su NIP. Nadie más debe saberlo.</li>
     </ol>
     <p class="note">Si se aleja de la caja, toque <b class="btn">Bloquear</b> (el candado de arriba).</p>
   </div>
@@ -112,15 +112,15 @@ td:first-child{font-weight:600;width:42%}
 <div class="page2">
 <div class="grid">
   <div class="box full">
-    <h2><span class="n">8</span>Corte de caja (al terminar el día)</h2>
+    <h2><span class="n">8</span>Corte de caja (lo hace el encargado)</h2>
     <ol>
-      <li>Necesita internet. Toque el menú <b class="btn">☰</b> (arriba a la derecha) → <b class="btn">Cerrar caja registradora</b>.</li>
+      <li>Necesita internet. El cajero toca el candado <b class="btn">Bloquear</b> y el <b>encargado</b> entra con su NIP: sólo él ve <b class="btn">Cerrar caja registradora</b> en el menú <b class="btn">☰</b> (arriba a la derecha).</li>
       <li>Cuente <b>todo el efectivo</b> del cajón, billetes y monedas. Puede tocar el ícono de billetes para contar por denominación.</li>
       <li>Escriba el total en <b class="btn">Contado</b>. La pantalla muestra si <b>falta o sobra</b> dinero.</li>
-      <li>Si la diferencia es <b>mayor a $30</b>, la caja no le deja cerrar: vuelva a contar. Si sigue igual, llame al encargado: él cierra con su NIP.</li>
+      <li>Si la diferencia es <b>mayor a $30</b>, vuelva a contar antes de cerrar. El cierre queda registrado a nombre del encargado.</li>
       <li>Toque <b class="btn">Cerrar sesión</b>. Imprima el reporte del día y entréguelo con el dinero.</li>
     </ol>
-    <p class="note">El sistema guarda quién cerró, cuánto se contó y la diferencia. Mientras haya ventas sin subir (por falta de internet) espere a que regrese la conexión.</p>
+    <p class="note">Si hubo ventas sin internet, espere a que regrese la conexión antes del corte.</p>
   </div>
 
   <div class="box full">
@@ -130,6 +130,7 @@ td:first-child{font-weight:600;width:42%}
       <tr><td>La impresora no imprime</td><td>Revise que esté encendida, con papel y la tapa cerrada. Para reimprimir: <b class="btn">Órdenes</b> → el ticket → <b class="btn">Imprimir recibo</b>.</td></tr>
       <tr><td>La pantalla se quedó en blanco o congelada</td><td>Presione la tecla <b>F5</b>. No se pierde nada: las ventas ya están guardadas.</td></tr>
       <tr><td>«NIP incorrecto»</td><td>Revise sus números. Si lo olvidó, el encargado se lo cambia.</td></tr>
+      <tr><td>Hay que corregir un producto (nombre, precio)</td><td>Avise al encargado: él lo corrige.</td></tr>
       <tr><td>El cliente pide factura</td><td>Por ahora la caja no factura: anote sus datos y el número de ticket, y páselos al encargado.</td></tr>
       <tr><td>Retirar o meter efectivo del cajón</td><td>Sólo el encargado, desde <b class="btn">☰</b> → <b class="btn">Entrada/salida de efectivo</b>.</td></tr>
     </table>

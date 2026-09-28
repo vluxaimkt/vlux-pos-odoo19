@@ -8,7 +8,9 @@ import * as Dialog from "@point_of_sale/../tests/generic_helpers/dialog_util";
 /*
  * A printed ticket must carry the fiscal identity of the store. Odoo prints the
  * name, address, phone and VAT (the RFC in Mexico); VLUX adds the tax regime and
- * the legend that keeps a ticket from being mistaken for a tax document.
+ * the legend that keeps a ticket from being mistaken for a tax document. The
+ * header carries the store name instead of Odoo's logo placeholder, and the
+ * change is printed as a positive amount.
  */
 registry.category("web_tour.tours").add("VluxReceiptFiscalTour", {
     steps: () =>
@@ -20,6 +22,10 @@ registry.category("web_tour.tours").add("VluxReceiptFiscalTour", {
             ProductScreen.clickDisplayedProduct("VLUX Recibo Producto"),
             ProductScreen.clickPayButton(),
             PaymentScreen.clickPaymentMethod("VLUX Recibo Efectivo"),
+            // 150 for a 100 ticket: the receipt must show a change of 50
+            PaymentScreen.enterPaymentLineAmount("VLUX Recibo Efectivo", "150", true, {
+                change: "50.00",
+            }),
             PaymentScreen.clickValidate(),
             ReceiptScreen.receiptIsThere(),
             {
@@ -33,6 +39,22 @@ registry.category("web_tour.tours").add("VluxReceiptFiscalTour", {
             {
                 content: "the receipt states it is not a tax document",
                 trigger: ".vlux-receipt-legend:contains('Este ticket no es un comprobante fiscal')",
+            },
+            {
+                content: "without a logo of its own, the receipt prints the store name",
+                trigger: ".pos-receipt .vlux-receipt-store:contains('VLUX Recibo Tienda')",
+            },
+            {
+                content: "and not Odoo's 'Your logo' placeholder",
+                trigger: ".pos-receipt:not(:has(img.pos-receipt-logo))",
+            },
+            {
+                content: "the change is printed as money handed back, not as a negative amount",
+                trigger: ".pos-receipt .receipt-change:contains('50.00'):not(:contains('-'))",
+            },
+            {
+                content: "the ticket does not advertise Odoo",
+                trigger: ".pos-receipt:not(:has(.footer-powered-by))",
             },
             Chrome.endTour(),
         ].flat(),

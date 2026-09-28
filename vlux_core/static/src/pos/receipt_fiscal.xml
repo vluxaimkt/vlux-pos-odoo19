@@ -18,6 +18,29 @@
                 <t t-out="company.vlux_receipt_legend"/>
             </div>
         </xpath>
+        <!-- The ticket is the store's, not Odoo's. -->
+        <xpath expr="//div[hasclass('footer-powered-by')]" position="attributes">
+            <attribute name="t-if">false</attribute>
+        </xpath>
+        <!-- Odoo keeps the change as a negative amount; a customer reads "-190"
+             as money owed. Print it the way the cashier hands it over. -->
+        <xpath expr="//div[hasclass('receipt-change')]/span[hasclass('pos-receipt-right-align')]" position="attributes">
+            <attribute name="t-out">formatCurrency(order.change &lt; 0 ? -order.change : order.change)</attribute>
+        </xpath>
+    </t>
+
+    <!--
+        A new store has no logo yet and Odoo prints its "Your logo" placeholder
+        on every ticket. Without a real logo, print the store name instead; with
+        one, print both (the name is how the customer finds the store again).
+    -->
+    <t t-name="vlux_core.ReceiptHeaderStoreName" t-inherit="point_of_sale.ReceiptHeader" t-inherit-mode="extension">
+        <xpath expr="//img[hasclass('pos-receipt-logo')]" position="attributes">
+            <attribute name="t-if">!order.company.uses_default_logo</attribute>
+        </xpath>
+        <xpath expr="//img[hasclass('pos-receipt-logo')]" position="after">
+            <div class="vlux-receipt-store text-center fw-bold fs-5 pt-2" t-out="order.company.name"/>
+        </xpath>
     </t>
 
 </templates>
