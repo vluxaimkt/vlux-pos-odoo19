@@ -5,6 +5,7 @@ import * as PaymentScreen from "@point_of_sale/../tests/pos/tours/utils/payment_
 import * as ProductScreen from "@point_of_sale/../tests/pos/tours/utils/product_screen_util";
 import * as ReceiptScreen from "@point_of_sale/../tests/pos/tours/utils/receipt_screen_util";
 import * as PosHr from "@pos_hr/../tests/tours/utils/pos_hr_helpers";
+import * as PartnerList from "@point_of_sale/../tests/pos/tours/utils/partner_list_util";
 import { negate } from "@point_of_sale/../tests/generic_helpers/utils";
 
 /*
@@ -86,6 +87,141 @@ registry.category("web_tour.tours").add("VluxCreditRegisterTour", {
             PaymentScreen.clickValidate(),
             refusedWith("lo rebasa"),
             PaymentScreen.isShown(),
+            Chrome.endTour(),
+        ].flat(),
+});
+
+function searchCustomer(name) {
+    return {
+        content: `search customer "${name}"`,
+        trigger: ".modal-dialog .input-group input",
+        run: `edit ${name}`,
+    };
+}
+
+/*
+ * The encargado authorises a customer for credit from the register's customer
+ * list and sells to them on credit right away; a cashier sees what the
+ * customer owes but not the "Crédito…" option.
+ */
+registry.category("web_tour.tours").add("VluxCreditAuthorizeTour", {
+    steps: () =>
+        [
+            Chrome.clickBtn("Open Register"),
+            PosHr.loginScreenIsShown(),
+            PosHr.login("Test Manager 2", "5652"),
+            Dialog.confirm("Open Register"),
+
+            ProductScreen.clickPartnerButton(),
+            searchCustomer("Cliente Nuevo Crédito"),
+            PartnerList.clickPartnerOptions("Cliente Nuevo Crédito"),
+            PartnerList.clickDropDownItemText("Crédito…"),
+            {
+                content: "authorise credit",
+                trigger: ".vlux-credit-dialog #vluxCreditAllowed",
+                run: "click",
+            },
+            {
+                content: "limit 100",
+                trigger: ".vlux-credit-dialog #vluxCreditLimit",
+                run: "edit 100",
+            },
+            {
+                content: "save",
+                trigger: ".vlux-credit-save",
+                run: "click",
+            },
+            {
+                content: "the dialog closed after saving",
+                trigger: negate(".vlux-credit-dialog"),
+            },
+            PartnerList.clickPartner("Cliente Nuevo Crédito"),
+
+            sellOneAndPay(),
+            PaymentScreen.clickPaymentMethod("Crédito"),
+            PaymentScreen.clickValidate(),
+            ReceiptScreen.receiptIsThere(),
+            {
+                content: "sold on credit to the customer just authorised",
+                trigger: ".pos-receipt .vlux-receipt-sale:contains('VENTA A CRÉDITO')",
+            },
+            ReceiptScreen.clickNextOrder(),
+
+            // A cashier sees the debt, not the option.
+            PosHr.clickLockButton(),
+            Chrome.clickBtn("Unlock Register"),
+            PosHr.login("Pos Employee2", "1234"),
+            ProductScreen.clickPartnerButton(),
+            searchCustomer("Cliente Nuevo Crédito"),
+            {
+                content: "the customer list shows what the customer owes",
+                trigger: ".partner-info:contains('Cliente Nuevo Crédito') .vlux-partner-debt:contains('18.00')",
+            },
+            PartnerList.clickPartnerOptions("Cliente Nuevo Crédito"),
+            PartnerList.checkDropDownItemText("All Orders"),
+            {
+                content: "a cashier cannot authorise credit",
+                trigger: negate(".o-dropdown-item:contains('Crédito')"),
+            },
+            Chrome.endTour(),
+        ].flat(),
+});
+
+/*
+ * Doña Lupe buys on credit from the encargado, then pays everything back to a
+ * cashier: the abono ticket shows the account settled and the customer list
+ * stops showing a debt.
+ */
+registry.category("web_tour.tours").add("VluxCreditAbonoTour", {
+    steps: () =>
+        [
+            Chrome.clickBtn("Open Register"),
+            PosHr.loginScreenIsShown(),
+            PosHr.login("Test Manager 2", "5652"),
+            Dialog.confirm("Open Register"),
+            sellOneAndPay(),
+            PaymentScreen.clickPartnerButton(),
+            PaymentScreen.clickCustomer("Doña Lupe Crédito"),
+            PaymentScreen.clickPaymentMethod("Crédito"),
+            PaymentScreen.clickValidate(),
+            ReceiptScreen.receiptIsThere(),
+            ReceiptScreen.clickNextOrder(),
+
+            PosHr.clickLockButton(),
+            Chrome.clickBtn("Unlock Register"),
+            PosHr.login("Pos Employee2", "1234"),
+            ProductScreen.clickPartnerButton(),
+            searchCustomer("Doña Lupe Crédito"),
+            PartnerList.clickPartnerOptions("Doña Lupe Crédito"),
+            PartnerList.clickDropDownItemText("Abonar"),
+            {
+                content: "the dialog shows the debt",
+                trigger: ".vlux-abono-dialog .vlux-abono-debt:contains('18.00')",
+            },
+            {
+                content: "settle everything",
+                trigger: ".vlux-abono-settle",
+                run: "click",
+            },
+            {
+                content: "register the abono (cash is preselected)",
+                trigger: ".vlux-abono-register",
+                run: "click",
+            },
+            {
+                content: "the abono ticket shows the account settled",
+                trigger: ".vlux-abono-receipt:contains('CUENTA LIQUIDADA') .vlux-abono-new:contains('0.00')",
+            },
+            {
+                content: "close",
+                trigger: ".vlux-abono-close",
+                run: "click",
+            },
+            searchCustomer("Doña Lupe Crédito"),
+            {
+                content: "the customer no longer shows a debt",
+                trigger: negate(".vlux-partner-debt", ".partner-info:contains('Doña Lupe Crédito')"),
+            },
             Chrome.endTour(),
         ].flat(),
 });

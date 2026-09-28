@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+
+    <!--
+        In the customer list: what each customer owes, and for the encargado or
+        the owner, "Crédito…" to authorise credit and set the limit; "Abonar"
+        for anyone when the customer owes something. The phone
+        layout and the desktop table each have their own name and menu.
+    -->
+    <t t-name="vlux_pos_credit.PartnerLineCredit" t-inherit="point_of_sale.PartnerLine" t-inherit-mode="extension">
+        <xpath expr="(//b[@t-esc=&quot;props.partner.name or ''&quot;])[1]" position="after">
+            <div t-if="props.partner.vlux_credit_balance &gt; 0" class="vlux-partner-debt text-danger small">
+                Debe <t t-out="env.utils.formatCurrency(props.partner.vlux_credit_balance)"/>
+            </div>
+        </xpath>
+        <xpath expr="(//b[@t-esc=&quot;props.partner.name or ''&quot;])[2]" position="after">
+            <div t-if="props.partner.vlux_credit_balance &gt; 0" class="vlux-partner-debt text-danger small">
+                Debe <t t-out="env.utils.formatCurrency(props.partner.vlux_credit_balance)"/>
+            </div>
+        </xpath>
+        <xpath expr="(//DropdownItem[contains(text(), 'All Orders')])[1]" position="after">
+            <DropdownItem t-if="props.partner.vlux_credit_balance &gt; 0" onSelected="() => this.vluxOpenAbono(props.partner)">
+                Abonar
+            </DropdownItem>
+            <DropdownItem t-if="pos.vluxCanSellOnCredit" onSelected="() => this.vluxOpenCredit(props.partner)">
+                Crédito…
+            </DropdownItem>
+        </xpath>
+        <xpath expr="(//DropdownItem[contains(text(), 'All Orders')])[2]" position="after">
+            <DropdownItem t-if="props.partner.vlux_credit_balance &gt; 0" onSelected="() => this.vluxOpenAbono(props.partner)">
+                Abonar
+            </DropdownItem>
+            <DropdownItem t-if="pos.vluxCanSellOnCredit" onSelected="() => this.vluxOpenCredit(props.partner)">
+                Crédito…
+            </DropdownItem>
+        </xpath>
+    </t>
+
+</templates>

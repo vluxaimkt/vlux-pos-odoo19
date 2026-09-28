@@ -8,8 +8,6 @@ that breaks a rule is flagged so the owner sees it.
 from odoo import api, fields, models
 from odoo.tools import float_compare
 
-MANAGER_GROUP = "point_of_sale.group_pos_manager"
-
 ISSUE_NOT_MANAGER = "Vendida a crédito por alguien que no es encargado ni dueño"
 ISSUE_NOT_AUTHORIZED = "El cliente no tiene crédito autorizado"
 ISSUE_OVER_LIMIT = "El saldo del cliente rebasó su límite de crédito"
@@ -30,6 +28,10 @@ class PosOrder(models.Model):
         help="Saldo del cliente que la caja imprimió como 'saldo anterior'. Sólo para el "
         "ticket: el saldo real se calcula de los pagos.",
     )
+    vlux_credit_abono = fields.Boolean(
+        string="Abono a crédito", readonly=True, index=True,
+        help="Pago de un cliente a su cuenta de crédito, registrado en la caja.",
+    )
     vlux_credit_flagged = fields.Boolean(string="Crédito por revisar", readonly=True, index=True)
     vlux_credit_issues = fields.Text(string="Motivo de revisión (crédito)", readonly=True)
 
@@ -43,20 +45,9 @@ class PosOrder(models.Model):
             )
 
     def _vlux_sold_by_manager(self):
-        """Whether the person at the register was the encargado or the owner.
-
-        With employee login (pos_hr) that is the order's employee: a manager of
-        the register (Odoo's "advanced" list) or linked to a POS manager user.
-        Without it, the logged-in user.
-        """
+        """Whether the encargado or the owner was at the register."""
         self.ensure_one()
-        config = self.session_id.config_id
-        employee = self.employee_id.sudo()
-        if config.module_pos_hr and employee:
-            return employee in config.advanced_employee_ids or bool(
-                employee.user_id and employee.user_id.has_group(MANAGER_GROUP)
-            )
-        return bool(self.user_id and self.user_id.has_group(MANAGER_GROUP))
+        return self.session_id.config_id._vlux_is_manager(self.employee_id, self.user_id)
 
     def _vlux_credit_issues(self):
         """Rules a sale on credit broke (empty list when none)."""
@@ -92,3 +83,23 @@ class PosOrder(models.Model):
         order_id = super()._process_order(order, existing_order)
         self.browse(order_id)._vlux_check_credit()
         return order_id
+
+    def _vlux_abono_payload(self):
+        """What the register prints on an abono ticket."""
+        self.ensure_one()
+        paid = self.payment_ids.filtered(lambda payment: payment.payment_method_id.type != "pay_later")[:1]
+        amount = paid.amount
+        previous = self.vlux_credit_prev_balance
+        return {
+            "order_id": self.id,
+            "uuid": self.uuid,
+            "reference": self.pos_reference,
+            "date": fields.Datetime.to_string(self.date_order),
+            "partner_id": self.partner_id.id,
+            "partner_name": self.partner_id.name,
+            "method": paid.payment_method_id.name,
+            "amount": amount,
+            "previous_balance": previous,
+            "new_balance": previous - amount,
+            "cashier": self.employee_id.name or self.user_id.name,
+        }
