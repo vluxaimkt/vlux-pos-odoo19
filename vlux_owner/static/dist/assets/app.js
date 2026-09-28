@@ -143,6 +143,7 @@
     const share = `https://wa.me/${phone}?text=${encodeURIComponent(statementText(statement))}`;
     return `
       <section class="page-section"><button class="icon-button back-button" id="closeStatement" aria-label="Volver">←</button>
+      <div class="print-only print-head"><strong>${escapeHtml(statement.company)}</strong><span>Estado de cuenta al ${escapeHtml(new Date(statement.generated_at.replace(" ", "T") + "Z").toLocaleString("es-MX", { dateStyle: "long", timeStyle: "short" }))}</span></div>
       <p class="eyebrow">ESTADO DE CUENTA</p><h2>${escapeHtml(statement.customer.name)}</h2>
       <section class="hero-card"><div><span>SALDO ACTUAL</span><strong>${escapeHtml(money(statement.balance))}</strong><p>${statement.customer.limit ? "Límite " + escapeHtml(money(statement.customer.limit)) : "Sin límite"}${statement.customer.allowed ? "" : " · crédito retirado"}</p></div></section>
       <div class="action-grid"><a class="action-button" href="${share}" target="_blank" rel="noopener">Compartir por WhatsApp</a><button class="action-button" id="printStatement">Imprimir</button></div>
