@@ -887,7 +887,7 @@ def _doctor_raw(**overrides) -> dict:
             "database_bytes": 50_000_000,
         },
         "modules": {"vlux_core": "installed", "vlux_mobile_scanner": "installed", "vlux_owner": "installed",
-                    "vlux_pos_catalog": "installed"},
+                    "vlux_pos_catalog": "installed", "vlux_pos_credit": "installed"},
         "filestore": {"files": 10, "bytes": 1000},
         "disk": {"total_bytes": 100 * 1024 ** 3, "free_bytes": 60 * 1024 ** 3},
         "edge": {"mode": "caddy_public", "route_present": True, "tunnel": None},
@@ -962,7 +962,7 @@ def check_doctor(cli) -> None:
     check(status_of("WORKERS", metadata=legacy) == "WARN", "DOCTOR: a legacy tenant must WARN (no profile)")
 
     pending = {"vlux_core": "installed", "vlux_mobile_scanner": "to upgrade", "vlux_owner": "installed",
-               "vlux_pos_catalog": "installed"}
+               "vlux_pos_catalog": "installed", "vlux_pos_credit": "installed"}
     check(status_of("ADDONS", modules=pending) == "FAIL", "DOCTOR: pending module upgrade must FAIL")
     missing = {"vlux_core": "installed"}
     check(status_of("ADDONS", modules=missing) == "FAIL", "DOCTOR: missing productive addon must FAIL")

@@ -7,7 +7,7 @@ if "%PROFILE%"=="" set "PROFILE=%VLUX_PROFILE%"
 
 if /I "%PROFILE%"=="scanner" set "MODULES=vlux_mobile_scanner"
 if /I "%PROFILE%"=="owner" set "MODULES=vlux_owner"
-if /I "%PROFILE%"=="scanner_owner" set "MODULES=vlux_mobile_scanner,vlux_owner,vlux_pos_catalog"
+if /I "%PROFILE%"=="scanner_owner" set "MODULES=vlux_mobile_scanner,vlux_owner,vlux_pos_catalog,vlux_pos_credit"
 if /I "%PROFILE%"=="catalog" set "MODULES=vlux_pos_catalog"
 if /I "%PROFILE%"=="facturacion_internal" set "MODULES=vlux_facturacion"
 if /I "%PROFILE%"=="custom" set "MODULES=%VLUX_MODULES%"

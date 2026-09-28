@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_partner_form_vlux_credit" model="ir.ui.view">
+        <field name="name">res.partner.form.vlux.credit</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_form"/>
+        <field name="arch" type="xml">
+            <notebook position="inside">
+                <page string="Crédito" name="vlux_credit">
+                    <group>
+                        <group>
+                            <field name="vlux_credit_currency_id" invisible="1"/>
+                            <field name="vlux_credit_allowed"/>
+                            <field name="vlux_credit_limit" invisible="not vlux_credit_allowed"/>
+                            <field name="vlux_credit_balance"/>
+                        </group>
+                    </group>
+                </page>
+            </notebook>
+        </field>
+    </record>
+</odoo>

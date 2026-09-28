@@ -161,7 +161,7 @@ LEGACY_PROFILE = "legacy"
 DEFAULT_PROFILE = "small"
 PROFILE_CHOICES = tuple(CAPACITY_PROFILES) + (LEGACY_PROFILE,)
 
-PRODUCTIVE_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog")
+PRODUCTIVE_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_pos_credit")
 # Country of the tenant company. Odoo would otherwise leave a new database on
 # the generic chart of accounts in USD, so a Mexican store would sell with a
 # 15 % generic tax instead of IVA 16 % and price in dollars. Loading the

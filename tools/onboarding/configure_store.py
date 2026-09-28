@@ -17,7 +17,8 @@ What it sets (running it again changes only what differs):
 * Shelf prices include tax (``prices_include_tax``, default true). Odoo
   refuses this change once the company has accounting entries, so it must run
   before the first sale.
-* One register (``register.name``) with cash and card, employee login with
+* One register (``register.name``) with cash, card and, when vlux_pos_credit is
+  installed, "Crédito" (sales on credit), employee login with
   PIN, prices shown with tax, and the closing difference limit
   (``register.difference_limit``, enforced by the server since vlux_core
   19.0.1.5.0).
@@ -144,11 +145,16 @@ wanted = {
     "amount_authorized_diff": limit,
 }
 changes = {field: value for field, value in wanted.items() if config[field] != value}
-if config.payment_method_ids != (cash | card):
-    changes["payment_method_ids"] = [(6, 0, (cash | card).ids)]
+# Sales on credit (vlux_pos_credit): Odoo's customer account, which asks for
+# the customer. Only managers see it at the register.
+methods = cash | card
+if hasattr(env["pos.payment.method"], "_vlux_credit_method"):
+    methods |= env["pos.payment.method"]._vlux_credit_method(company)
+if config.payment_method_ids != methods:
+    changes["payment_method_ids"] = [(6, 0, methods.ids)]
 if changes:
     config.write(changes)
-report.append("caja %%s: Efectivo + Tarjeta, inicio por empleado, límite de arqueo $%%.2f" %% (name, limit))
+report.append("caja %%s: %%s, inicio por empleado, límite de arqueo $%%.2f" %% (name, " + ".join(methods.mapped("name")), limit))
 
 # --- people ------------------------------------------------------------------------
 Employee = env["hr.employee"].sudo()
