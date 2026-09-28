@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const state = { data: null, tab: "summary", error: null };
+  const state = { data: null, tab: "summary", error: null, credit: null, creditAvailable: false, statement: null, creditError: null };
   const root = document.getElementById("root");
 
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
@@ -82,13 +82,82 @@
     return `<section class="page-section"><p class="eyebrow">INVENTARIO</p><h2>Stock bajo</h2><div class="list-surface">${rows || '<div class="empty-state">Todo el inventario está por encima del mínimo.</div>'}</div></section>`;
   }
 
+  // Credit (vlux_pos_credit): who owes what, and each customer's statement.
+  // The tab only appears when the store has credit installed.
+  async function probeCredit() {
+    try {
+      state.credit = await jsonRpc("/vlux_owner/api/credit");
+      state.creditAvailable = true;
+      state.creditError = null;
+    } catch (error) {
+      // 404: the store does not sell on credit. Anything else keeps the tab.
+      if (!state.creditAvailable) return;
+      state.creditError = error instanceof Error ? error.message : "No se pudo actualizar";
+    }
+  }
+
+  async function openStatement(partnerId) {
+    try {
+      state.statement = await jsonRpc("/vlux_owner/api/credit/statement", { partner_id: partnerId });
+      state.creditError = null;
+    } catch (error) {
+      state.creditError = error instanceof Error ? error.message : "No se pudo abrir el estado de cuenta";
+    }
+    render();
+  }
+
+  function shortDate(value) {
+    if (!value) return "—";
+    return new Date(value.replace(" ", "T") + "Z").toLocaleDateString("es-MX", { day: "numeric", month: "short" });
+  }
+
+  function statementText(statement) {
+    const lines = [
+      `*Estado de cuenta* · ${statement.company}`,
+      `Cliente: ${statement.customer.name}`,
+      "",
+      ...statement.moves.slice(-15).map((move) => `${shortDate(move.date)} · ${move.kind} · ${move.charge ? "+" + money(move.charge) : "-" + money(move.payment)} · saldo ${money(move.balance)}`),
+      "",
+      `*Saldo actual: ${money(statement.balance)}*`,
+    ];
+    return lines.join("\n");
+  }
+
+  function creditView() {
+    if (state.statement) return statementView();
+    const credit = state.credit;
+    if (!credit) return `<section class="page-section"><p class="eyebrow">CRÉDITOS</p><h2>Cargando…</h2></section>`;
+    const flagged = credit.flagged.length ? `<section class="section-block"><div class="section-title"><div><span>POR REVISAR</span><h2>Ventas a crédito fuera de regla</h2></div></div><div class="list-surface">${credit.flagged.map((item) => `<div class="detail-row"><span class="warning-icon">!</span><div class="grow"><strong>${escapeHtml(item.customer || "Sin cliente")} · ${escapeHtml(money(item.amount))}</strong><small>${escapeHtml(shortDate(item.date))} · ${escapeHtml(item.reference)} · ${escapeHtml(item.cashier)}</small><small>${escapeHtml(item.issues.join(" · "))}</small></div></div>`).join("")}</div></section>` : "";
+    const rows = credit.customers.map((customer) => `<button class="detail-row credit-row" data-partner="${customer.id}" style="width:100%;border:0;border-bottom:1px solid #24202f;background:transparent;color:inherit;text-align:left;cursor:pointer"><div class="grow"><strong>${escapeHtml(customer.name)}</strong><small>Última compra ${escapeHtml(shortDate(customer.last_purchase))} · último abono ${escapeHtml(shortDate(customer.last_payment))}${customer.over_limit ? ' · <b class="negative">rebasa su límite</b>' : ""}</small></div><strong class="${customer.over_limit ? "negative" : ""}">${escapeHtml(money(customer.balance))}</strong></button>`).join("");
+    return `
+      ${state.creditError ? `<div class="sync-warning">${escapeHtml(state.creditError)}</div>` : ""}
+      <section class="hero-card"><div><span>POR COBRAR</span><strong>${escapeHtml(money(credit.total_owed))}</strong><p>${credit.customers.length} ${credit.customers.length === 1 ? "cliente debe" : "clientes deben"}</p></div></section>
+      ${flagged}
+      <section class="page-section"><p class="eyebrow">CRÉDITOS</p><h2>Quién debe</h2><div class="list-surface">${rows || '<div class="empty-state">Nadie debe. Todas las cuentas están liquidadas.</div>'}</div></section>`;
+  }
+
+  function statementView() {
+    const statement = state.statement;
+    const rows = statement.moves.slice().reverse().map((move) => `<div class="detail-row"><div class="grow"><strong>${escapeHtml(move.kind)}</strong><small>${escapeHtml(shortDate(move.date))} · ${escapeHtml(move.reference)} · ${escapeHtml(move.cashier)}</small></div><div style="text-align:right"><strong class="${move.payment ? "positive" : ""}">${move.charge ? "+" + escapeHtml(money(move.charge)) : "−" + escapeHtml(money(move.payment))}</strong><small>saldo ${escapeHtml(money(move.balance))}</small></div></div>`).join("");
+    const phone = (statement.customer.phone || "").replace(/\D/g, "");
+    const share = `https://wa.me/${phone}?text=${encodeURIComponent(statementText(statement))}`;
+    return `
+      <section class="page-section"><button class="icon-button" id="closeStatement" aria-label="Volver">←</button>
+      <p class="eyebrow">ESTADO DE CUENTA</p><h2>${escapeHtml(statement.customer.name)}</h2>
+      <section class="hero-card"><div><span>SALDO ACTUAL</span><strong>${escapeHtml(money(statement.balance))}</strong><p>${statement.customer.limit ? "Límite " + escapeHtml(money(statement.customer.limit)) : "Sin límite"}${statement.customer.allowed ? "" : " · crédito retirado"}</p></div></section>
+      <div class="kpi-grid"><a class="kpi-card" style="min-height:0;color:inherit;text-decoration:none" href="${share}" target="_blank" rel="noopener">Compartir por WhatsApp</a><button class="kpi-card" style="min-height:0;cursor:pointer" id="printStatement">Imprimir</button></div>
+      <div class="list-surface" style="margin-top:12px">${rows || '<div class="empty-state">Sin movimientos.</div>'}</div></section>`;
+  }
+
   function moreView() {
     return `<section class="page-section"><p class="eyebrow">VLUX ECOSYSTEM</p><h2>Tu negocio, conectado</h2><div class="menu-surface"><div><b class="menu-icon">P</b><span><strong>VLUX POS</strong><small>Punto de venta conectado</small></span></div><div><b class="menu-icon">S</b><span><strong>VLUX Mobile Scanner</strong><small>Escaneo móvil para tus cajas</small></span></div><div><b class="menu-icon">O</b><span><strong>VLUX Owner</strong><small>Control del negocio desde el celular</small></span></div></div></section>`;
   }
 
   function nav() {
-    const items = [["summary","⌂","Resumen"],["sales","$","Ventas"],["products","P","Productos"],["inventory","I","Inventario"],["more","•••","Más"]];
-    return `<nav class="bottom-nav">${items.map(([id, icon, label]) => `<button data-tab="${id}" class="${state.tab === id ? "active" : ""}"><b>${icon}</b><span>${label}</span></button>`).join("")}</nav>`;
+    const items = [["summary","⌂","Resumen"],["sales","$","Ventas"],["products","P","Productos"],["inventory","I","Inventario"]];
+    if (state.creditAvailable) items.push(["credit","¢","Créditos"]);
+    items.push(["more","•••","Más"]);
+    return `<nav class="bottom-nav" style="grid-template-columns:repeat(${items.length},1fr)">${items.map(([id, icon, label]) => `<button data-tab="${id}" class="${state.tab === id ? "active" : ""}"><b>${icon}</b><span>${label}</span></button>`).join("")}</nav>`;
   }
 
   function drawChart(canvasId, data, compact = false) {
@@ -123,9 +192,17 @@
       document.getElementById("retry")?.addEventListener("click", loadDashboard);
       return;
     }
-    const view = state.tab === "summary" ? summaryView() : state.tab === "sales" ? salesView() : state.tab === "products" ? productsView() : state.tab === "inventory" ? inventoryView() : moreView();
+    const view = state.tab === "summary" ? summaryView() : state.tab === "sales" ? salesView() : state.tab === "products" ? productsView() : state.tab === "inventory" ? inventoryView() : state.tab === "credit" ? creditView() : moreView();
     root.innerHTML = `<main class="app-shell">${header()}${view}${nav()}</main>`;
-    root.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => { state.tab = button.dataset.tab; render(); }));
+    root.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", async () => {
+      state.tab = button.dataset.tab;
+      state.statement = null;
+      render();
+      if (state.tab === "credit") { await probeCredit(); render(); }
+    }));
+    root.querySelectorAll("[data-partner]").forEach((button) => button.addEventListener("click", () => openStatement(Number(button.dataset.partner))));
+    document.getElementById("closeStatement")?.addEventListener("click", () => { state.statement = null; render(); });
+    document.getElementById("printStatement")?.addEventListener("click", () => window.print());
     if (state.tab === "summary") requestAnimationFrame(() => { drawChart("sparkline", state.data.sales_trend, true); drawChart("salesChart", state.data.sales_trend, false); });
   }
 
@@ -140,13 +217,18 @@
   async function refresh() {
     if (loading || document.hidden) return;
     loading = true;
-    try { await loadDashboard(); } finally { loading = false; lastLoad = Date.now(); }
+    try {
+      await loadDashboard();
+      // Credit refreshes with the rest, except while a statement is open.
+      if (state.tab === "credit" && !state.statement) { await probeCredit(); render(); }
+    } finally { loading = false; lastLoad = Date.now(); }
   }
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && Date.now() - lastLoad > STALE_ON_RETURN_MS) refresh();
   });
   render();
   refresh();
+  probeCredit().then(render);
   window.setInterval(refresh, REFRESH_MS);
 
   if ("serviceWorker" in navigator) {
