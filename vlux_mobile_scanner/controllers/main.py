@@ -11,6 +11,8 @@ from odoo.addons.bus.websocket import WebsocketConnectionHandler
 from odoo.addons.vlux_core.controllers.assets import asset_version
 from odoo.http import request
 
+from ..models.pairing import ANY_REGISTER_DEVICE
+
 
 BARCODE_MAX_LENGTH = 128
 JSON_BODY_MAX_BYTES = 16 * 1024
@@ -477,6 +479,10 @@ class VluxMobileScannerController(http.Controller):
         device_identifier = str(payload.get("device_identifier") or "").strip()
         if not device_identifier or len(device_identifier) > 128:
             return self._error("No se pudo identificar este dispositivo POS.", code="INVALID_DEVICE")
+        # A phone that runs the POS turns itself into the scanner: its scans go
+        # to the register(s) of the session, not back to the phone.
+        if payload.get("any_register"):
+            device_identifier = ANY_REGISTER_DEVICE
 
         session = self._accessible_pos_session(session_id, config_id=config_id)
         if (
@@ -511,7 +517,7 @@ class VluxMobileScannerController(http.Controller):
             return False
         return (
             pairing.pos_session_id.id == session_id
-            and pairing.device_identifier == device_identifier
+            and pairing.device_identifier in (device_identifier, ANY_REGISTER_DEVICE)
             and bool(self._accessible_pos_session(session_id))
         )
 

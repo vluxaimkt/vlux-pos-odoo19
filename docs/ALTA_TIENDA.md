@@ -24,7 +24,8 @@ Los PIN y el JSON de la tienda **no se suben al repositorio ni se mandan por cha
 
 ```bash
 vlux-cloud provision <tenant> --domain <subdominio> --owner-email <correo> \
-  --country MX --data-class REAL_CLIENT_DATA --profile small --company-name "<Razón social>" \n  --image vlux-pos:0.0.0-cloud11
+  --country MX --data-class REAL_CLIENT_DATA --profile small --company-name "<Razón social>" \
+  --image vlux-pos:0.0.0-cloud12
 ```
 
 `--image` es obligatorio mientras no publiquemos la imagen en un registro: sin

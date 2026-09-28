@@ -2,6 +2,8 @@ from odoo.tests import tagged
 
 from odoo.addons.point_of_sale.tests.test_frontend import TestPointOfSaleHttpCommon
 
+from ..models.pairing import ANY_REGISTER_DEVICE
+
 
 @tagged("post_install", "-at_install", "vlux_e2e")
 class TestVluxMobileScannerTours(TestPointOfSaleHttpCommon):
@@ -33,6 +35,13 @@ class TestVluxMobileScannerTours(TestPointOfSaleHttpCommon):
         self.assertEqual(events.state, "delivered")
         self.assertEqual(events.product_id, self.product.product_variant_id)
         self.assertEqual(events.unit_price, 12.0)
+
+    def test_phone_of_a_manager_scans_into_the_register(self):
+        self.start_pos_tour("VluxScannerAnyRegisterTour", login="pos_user")
+        events = self._events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events.state, "delivered")
+        self.assertEqual(events.pairing_id.device_identifier, ANY_REGISTER_DEVICE)
 
     def test_results_are_pushed_to_the_phone(self):
         self.start_pos_tour("VluxScannerPushDeliveryTour", login="pos_user")

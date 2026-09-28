@@ -19,6 +19,10 @@ PAIRING_RETENTION_DAYS = 30
 # throttled write keeps the value fresh enough without the amplification.
 LAST_SEEN_THROTTLE_SECONDS = 60
 PUSH_CHANNEL_PREFIX = "vlux_mobile_scanner"
+# Device of a pairing made from a phone that runs the POS itself (the owner or
+# the encargado): the phone becomes the scanner, so its scans belong to the
+# register(s) of that session rather than to the device that asked.
+ANY_REGISTER_DEVICE = "any-register"
 
 
 class VluxMobileScannerPairing(models.Model):
