@@ -45,10 +45,10 @@
 
     <!-- Same placeholder on the PIN screen: show the store name instead. -->
     <t t-name="vlux_core.LoginScreenStoreName" t-inherit="point_of_sale.LoginScreen" t-inherit-mode="extension">
-        <xpath expr="//div[hasclass('screen-login-logo')]/img" position="attributes">
+        <xpath expr="//div[contains(@t-attf-class, 'screen-login-logo')]/img" position="attributes">
             <attribute name="t-if">!pos.company.uses_default_logo</attribute>
         </xpath>
-        <xpath expr="//div[hasclass('screen-login-logo')]/img" position="after">
+        <xpath expr="//div[contains(@t-attf-class, 'screen-login-logo')]/img" position="after">
             <span t-else="" class="vlux-login-store fs-2 fw-bold" t-out="pos.company.name"/>
         </xpath>
     </t>
