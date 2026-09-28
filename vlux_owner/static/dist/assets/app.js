@@ -59,7 +59,7 @@
     const comparison = data.summary.comparison_vs_yesterday_pct;
     const comparisonHtml = comparison === null ? "" : `<p class="${comparison >= 0 ? "positive" : "negative"}">${comparison >= 0 ? "▲" : "▼"} ${Math.abs(comparison).toFixed(1)}% vs ayer a esta hora</p>`;
     const registers = data.sales_by_register.map((item) => `
-      <div class="register-row"><div class="register-head"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(money(item.amount))} · ${Number(item.share_pct).toFixed(1)}%</span></div><div class="progress"><i style="width:${Math.min(Number(item.share_pct), 100)}%"></i></div></div>`).join("");
+      <div class="register-row"><div class="register-head"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(money(item.amount))} · ${Number(item.share_pct).toFixed(1)}%</span></div><div class="progress"><i data-width="${Math.min(Number(item.share_pct), 100)}"></i></div></div>`).join("");
     return `
       <section class="hero-card"><div><span>VENTAS TOTALES HOY</span><strong>${escapeHtml(money(data.summary.sales_today))}</strong>${comparisonHtml}</div><canvas class="sparkline" id="sparkline" width="252" height="180"></canvas></section>
       <section class="kpi-grid">${kpi("Tickets", data.summary.tickets, "T")}${kpi("Productos vendidos", data.summary.units_sold, "P")}${kpi("Ticket promedio", money(data.summary.average_ticket), "$")}${kpi("Cajas con ventas", data.sales_by_register.length, "C")}</section>
@@ -128,7 +128,7 @@
     const credit = state.credit;
     if (!credit) return `<section class="page-section"><p class="eyebrow">CRÉDITOS</p><h2>Cargando…</h2></section>`;
     const flagged = credit.flagged.length ? `<section class="section-block"><div class="section-title"><div><span>POR REVISAR</span><h2>Ventas a crédito fuera de regla</h2></div></div><div class="list-surface">${credit.flagged.map((item) => `<div class="detail-row"><span class="warning-icon">!</span><div class="grow"><strong>${escapeHtml(item.customer || "Sin cliente")} · ${escapeHtml(money(item.amount))}</strong><small>${escapeHtml(shortDate(item.date))} · ${escapeHtml(item.reference)} · ${escapeHtml(item.cashier)}</small><small>${escapeHtml(item.issues.join(" · "))}</small></div></div>`).join("")}</div></section>` : "";
-    const rows = credit.customers.map((customer) => `<button class="detail-row credit-row" data-partner="${customer.id}" style="width:100%;border:0;border-bottom:1px solid #24202f;background:transparent;color:inherit;text-align:left;cursor:pointer"><div class="grow"><strong>${escapeHtml(customer.name)}</strong><small>Última compra ${escapeHtml(shortDate(customer.last_purchase))} · último abono ${escapeHtml(shortDate(customer.last_payment))}${customer.over_limit ? ' · <b class="negative">rebasa su límite</b>' : ""}</small></div><strong class="${customer.over_limit ? "negative" : ""}">${escapeHtml(money(customer.balance))}</strong></button>`).join("");
+    const rows = credit.customers.map((customer) => `<button class="detail-row credit-row" data-partner="${customer.id}"><div class="grow"><strong>${escapeHtml(customer.name)}</strong><small>Última compra ${escapeHtml(shortDate(customer.last_purchase))} · último abono ${escapeHtml(shortDate(customer.last_payment))}${customer.over_limit ? ' · <b class="negative">rebasa su límite</b>' : ""}</small></div><strong class="${customer.over_limit ? "negative" : ""}">${escapeHtml(money(customer.balance))}</strong></button>`).join("");
     return `
       ${state.creditError ? `<div class="sync-warning">${escapeHtml(state.creditError)}</div>` : ""}
       <section class="hero-card"><div><span>POR COBRAR</span><strong>${escapeHtml(money(credit.total_owed))}</strong><p>${credit.customers.length} ${credit.customers.length === 1 ? "cliente debe" : "clientes deben"}</p></div></section>
@@ -138,15 +138,15 @@
 
   function statementView() {
     const statement = state.statement;
-    const rows = statement.moves.slice().reverse().map((move) => `<div class="detail-row"><div class="grow"><strong>${escapeHtml(move.kind)}</strong><small>${escapeHtml(shortDate(move.date))} · ${escapeHtml(move.reference)} · ${escapeHtml(move.cashier)}</small></div><div style="text-align:right"><strong class="${move.payment ? "positive" : ""}">${move.charge ? "+" + escapeHtml(money(move.charge)) : "−" + escapeHtml(money(move.payment))}</strong><small>saldo ${escapeHtml(money(move.balance))}</small></div></div>`).join("");
+    const rows = statement.moves.slice().reverse().map((move) => `<div class="detail-row"><div class="grow"><strong>${escapeHtml(move.kind)}</strong><small>${escapeHtml(shortDate(move.date))} · ${escapeHtml(move.reference)} · ${escapeHtml(move.cashier)}</small></div><div class="statement-amount"><strong class="${move.payment ? "positive" : ""}">${move.charge ? "+" + escapeHtml(money(move.charge)) : "−" + escapeHtml(money(move.payment))}</strong><small>saldo ${escapeHtml(money(move.balance))}</small></div></div>`).join("");
     const phone = (statement.customer.phone || "").replace(/\D/g, "");
     const share = `https://wa.me/${phone}?text=${encodeURIComponent(statementText(statement))}`;
     return `
-      <section class="page-section"><button class="icon-button" id="closeStatement" aria-label="Volver">←</button>
+      <section class="page-section"><button class="icon-button back-button" id="closeStatement" aria-label="Volver">←</button>
       <p class="eyebrow">ESTADO DE CUENTA</p><h2>${escapeHtml(statement.customer.name)}</h2>
       <section class="hero-card"><div><span>SALDO ACTUAL</span><strong>${escapeHtml(money(statement.balance))}</strong><p>${statement.customer.limit ? "Límite " + escapeHtml(money(statement.customer.limit)) : "Sin límite"}${statement.customer.allowed ? "" : " · crédito retirado"}</p></div></section>
-      <div class="kpi-grid"><a class="kpi-card" style="min-height:0;color:inherit;text-decoration:none" href="${share}" target="_blank" rel="noopener">Compartir por WhatsApp</a><button class="kpi-card" style="min-height:0;cursor:pointer" id="printStatement">Imprimir</button></div>
-      <div class="list-surface" style="margin-top:12px">${rows || '<div class="empty-state">Sin movimientos.</div>'}</div></section>`;
+      <div class="action-grid"><a class="action-button" href="${share}" target="_blank" rel="noopener">Compartir por WhatsApp</a><button class="action-button" id="printStatement">Imprimir</button></div>
+      <div class="list-surface statement-list">${rows || '<div class="empty-state">Sin movimientos.</div>'}</div></section>`;
   }
 
   function moreView() {
@@ -157,7 +157,7 @@
     const items = [["summary","⌂","Resumen"],["sales","$","Ventas"],["products","P","Productos"],["inventory","I","Inventario"]];
     if (state.creditAvailable) items.push(["credit","¢","Créditos"]);
     items.push(["more","•••","Más"]);
-    return `<nav class="bottom-nav" style="grid-template-columns:repeat(${items.length},1fr)">${items.map(([id, icon, label]) => `<button data-tab="${id}" class="${state.tab === id ? "active" : ""}"><b>${icon}</b><span>${label}</span></button>`).join("")}</nav>`;
+    return `<nav class="bottom-nav nav-${items.length}">${items.map(([id, icon, label]) => `<button data-tab="${id}" class="${state.tab === id ? "active" : ""}"><b>${icon}</b><span>${label}</span></button>`).join("")}</nav>`;
   }
 
   function drawChart(canvasId, data, compact = false) {
@@ -194,6 +194,8 @@
     }
     const view = state.tab === "summary" ? summaryView() : state.tab === "sales" ? salesView() : state.tab === "products" ? productsView() : state.tab === "inventory" ? inventoryView() : state.tab === "credit" ? creditView() : moreView();
     root.innerHTML = `<main class="app-shell">${header()}${view}${nav()}</main>`;
+    // Widths through the CSSOM: the CSP drops style attributes written in HTML.
+    root.querySelectorAll("[data-width]").forEach((bar) => { bar.style.width = `${bar.dataset.width}%`; });
     root.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", async () => {
       state.tab = button.dataset.tab;
       state.statement = null;

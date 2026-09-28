@@ -1,4 +1,5 @@
 from odoo.modules.module import get_manifest
+from odoo.tools import file_open
 from odoo.tests.common import HttpCase, tagged
 
 
@@ -38,3 +39,11 @@ class TestVluxOwnerAssets(HttpCase):
         manifest = self.url_open("/vlux-owner/manifest.webmanifest").json()
         for icon in manifest["icons"]:
             self.assertIn(f"?v={version}", icon["src"])
+
+    def test_the_app_writes_no_inline_styles(self):
+        # The page's CSP is style-src 'self': a style="..." written in the
+        # HTML is silently dropped (unstyled buttons, bars without width).
+        # Styles go in app.css; computed sizes through element.style in JS.
+        with file_open("vlux_owner/static/dist/assets/app.js") as handle:
+            source = handle.read()
+        self.assertNotIn("style=", source)

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+
+    <!--
+        The closing asks, for each card method, the total the bank terminal
+        reports; Odoo labels it "<method> Count", which the Spanish
+        translation turns into "Tarjeta Número". Say what to type.
+    -->
+    <t t-name="vlux_core.ClosePosPopupTerminalTotal" t-inherit="point_of_sale.ClosePosPopup" t-inherit-mode="extension">
+        <xpath expr="//div[@t-foreach='props.non_cash_payment_methods']//span[t[@t-esc='pm.name']]" position="replace">
+            <span class="vlux-closing-terminal-label">Total de <t t-esc="pm.name"/> según la terminal bancaria</span>
+            <small class="d-block text-muted">Viene en el cierre (voucher) que imprime la terminal. Si coincide con la caja, toca el botón de copiar.</small>
+        </xpath>
+    </t>
+
+</templates>
