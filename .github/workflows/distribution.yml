@@ -30,6 +30,7 @@ on:
       - "vlux_mobile_scanner/**"
       - "vlux_owner/**"
       - "vlux_pos_catalog/**"
+      - "vlux_pos_credit/**"
       - "requirements-extra.txt"
 
 env:

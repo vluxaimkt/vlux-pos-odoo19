@@ -14,8 +14,8 @@ VALID_EDITIONS = {"local_core", "local_complete", "cloud_managed"}
 # PRODUCTIVE_ADDONS de packaging/cloud/vlux_cloud.py.
 EDITION_REQUIRED_ADDONS = {
     "local_core": ("vlux_core",),
-    "local_complete": ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog"),
-    "cloud_managed": ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog"),
+    "local_complete": ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_pos_credit"),
+    "cloud_managed": ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_pos_credit"),
 }
 PENDING_MODULE_STATES = ("to install", "to upgrade", "to remove")
 

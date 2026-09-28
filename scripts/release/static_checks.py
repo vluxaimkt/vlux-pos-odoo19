@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_facturacion")
+ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_pos_credit", "vlux_facturacion")
 SECRET_RE = re.compile(
     r"(?m)^\s*[A-Za-z0-9_.-]*(password|passwd|secret|token|api[_-]?key)"
     r"\s*=\s*(['\"][^'\"]{12,}|[A-Z0-9_./+=-]{12,})"
@@ -19,7 +19,7 @@ SECRET_RE = re.compile(
 # repeated in files that cannot import each other (Python for Odoo, the cloud
 # CLI, the release builder, C#, batch, shell, Dockerfile). This check is the
 # single source of truth: adding an addon here fails until every copy agrees.
-PRODUCT_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog")
+PRODUCT_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_pos_credit")
 PRODUCT_ADDON_COPIES = {
     "packaging/cloud/vlux_cloud.py": r"PRODUCTIVE_ADDONS = \(([^)]*)\)",
     "scripts/release/build_release.py": r"PRODUCT_ADDONS = \(([^)]*)\)",

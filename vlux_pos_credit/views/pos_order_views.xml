@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_pos_order_form_vlux_credit" model="ir.ui.view">
+        <field name="name">pos.order.form.vlux.credit</field>
+        <field name="model">pos.order</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_pos_form"/>
+        <field name="arch" type="xml">
+            <field name="partner_id" position="after">
+                <field name="vlux_credit_amount" invisible="not vlux_credit_amount"/>
+                <field name="vlux_credit_flagged" invisible="not vlux_credit_flagged"/>
+                <field name="vlux_credit_issues" invisible="not vlux_credit_flagged"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="view_pos_order_filter_vlux_credit" model="ir.ui.view">
+        <field name="name">pos.order.search.vlux.credit</field>
+        <field name="model">pos.order</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_order_filter"/>
+        <field name="arch" type="xml">
+            <filter name="invoiced" position="before">
+                <filter string="A crédito" name="vlux_on_credit" domain="[('vlux_credit_amount', '!=', 0)]"/>
+                <filter string="Crédito por revisar" name="vlux_credit_flagged" domain="[('vlux_credit_flagged', '=', True)]"/>
+                <separator/>
+            </filter>
+        </field>
+    </record>
+</odoo>
