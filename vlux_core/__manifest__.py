@@ -1,7 +1,7 @@
 {
     "name": "VLUX Core",
     "summary": "Roles, metadata y diagnostico base para VLUX POS",
-    "version": "19.0.1.7.0",
+    "version": "19.0.1.7.1",
     "category": "Point of Sale",
     "author": "VLUX",
     "license": "LGPL-3",
@@ -16,6 +16,7 @@
     "assets": {
         "point_of_sale._assets_pos": [
             "vlux_core/static/src/pos/receipt_fiscal.xml",
+            "vlux_core/static/src/pos/closing_popup.xml",
         ],
         "web.assets_tests": [
             "vlux_core/static/tests/tours/**/*.js",
