@@ -66,6 +66,11 @@ NIP el script se detiene **sin guardar nada**. Con `logo` (ruta a PNG/JPG junto
 al JSON) el ticket lleva el logo; sin él, el nombre de la tienda. El código
 QR de "¿Necesita factura?" queda apagado salvo `"invoicing": true`.
 
+**Configurar antes de abrir la caja por primera vez.** La caja guarda los
+empleados y sus NIP en el navegador al abrirse: si después se agrega un
+empleado o se cambia un NIP, en la caja hay que usar ☰ → *Volver a cargar
+datos* (entrando con un NIP que ya existía).
+
 **El IVA incluido sólo se puede cambiar antes de la primera venta.** Si se
 olvida, un producto de $20 se cobra $23.20.
 
