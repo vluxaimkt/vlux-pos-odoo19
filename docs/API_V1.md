@@ -42,6 +42,13 @@ Códigos de error del contrato:
 | `CONFLICT` | 409 | La operación choca con un registro existente; `details` lo describe |
 | `RATE_LIMITED` | 429 | Más de 600 solicitudes por minuto con el mismo token |
 | `INTERNAL_ERROR` | 500 | Fallo del servidor; el detalle queda en el registro, nunca en la respuesta |
+| `NO_OPEN_SESSION` | 409 | La caja no tiene una sesión abierta (venta o corte) |
+| `CLOSING_REFUSED` | 409 | Odoo rechazó el corte (por ejemplo, diferencia arriba del límite sin encargado); la caja sigue abierta |
+| `PAYMENT_MISMATCH` | 409 | Los pagos no cubren el total del servidor, o sobra dinero sin efectivo para dar cambio |
+| `TOTAL_MISMATCH` | 409 | El `expected_total` de la caja no coincide al centavo con el total del servidor |
+
+Toda petición corre dentro de un *savepoint*: si termina en error, **no deja
+nada escrito** (una venta o un corte rechazados no dejan registros a medias).
 
 Un error puede traer además `details` (objeto) con datos útiles para el
 cliente, por ejemplo el producto existente en un `CONFLICT` de código de barras.
@@ -84,7 +91,7 @@ Qué puede otorgar cada rol (el resto se rechaza al emitir, no al usar):
 | --- | --- |
 | Owner, Administrador | todos |
 | Supervisor | todos menos `catalog:write` |
-| Cajero | `system:read`, `catalog:read`, `orders:write` |
+| Cajero | `system:read`, `catalog:read`, `orders:write`, `session:manage` |
 | Operador de inventario | `system:read`, `catalog:read`, `catalog:write` |
 | Auditor | `system:read`, `dashboard:read` |
 | Soporte | `system:read` |
@@ -118,6 +125,14 @@ print(raw)   # única vez
 | GET | `/catalog/pricelists` | `catalog:read` | Listas de precios con sus reglas (instantánea) |
 | POST | `/catalog/products` | `catalog:write` | Alta rápida de un producto vendible (mismas reglas que el diálogo del POS) |
 | GET | `/catalog/products/<id>/image` | `catalog:read` | Miniatura del producto (binaria) con `ETag` y `304` |
+| GET | `/registers/<id>/session` | `system:read` | Estado de la caja y su sesión actual |
+| GET | `/registers/<id>/employees` | `orders:write` | Empleados que pueden usar la caja, con rol y PIN cifrado |
+| POST | `/registers/<id>/session/open` | `session:manage` | Abrir la caja con el efectivo inicial |
+| GET | `/registers/<id>/session/closing` | `session:manage` | Lo esperado en el corte |
+| POST | `/registers/<id>/session/close` | `session:manage` | Corte de caja con lo contado |
+| POST | `/orders/quote` | `orders:write` | Precios, impuestos y total de un carrito (no registra nada) |
+| POST | `/orders` | `orders:write` | Registrar una venta pagada, idempotente por `uuid` |
+| GET | `/orders/<uuid>` | `orders:write` | Consultar una venta por su `uuid` |
 
 `/me` es también la prueba de vida que debe ejecutar una caja al arrancar:
 confirma token, tienda, moneda y hora del servidor.
@@ -222,7 +237,82 @@ el grupo de alta rápida y ser operador de POS, la caja debe ser de su compañí
 y tener una sesión abierta (el stock inicial entra a la ubicación de esa
 caja). Un código ya usado responde `CONFLICT` con `details.existing`.
 
-Las fases C y D añaden venta, apertura y cierre de caja y métricas (ver
+### 4.3 Operación de venta (fase C)
+
+Módulo `vlux_pos_api`. Todo pasa por los mismos métodos de Odoo que usa su POS
+(`pos.session.set_opening_control`, `post_closing_cash_details`,
+`close_session_from_ui`, `pos.order.sync_from_ui`): sesiones, cortes,
+inventario y contabilidad son idénticos se venda en la pantalla que se venda.
+Las ventas registradas por la API llevan `source = vlux_api`.
+
+**Empleados.** Si la caja usa inicio de sesión por empleado (`employee_login`
+en `/registers/<id>/session`, las cajas VLUX lo usan), la apertura, el corte y
+cada venta llevan `employee_id`, que debe ser un empleado permitido en la caja.
+`/registers/<id>/employees` entrega `role` (`manager`, `cashier`, `minimal`)
+y `pin_sha1`/`barcode_sha1` para validar el PIN sin red, igual que el POS de
+Odoo. **Riesgo aceptado:** un PIN de 4 dígitos en SHA-1 sin sal se descifra por
+fuerza bruta; por eso sólo se entrega a un token que ya puede vender en esa
+caja (`orders:write`), el mismo nivel de confianza que el POS de Odoo.
+
+**Apertura.** `POST /registers/<id>/session/open`
+`{"opening_cash": 500, "employee_id": 7, "notes": "..."}`. Repetirla es
+inofensivo: con la sesión abierta responde `already_open: true` sin cambiar
+nada. Si la caja está en corte responde `CONFLICT`.
+
+**Cotización.** `POST /orders/quote`
+`{"register_id": 1, "lines": [{"product_id": 512, "qty": 2}], "partner_id": null}`
+devuelve cada línea con precio, impuestos y subtotales, y `amount_untaxed`,
+`amount_tax` y `amount_total` calculados con el mismo motor que
+`pos.order._compute_prices` (redondeo de la compañía y de la caja). Sin
+`price_unit` decide la lista de precios de la caja (o la del cliente si la caja
+la ofrece); con `price_unit`, la línea se cobra a ese precio y
+`price_overridden` dice si difiere del catálogo.
+
+**Venta.** `POST /orders`:
+
+```json
+{"uuid": "5f0c…", "register_id": 1, "employee_id": 7,
+ "lines": [{"product_id": 512, "qty": 2, "price_unit": 20.0}],
+ "payments": [{"payment_method_id": 1, "amount": 100.0}],
+ "expected_total": 40.0, "created_at": "2026-09-28T18:04:11Z",
+ "partner_id": null, "session_id": 31}
+```
+
+- **Idempotente por `uuid`** (lo genera la caja). Reenviar la misma venta
+  devuelve la ya registrada con `duplicate: true`; nunca crea otra. Si dos
+  envíos llegan a la vez, uno responde `CONFLICT` con `details.retry` y el
+  reintento encuentra la venta.
+- **Totales del servidor.** El total que se contabiliza es el calculado aquí;
+  `expected_total` (recomendado) se compara al centavo y, si no coincide,
+  `TOTAL_MISMATCH` con el desglose del servidor en `details`.
+- **Pagos.** Deben cubrir el total (con el redondeo de efectivo de la caja, si
+  lo tiene). El cambio sólo sale de efectivo: con tarjeta de más responde
+  `PAYMENT_MISMATCH`. La forma de pago Crédito se rechaza por ahora: las ventas
+  a crédito y los abonos siguen en el POS de Odoo.
+- **Precio distinto al catálogo:** se acepta (una caja sin red cobra con su
+  copia local) y la orden queda marcada `vlux_api_price_overridden` para el
+  dueño.
+- **Sesión.** La venta entra en la sesión abierta de la caja; una venta hecha
+  antes de un corte que llega después entra en la sesión abierta en ese
+  momento, como en Odoo. Sin sesión abierta: `NO_OPEN_SESSION`.
+- `created_at` es la hora de la venta en la caja (UTC); una fecha futura se
+  ignora.
+
+Cualquier `409` significa que **no se escribió nada**: la caja conserva la
+venta en su cola y muestra el motivo. La respuesta de éxito (y
+`GET /orders/<uuid>`) trae `name`, `pos_reference`, totales, `change`, líneas
+y pagos para imprimir el ticket.
+
+**Corte.** `GET /registers/<id>/session/closing` da lo esperado: efectivo
+(apertura, ventas, entradas y salidas, esperado) y cada otra forma de pago.
+`POST /registers/<id>/session/close`
+`{"session_id": 31, "employee_id": 7, "counted_cash": 1250.0, "counted": [{"payment_method_id": 2, "amount": 830.0}], "notes": "..."}`.
+`session_id` debe ser la sesión abierta (una pantalla vieja no puede cerrar
+otra sesión). La regla de diferencia máxima (D6, $30) la aplica el servidor: por
+encima del límite sólo cierra un encargado (el empleado que cuenta); si no,
+`CLOSING_REFUSED` y la caja **sigue abierta**.
+
+La fase D añade métricas y diagnóstico de la API (ver
 [PLAN_INICIATIVAS.md](PLAN_INICIATIVAS.md)).
 
 ## 5. Límites de uso
@@ -272,3 +362,12 @@ miniatura de 256 px por defecto, `Content-Type`, `ETag` igual a
 `image_version`, `304`, ETag distinto por tamaño y por foto nueva, `NO_IMAGE`,
 tamaño inválido, id inexistente, id no numérico, alcance, sin token y producto
 de otra compañía. La sincronización inicial sin `deleted`.
+
+`vlux_pos_api/tests/test_api_sales.py` cubre la fase C por HTTP: estado de la
+caja, empleados y PIN sólo con `orders:write`, apertura que exige empleado y
+es repetible, cotización con IVA incluido, venta enviada dos veces que queda
+una sola y cuyo total coincide con el que recalcula Odoo, ventas rechazadas
+(pago corto, tarjeta de más, total distinto) sin dejar nada escrito, cambio
+de un pago mixto, precio distinto al catálogo marcado, venta sin sesión, corte
+de una cajera rechazado por diferencia con la caja todavía abierta, corte
+cuadrado y corte de un encargado por encima del límite.

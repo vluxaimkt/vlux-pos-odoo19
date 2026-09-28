@@ -27,6 +27,7 @@
 !/vlux_facturacion/
 !/vlux_pos_catalog/
 !/vlux_pos_credit/
+!/vlux_pos_api/
 
 **/__pycache__/
 *.py[cod]
