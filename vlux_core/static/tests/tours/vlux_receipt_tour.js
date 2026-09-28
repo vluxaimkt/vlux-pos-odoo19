@@ -53,6 +53,10 @@ registry.category("web_tour.tours").add("VluxReceiptFiscalTour", {
                 trigger: ".pos-receipt .receipt-change:contains('50.00'):not(:contains('-'))",
             },
             {
+                content: "a sale is labelled as a sale",
+                trigger: ".pos-receipt .vlux-receipt-sale:contains('TICKET DE VENTA')",
+            },
+            {
                 content: "the ticket does not advertise Odoo",
                 trigger: ".pos-receipt:not(:has(.footer-powered-by))",
             },
