@@ -33,6 +33,14 @@ registry.category("web_tour.tours").add("VluxRegisterDayTour", {
             PaymentScreen.clickPaymentMethod("Cash"),
             PaymentScreen.clickValidate(),
             ReceiptScreen.isShown(),
+            {
+                content: "the refund ticket says it is a refund, not a sale",
+                trigger: ".pos-receipt .vlux-receipt-refund:contains('DEVOLUCIÓN')",
+            },
+            {
+                content: "and names the ticket it reverses",
+                trigger: ".pos-receipt .vlux-receipt-original:contains('Ticket original')",
+            },
             ReceiptScreen.clickNextOrder(),
 
             // Float 0 + 2 x 12 sold - 1 x 12 refunded = 12 in the drawer.

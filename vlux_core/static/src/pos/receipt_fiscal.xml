@@ -40,6 +40,18 @@
         </xpath>
         <xpath expr="//img[hasclass('pos-receipt-logo')]" position="after">
             <div class="vlux-receipt-store text-center fw-bold fs-5 pt-2" t-out="order.company.name"/>
+            <!-- A refund ticket must not pass for a sale (same layout, negative
+                 amounts): say what it is and which ticket it reverses. -->
+            <div t-if="order.isRefund" class="vlux-receipt-kind vlux-receipt-refund text-center fw-bold fs-4 border border-dark mt-2 py-1">
+                DEVOLUCIÓN
+            </div>
+            <t t-if="order.isRefund">
+                <t t-set="vluxOriginals" t-value="order.lines.map((line) => line.refunded_orderline_id?.order_id?.pos_reference).filter((ref, index, refs) => ref and refs.indexOf(ref) === index)"/>
+                <div t-if="vluxOriginals.length" class="vlux-receipt-original text-center" style="font-size: 85%;">
+                    Ticket original: <t t-out="vluxOriginals.join(', ')"/>
+                </div>
+            </t>
+            <div t-else="" class="vlux-receipt-kind vlux-receipt-sale text-center fw-bold pt-1">TICKET DE VENTA</div>
         </xpath>
     </t>
 
