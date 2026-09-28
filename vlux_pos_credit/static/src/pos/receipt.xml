@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+
+    <!-- A sale on credit is its own kind of ticket: the header says so. -->
+    <t t-name="vlux_pos_credit.ReceiptHeaderCredit" t-inherit="point_of_sale.ReceiptHeader" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('vlux-receipt-sale')]" position="attributes">
+            <attribute name="t-out">order.vluxIsCreditSale ? 'VENTA A CRÉDITO' : 'TICKET DE VENTA'</attribute>
+        </xpath>
+    </t>
+
+    <!--
+        What the customer owes after this ticket, and a line to sign: the
+        store keeps a signed copy, as with a paper fiado note.
+    -->
+    <t t-name="vlux_pos_credit.ReceiptCreditBalance" t-inherit="point_of_sale.OrderReceipt" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('before-footer')]" position="before">
+            <div t-if="order.vluxIsCreditSale" class="vlux-receipt-credit border-top border-dark mt-3 pt-2">
+                <div class="d-flex">
+                    <span>Cliente</span>
+                    <span class="ms-auto fw-bold" t-out="order.getPartner()?.name"/>
+                </div>
+                <div class="d-flex">
+                    <span>Saldo anterior</span>
+                    <span class="ms-auto font-monospace vlux-credit-prev" t-out="formatCurrency(order.vlux_credit_prev_balance or 0)"/>
+                </div>
+                <div class="d-flex">
+                    <span>Esta compra a crédito</span>
+                    <span class="ms-auto font-monospace" t-out="formatCurrency(order.vluxCreditAmount)"/>
+                </div>
+                <div class="d-flex fw-bold">
+                    <span>Saldo nuevo</span>
+                    <span class="ms-auto font-monospace vlux-credit-new" t-out="formatCurrency(order.vluxCreditNewBalance)"/>
+                </div>
+                <div class="text-center pt-5">
+                    <div class="border-top border-dark mx-4"/>
+                    <div style="font-size: 85%;">Firma del cliente</div>
+                </div>
+            </div>
+        </xpath>
+    </t>
+
+</templates>

@@ -25,6 +25,11 @@ class PosOrder(models.Model):
         store=True,
         help="Parte del ticket pagada con la forma de pago Crédito.",
     )
+    vlux_credit_prev_balance = fields.Monetary(
+        string="Saldo anterior (ticket)",
+        help="Saldo del cliente que la caja imprimió como 'saldo anterior'. Sólo para el "
+        "ticket: el saldo real se calcula de los pagos.",
+    )
     vlux_credit_flagged = fields.Boolean(string="Crédito por revisar", readonly=True, index=True)
     vlux_credit_issues = fields.Text(string="Motivo de revisión (crédito)", readonly=True)
 
