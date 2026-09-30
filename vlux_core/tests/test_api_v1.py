@@ -234,3 +234,85 @@ class TestVluxApiV1Contract(HttpCase, VluxApiCase):
         self.assertIn("system:read", spec["x-scopes"])
         for code in ("MISSING_TOKEN", "INVALID_TOKEN", "FORBIDDEN_SCOPE", "RATE_LIMITED"):
             self.assertIn(code, spec["components"]["schemas"]["Error"]["properties"]["error"]["enum"])
+
+
+@tagged("post_install", "-at_install")
+class TestVluxApiTokenRotation(TransactionCase, VluxApiCase):
+    """A renewable token is replaced by the device before it expires."""
+
+    def setUp(self):
+        super().setUp()
+        self.cashier = self._make_user("api-rotate-cashier", "vlux_core.group_vlux_cashier")
+        self.Token = self.env["vlux.api.token"]
+
+    def test_a_lifetime_sets_the_expiry(self):
+        token, _raw = self.Token.issue("Caja", "orders:write", user=self.cashier, lifetime_days=30)
+        remaining = token.expires_at - fields.Datetime.now()
+        self.assertGreater(remaining, timedelta(days=29, hours=23))
+        self.assertLessEqual(remaining, timedelta(days=30))
+
+    def test_rotation_issues_a_twin_and_gives_the_old_one_a_grace_period(self):
+        old, old_raw = self.Token.issue("Caja 1", "orders:write catalog:read", user=self.cashier, lifetime_days=30)
+
+        new, new_raw = old.rotate()
+
+        self.assertEqual(self.Token.authenticate(new_raw), new)
+        self.assertEqual((new.name, new.scopes, new.user_id, new.lifetime_days),
+                         (old.name, old.scopes, old.user_id, old.lifetime_days))
+        self.assertEqual(old.rotated_to_id, new)
+        self.assertEqual(self.Token.authenticate(old_raw), old, "the old token still works during the grace period")
+        self.assertLessEqual(old.expires_at, fields.Datetime.now() + timedelta(hours=24))
+        self.assertGreater(new.expires_at, old.expires_at)
+
+    def test_asking_again_revokes_the_unused_replacement(self):
+        old, _raw = self.Token.issue("Caja 1", "orders:write", user=self.cashier, lifetime_days=30)
+        first, first_raw = old.rotate()
+        second, second_raw = old.rotate()
+
+        self.assertFalse(self.Token.authenticate(first_raw), "a lost, never used replacement is revoked")
+        self.assertEqual(self.Token.authenticate(second_raw), second)
+
+        second.sudo().last_used_at = fields.Datetime.now()
+        third, _third_raw = old.rotate()
+        self.assertTrue(second.active, "a replacement already in use is never revoked by a retry")
+        self.assertEqual(old.rotated_to_id, third)
+
+    def test_non_renewable_tokens_and_lost_roles_do_not_rotate(self):
+        fixed, _raw = self.Token.issue("Fijo", "orders:write", user=self.cashier)
+        with self.assertRaises(UserError):
+            fixed.rotate()
+
+        renewable, _raw = self.Token.issue("Caja", "orders:write", user=self.cashier, lifetime_days=30)
+        self.cashier.sudo().group_ids = [(6, 0, [self.env.ref("base.group_user").id])]
+        with self.assertRaises(UserError, msg="the scopes are checked again against the current role"):
+            renewable.rotate()
+
+
+@tagged("post_install", "-at_install")
+class TestVluxApiTokenRotationHttp(HttpCase, VluxApiCase):
+
+    def test_me_describes_the_token_and_rotate_returns_a_working_one_once(self):
+        cashier = self._make_user("api-rotate-http", "vlux_core.group_vlux_cashier")
+        token, raw = self.env["vlux.api.token"].issue("Caja", "system:read", user=cashier, lifetime_days=30)
+
+        response = self.url_open(API + "/me", headers={"Authorization": "Bearer " + raw})
+        me = json.loads(response.text)["data"]["token"]
+        self.assertTrue(me["renewable"])
+        self.assertIsNone(me["register_id"])
+        self.assertTrue(me["expires_at"].endswith("Z"))
+
+        response = self.url_open(API + "/token/rotate", data="{}", method="POST",
+                                 headers={"Authorization": "Bearer " + raw, "Content-Type": "application/json"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers["Cache-Control"].split(",")[0], "no-store")
+        data = json.loads(response.text)["data"]
+        self.assertNotEqual(data["token"], raw)
+        self.assertEqual(data["scopes"], ["system:read"])
+
+        response = self.url_open(API + "/me", headers={"Authorization": "Bearer " + data["token"]})
+        self.assertEqual(response.status_code, 200)
+
+        fixed, fixed_raw = self.env["vlux.api.token"].issue("Fijo", "system:read", user=cashier)
+        response = self.url_open(API + "/token/rotate", data="{}", method="POST",
+                                 headers={"Authorization": "Bearer " + fixed_raw})
+        self.assertEqual(json.loads(response.text)["error"], "VALIDATION_ERROR")

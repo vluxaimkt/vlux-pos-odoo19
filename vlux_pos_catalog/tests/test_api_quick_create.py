@@ -69,3 +69,12 @@ class TestVluxApiQuickCreate(HttpCase, VluxCatalogCase):
 
         response, payload = self._post({"config_id": self.config_b.id, **self.values()}, self.owner_raw)
         self.assertEqual((response.status_code, payload["error"]), (403, "FORBIDDEN"))
+
+    def test_a_register_token_only_creates_on_its_register(self):
+        bound = self.env["vlux.api.token"].issue(
+            "Caja A", "catalog:read catalog:write", user=self.owner, pos_config=self.config_a,
+        )[1]
+        self.env.flush_all()
+        response, payload = self._post({"config_id": self.config_b.id, **self.values()}, bound)
+        self.assertEqual((response.status_code, payload["error"]), (403, "FORBIDDEN"))
+        self.assertEqual(payload["message"], "Este token es de otra caja.")

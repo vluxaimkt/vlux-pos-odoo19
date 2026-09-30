@@ -34,6 +34,8 @@ class VluxApiCatalogWrite(http.Controller):
         config_id = int_param(body.get("config_id"), "config_id", minimum=1)
         if not config_id:
             raise VluxApiError("VALIDATION_ERROR", "Falta config_id (la caja).")
+        if token.pos_config_id and token.pos_config_id.id != config_id:
+            raise VluxApiError("FORBIDDEN", "Este token es de otra caja.")
         values = {key: body[key] for key in BODY_FIELDS if key in body}
         result = request.env["product.template"].vlux_pos_quick_create(values, config_id)
         if not result.get("ok"):

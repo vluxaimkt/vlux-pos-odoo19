@@ -1,9 +1,10 @@
 import { useState } from "preact/hooks";
 
 import { ApiClient, ApiError, NetworkError } from "../api/client";
-import type { Me, StoreConfig } from "../api/types";
+import type { Me, RegisterConfig, StoreConfig } from "../api/types";
 import { type PosDb, setMeta } from "../db/db";
 import { META_SETUP, META_TOKEN, type Setup } from "../state";
+import { META_TOKEN_INFO } from "../sync/token";
 
 const NEEDED_SCOPES = ["system:read", "catalog:read", "orders:write", "session:manage"];
 // Tokens are URL-safe base64 with a short prefix: anything else is a paste
@@ -11,12 +12,13 @@ const NEEDED_SCOPES = ["system:read", "catalog:read", "orders:write", "session:m
 const TOKEN_SHAPE = /^[A-Za-z0-9_-]{20,200}$/;
 
 /**
- * First run: paste the register's token (Ajustes → API VLUX → Emitir token),
- * check it against the store and pick the register this device will be.
+ * First run: paste the register's token (Ajustes → API VLUX → Emitir token,
+ * choosing the register). The token decides which register this device is:
+ * one that serves every register is refused (least privilege).
  */
 export function SetupScreen({ db, onReady }: { db: PosDb; onReady: (token: string, setup: Setup) => void }) {
   const [token, setToken] = useState("");
-  const [checked, setChecked] = useState<{ me: Me; store: StoreConfig } | null>(null);
+  const [checked, setChecked] = useState<{ me: Me; store: StoreConfig; register: RegisterConfig } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -43,7 +45,17 @@ export function SetupScreen({ db, onReady }: { db: PosDb; onReady: (token: strin
         setError(`Este token tiene permisos de más (${extra.join(", ")}). Emite uno sólo con: ${NEEDED_SCOPES.join(", ")}.`);
         return;
       }
-      setChecked({ me, store: await client.storeConfig() });
+      if (!me.token.register_id) {
+        setError("Este token no está atado a una caja. En Odoo, emite uno eligiendo la caja de este equipo.");
+        return;
+      }
+      const store = await client.storeConfig();
+      const register = store.registers.find((r) => r.id === me.token.register_id);
+      if (!register) {
+        setError("La caja de este token ya no existe o no está disponible.");
+        return;
+      }
+      setChecked({ me, store, register });
     } catch (err) {
       setError(explain(err));
     } finally {
@@ -51,14 +63,15 @@ export function SetupScreen({ db, onReady }: { db: PosDb; onReady: (token: strin
     }
   }
 
-  async function choose(registerId: number) {
+  async function confirm() {
     if (!checked) return;
-    const register = checked.store.registers.find((r) => r.id === registerId);
-    if (!register) return;
-    const setup: Setup = { ...checked, register };
+    const setup: Setup = checked;
     const value = token.trim();
-    await setMeta(db, META_TOKEN, value);
-    await setMeta(db, META_SETUP, setup);
+    await db.transaction("rw", db.meta, async () => {
+      await setMeta(db, META_TOKEN, value);
+      await setMeta(db, META_TOKEN_INFO, checked.me.token);
+      await setMeta(db, META_SETUP, setup);
+    });
     setToken("");
     // Ask the browser not to evict the local data (catalog, queued sales).
     void navigator.storage?.persist?.();
@@ -95,16 +108,10 @@ export function SetupScreen({ db, onReady }: { db: PosDb; onReady: (token: strin
           ) : (
             <div class="flex flex-col gap-3">
               <p>
-                Tienda <strong>{checked.store.company.name}</strong>. ¿Qué caja es este equipo?
+                Este equipo será <strong>{checked.register.name}</strong> de {checked.store.company.name}.
               </p>
-              {checked.store.registers.map((register) => (
-                <button key={register.id} class="btn btn-outline btn-lg justify-start" onClick={() => choose(register.id)}>
-                  {register.name}
-                </button>
-              ))}
-              {!checked.store.registers.length && (
-                <div role="alert" class="alert alert-warning">La tienda no tiene cajas configuradas.</div>
-              )}
+              <button class="btn btn-primary btn-lg" onClick={() => void confirm()}>Usar este equipo como {checked.register.name}</button>
+              <button class="btn btn-ghost" onClick={() => setChecked(null)}>Usar otro token</button>
             </div>
           )}
         </div>

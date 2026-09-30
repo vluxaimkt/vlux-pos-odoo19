@@ -254,3 +254,40 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         })
         self.assertEqual(response.status_code, 200, body)
         self.assertEqual(self.env["pos.session"].browse(opened["data"]["session"]["id"]).state, "closed")
+
+    # --- a register's token ---------------------------------------------------------
+
+    def test_a_token_bound_to_a_register_cannot_touch_another(self):
+        other = self.env["pos.config"].create({"name": "Otra caja"})
+        _token, bound = self.env["vlux.api.token"].issue(
+            "Caja atada", "system:read catalog:read orders:write session:manage",
+            user=self.cashier, pos_config=self.config, lifetime_days=30,
+        )
+
+        response, body = self._call("GET", "/registers/%d/session" % self.config.id, token=bound)
+        self.assertEqual(response.status_code, 200, body)
+
+        for method, path, payload in (
+            ("GET", "/registers/%d/session" % other.id, None),
+            ("GET", "/registers/%d/employees" % other.id, None),
+            ("POST", "/registers/%d/session/open" % other.id, {"opening_cash": 0}),
+            ("POST", "/orders/quote", {"register_id": other.id, "lines": [{"product_id": self.soda.id, "qty": 1}]}),
+            ("POST", "/orders", self._sale([(self.cash, 20.0)], register_id=other.id)),
+        ):
+            response, body = self._call(method, path, payload, token=bound)
+            self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"), path)
+        self.assertFalse(other.current_session_id, "nothing was opened on the other register")
+
+        _response, body = self._call("GET", "/store/config", token=bound)
+        self.assertEqual([r["id"] for r in body["data"]["registers"]], [self.config.id])
+
+        _response, body = self._call("GET", "/me", token=bound)
+        self.assertEqual(body["data"]["token"]["register_id"], self.config.id)
+
+    def test_a_rotated_register_token_stays_bound(self):
+        token, _raw = self.env["vlux.api.token"].issue(
+            "Caja atada", "orders:write", user=self.cashier, pos_config=self.config, lifetime_days=30,
+        )
+        new, _new_raw = token.rotate()
+        self.assertEqual(new.pos_config_id, self.config)
+        self.assertEqual(new.company_id, self.config.company_id)

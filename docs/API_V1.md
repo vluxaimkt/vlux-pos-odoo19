@@ -96,10 +96,26 @@ Qué puede otorgar cada rol (el resto se rechaza al emitir, no al usar):
 | Auditor | `system:read`, `dashboard:read` |
 | Soporte | `system:read` |
 
+### Token de una caja: atado y renovable
+
+- **Atado a una caja** (`pos_config_id`): sólo sirve para esa caja. Abrir,
+  cerrar, cotizar, vender, consultar ventas o dar de alta productos en otra
+  caja responde `FORBIDDEN` ("Este token es de otra caja"), y `/store/config`
+  sólo lista su caja. Un equipo perdido no sirve para operar otra caja. La
+  PWA del POS rechaza tokens que no estén atados a una caja.
+- **Renovable** (`lifetime_days`, 30 por defecto al emitirlo desde Odoo):
+  caduca a los N días y el dispositivo lo renueva solo con
+  `POST /token/rotate` antes de que eso pase (la PWA, cuando le quedan menos
+  de 15 días). La respuesta trae el token nuevo **una sola vez**; el viejo
+  sigue sirviendo 24 horas por si la respuesta se perdió, y pedirlo otra vez
+  revoca el reemplazo que nunca se usó. Los alcances se vuelven a comprobar
+  contra el rol actual del usuario: si perdió el rol, no se renueva.
+- `/me` informa `token.register_id`, `token.expires_at` y `token.renewable`.
+
 ### Emitir un token
 
 En Odoo: **Ajustes → API VLUX → Emitir token**. Se elige nombre, usuario,
-alcances y expiración; el token aparece una sola vez para copiarlo a la caja.
+caja (para el token de una caja), renovación, alcances y expiración; el token aparece una sola vez para copiarlo a la caja.
 **Ajustes → API VLUX → Tokens de la API** lista los vigentes y los revocados, y
 desde el formulario se revoca.
 
@@ -116,6 +132,7 @@ print(raw)   # única vez
 | --- | --- | --- | --- |
 | GET | `/me` | `system:read` | Identidad del token, sus alcances y la tienda contra la que opera |
 | GET | `/openapi.json` | público | El contrato completo, para generar un cliente |
+| POST | `/token/rotate` | cualquiera | Renovar el token del dispositivo (sólo si es renovable) |
 | GET | `/store/config` | `system:read` | Compañía, datos fiscales, moneda, impuestos por defecto y cajas con sus métodos de pago |
 | GET | `/catalog/products` | `catalog:read` | **Feed** de variantes vendibles con cursor y bajas |
 | GET | `/catalog/customers` | `catalog:read` | **Feed** de clientes con cursor y bajas |

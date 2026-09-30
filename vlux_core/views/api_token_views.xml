@@ -9,6 +9,7 @@
                 <field name="name"/>
                 <field name="user_id"/>
                 <field name="scopes"/>
+                <field name="pos_config_id" optional="show"/>
                 <field name="token_prefix"/>
                 <field name="last_used_at"/>
                 <field name="expires_at"/>
@@ -38,11 +39,14 @@
                             <field name="user_id" readonly="1"/>
                             <field name="company_id" readonly="1" groups="base.group_multi_company"/>
                             <field name="scopes" readonly="1"/>
+                            <field name="pos_config_id" readonly="1"/>
                         </group>
                         <group>
                             <field name="token_prefix"/>
                             <field name="expires_at"/>
+                            <field name="lifetime_days" readonly="1"/>
                             <field name="last_used_at"/>
+                            <field name="rotated_to_id" invisible="not rotated_to_id"/>
                             <field name="active" invisible="1"/>
                         </group>
                     </group>
@@ -75,6 +79,8 @@
                 <group invisible="raw_token">
                     <field name="name" placeholder="Caja 1 — tablet"/>
                     <field name="user_id"/>
+                    <field name="pos_config_id" options="{'no_create': True}"/>
+                    <field name="lifetime_days"/>
                     <field name="expires_at"/>
                     <field name="allowed_scopes" string="Permitidos por su rol"/>
                 </group>

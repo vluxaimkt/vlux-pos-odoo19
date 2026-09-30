@@ -21,7 +21,15 @@ class VluxApiTokenNew(models.TransientModel):
         domain="[('share', '=', False)]",
         help="El token nunca puede hacer más que este usuario.",
     )
-    expires_at = fields.Datetime(string="Expira", help="Vacío: no expira.")
+    expires_at = fields.Datetime(string="Expira", help="Vacío: no expira (o, con renovación, a los N días).")
+    pos_config_id = fields.Many2one(
+        "pos.config", string="Caja",
+        help="Para el token de una caja: sólo servirá para esa caja. Vacío: cualquier caja de la compañía.",
+    )
+    lifetime_days = fields.Integer(
+        string="Renovación (días)", default=30,
+        help="El token caduca a los N días y el dispositivo lo renueva solo antes. Cero: no se renueva.",
+    )
     allowed_scopes = fields.Char(compute="_compute_allowed_scopes")
 
     scope_system_read = fields.Boolean(string=SCOPES["system:read"])
@@ -59,7 +67,8 @@ class VluxApiTokenNew(models.TransientModel):
         if not scopes:
             raise UserError(_("Elige al menos un alcance para el token."))
         token, raw_token = self.env["vlux.api.token"].issue(
-            self.name, scopes, user=self.user_id, expires_at=self.expires_at or None
+            self.name, scopes, user=self.user_id, expires_at=self.expires_at or None,
+            pos_config=self.pos_config_id or None, lifetime_days=self.lifetime_days or 0,
         )
         self.write({"token_id": token.id, "raw_token": raw_token})
         return {

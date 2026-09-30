@@ -11,6 +11,7 @@ import { SetupScreen } from "./screens/SetupScreen";
 import { META_EMPLOYEES, META_SETUP, META_TOKEN, PosContext, type PosContextValue, type Setup, usePos } from "./state";
 import { syncFeed } from "./sync/catalog";
 import { flushOutbox } from "./sync/outbox";
+import { renewIfDue } from "./sync/token";
 
 const META_REGISTER_STATE = "register_state";
 const CATALOG_EVERY_MS = 5 * 60_000;
@@ -34,10 +35,22 @@ export function App({ db }: { db: PosDb }) {
 
   if (paired === undefined) return <Splash />;
   if (!paired) return <SetupScreen db={db} onReady={(token, setup) => setPaired({ token, setup })} />;
-  return <Register db={db} paired={paired} onForget={() => setPaired(null)} />;
+  return (
+    <Register
+      db={db}
+      paired={paired}
+      onForget={() => setPaired(null)}
+      onRenewed={(token) => setPaired((current) => (current ? { ...current, token } : current))}
+    />
+  );
 }
 
-function Register({ db, paired, onForget }: { db: PosDb; paired: Paired; onForget: () => void }) {
+function Register({ db, paired, onForget, onRenewed }: {
+  db: PosDb;
+  paired: Paired;
+  onForget: () => void;
+  onRenewed: (token: string) => void;
+}) {
   const online = useOnline();
   const client = useMemo(() => new ApiClient({ token: paired.token }), [paired.token]);
   const registerId = paired.setup.register.id;
@@ -98,6 +111,9 @@ function Register({ db, paired, onForget }: { db: PosDb; paired: Paired; onForge
   const syncCatalog = useCallback(async () => {
     setStatus((s) => ({ ...s, syncing: true }));
     try {
+      // Renew the token before it ages out; the next round uses the new one.
+      const renewed = await renewIfDue(client, db);
+      if (renewed) onRenewed(renewed);
       await syncFeed(client, db, "products");
       await syncFeed(client, db, "customers");
       await refreshRegister();
@@ -111,7 +127,7 @@ function Register({ db, paired, onForget }: { db: PosDb; paired: Paired; onForge
     } finally {
       setStatus((s) => ({ ...s, syncing: false }));
     }
-  }, [client, db, refreshRegister]);
+  }, [client, db, refreshRegister, onRenewed]);
 
   const flush = useCallback(async () => {
     if (online) await flushOutbox(client, db);

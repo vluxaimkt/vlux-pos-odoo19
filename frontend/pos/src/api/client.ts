@@ -1,6 +1,6 @@
 import type {
   ClosingSummary, Customer, Employee, Envelope, FeedPage, Me, OrderRequest, OrderResult, Product, Quote,
-  RegisterState, SaleLine, StoreConfig,
+  RegisterState, SaleLine, StoreConfig, TokenInfo,
 } from "./types";
 
 export const API_ROOT = "/vlux/api/v1";
@@ -104,6 +104,11 @@ export class ApiClient {
 
   me() {
     return this.request<Me>("GET", "/me");
+  }
+
+  /** Replace this device's token; the answer carries the new one, once. */
+  rotateToken() {
+    return this.request<TokenInfo & { token: string }>("POST", "/token/rotate", {});
   }
 
   storeConfig() {
