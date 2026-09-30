@@ -46,6 +46,12 @@ ERROR_CODES = {
     "NO_IMAGE": 404,
     "RATE_LIMITED": 429,
     "INTERNAL_ERROR": 500,
+    # Phase C: selling. All 409s leave nothing written; the client keeps the
+    # request and shows why.
+    "NO_OPEN_SESSION": 409,
+    "CLOSING_REFUSED": 409,
+    "PAYMENT_MISMATCH": 409,
+    "TOTAL_MISMATCH": 409,
 }
 # Registered endpoints, for the OpenAPI document: path -> method -> metadata.
 API_PATHS = {}
@@ -191,7 +197,11 @@ def api_route(path, scope, methods=("GET",), summary=None, params=None):
             request_id = uuid.uuid4().hex
             try:
                 token = authenticate(scope)
-                data = function(self, token, *args, **kwargs)
+                # A savepoint per call: an endpoint that fails half way leaves
+                # nothing behind, even though the error is answered (and the
+                # request's transaction committed) instead of raised.
+                with request.env.cr.savepoint():
+                    data = function(self, token, *args, **kwargs)
                 if isinstance(data, Response):
                     # Binary endpoints (images) build their own response and
                     # only borrow the request id and version headers.

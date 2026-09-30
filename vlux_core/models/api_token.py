@@ -23,7 +23,9 @@ ROLE_SCOPES = {
     "vlux_core.group_vlux_owner": set(SCOPES),
     "vlux_core.group_vlux_administrator": set(SCOPES),
     "vlux_core.group_vlux_supervisor": {"system:read", "catalog:read", "orders:write", "session:manage", "dashboard:read"},
-    "vlux_core.group_vlux_cashier": {"system:read", "catalog:read", "orders:write"},
+    # A cashier opens and closes the register; the closing difference limit is
+    # enforced by the server (``pos.session.close_session_from_ui``).
+    "vlux_core.group_vlux_cashier": {"system:read", "catalog:read", "orders:write", "session:manage"},
     "vlux_core.group_vlux_inventory_operator": {"system:read", "catalog:read", "catalog:write"},
     "vlux_core.group_vlux_auditor": {"system:read", "dashboard:read"},
     "vlux_core.group_vlux_support": {"system:read"},
