@@ -18,3 +18,7 @@ packaging/cloud/**/*.yaml text eol=lf
 *.scss text eol=lf
 *.md text eol=lf
 *.cmd text eol=crlf
+# The PWA build is committed byte for byte; CI rebuilds it and compares.
+vlux_pos_app/static/dist/** -text
+# Same bytes on Windows and in CI, so both builds match.
+frontend/** text eol=lf

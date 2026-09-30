@@ -1,0 +1,167 @@
+import type {
+  ClosingSummary, Customer, Employee, Envelope, FeedPage, Me, OrderRequest, OrderResult, Product, Quote,
+  RegisterState, SaleLine, StoreConfig,
+} from "./types";
+
+export const API_ROOT = "/vlux/api/v1";
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+/** The server answered with an error of the contract (`{"ok": false, "error": CODE}`). */
+export class ApiError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: number,
+    readonly details?: Record<string, unknown>,
+    readonly requestId?: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+/** The server could not be reached, timed out, or a proxy answered instead of it. */
+export class NetworkError extends Error {
+  constructor(message: string, readonly status?: number) {
+    super(message);
+    this.name = "NetworkError";
+  }
+}
+
+/** Worth sending again later: nothing in the request itself is wrong. */
+export function isRetryable(error: unknown): boolean {
+  if (error instanceof NetworkError) return true;
+  if (error instanceof ApiError) {
+    return error.status >= 500 || error.status === 429 || (error.code === "CONFLICT" && error.details?.retry === true);
+  }
+  return false;
+}
+
+export interface ApiClientOptions {
+  token: string;
+  baseUrl?: string;
+  timeoutMs?: number;
+  fetch?: typeof fetch;
+}
+
+export class ApiClient {
+  private readonly token: string;
+  private readonly baseUrl: string;
+  private readonly timeoutMs: number;
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(options: ApiClientOptions) {
+    this.token = options.token;
+    this.baseUrl = (options.baseUrl ?? "") + API_ROOT;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
+  }
+
+  async request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(this.baseUrl + path, {
+        method,
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          Accept: "application/json",
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        cache: "no-store",
+        credentials: "omit",
+        signal: controller.signal,
+      });
+    } catch (error) {
+      throw new NetworkError(controller.signal.aborted ? "El servidor tardó demasiado." : "Sin conexión con el servidor.");
+    } finally {
+      clearTimeout(timer);
+    }
+
+    let envelope: Envelope<T>;
+    try {
+      envelope = (await response.json()) as Envelope<T>;
+    } catch {
+      // A proxy or tunnel page (Cloudflare 502, captive portal) instead of Odoo.
+      throw new NetworkError(`Respuesta inesperada del servidor (HTTP ${response.status}).`, response.status);
+    }
+    if (!envelope || typeof envelope !== "object" || typeof envelope.ok !== "boolean") {
+      throw new NetworkError(`Respuesta inesperada del servidor (HTTP ${response.status}).`, response.status);
+    }
+    if (!envelope.ok) {
+      throw new ApiError(
+        envelope.error ?? "INTERNAL_ERROR",
+        envelope.message ?? "Error del servidor.",
+        response.status,
+        envelope.details,
+        envelope.request_id,
+      );
+    }
+    return envelope.data as T;
+  }
+
+  me() {
+    return this.request<Me>("GET", "/me");
+  }
+
+  storeConfig() {
+    return this.request<StoreConfig>("GET", "/store/config");
+  }
+
+  productsPage(cursor?: string, limit = 500) {
+    return this.request<FeedPage<Product>>("GET", `/catalog/products?${feedQuery(cursor, limit)}`);
+  }
+
+  customersPage(cursor?: string, limit = 500) {
+    return this.request<FeedPage<Customer>>("GET", `/catalog/customers?${feedQuery(cursor, limit)}`);
+  }
+
+  registerState(registerId: number) {
+    return this.request<RegisterState>("GET", `/registers/${registerId}/session`);
+  }
+
+  employees(registerId: number) {
+    return this.request<{ items: Employee[] }>("GET", `/registers/${registerId}/employees`);
+  }
+
+  openSession(registerId: number, body: { opening_cash: number; employee_id?: number; notes?: string }) {
+    return this.request<RegisterState>("POST", `/registers/${registerId}/session/open`, body);
+  }
+
+  closingSummary(registerId: number) {
+    return this.request<ClosingSummary>("GET", `/registers/${registerId}/session/closing`);
+  }
+
+  closeSession(
+    registerId: number,
+    body: {
+      session_id: number;
+      counted_cash?: number;
+      counted?: { payment_method_id: number; amount: number }[];
+      employee_id?: number;
+      notes?: string;
+    },
+  ) {
+    return this.request<RegisterState>("POST", `/registers/${registerId}/session/close`, body);
+  }
+
+  quote(body: { register_id: number; lines: SaleLine[]; partner_id?: number | null }) {
+    return this.request<Quote>("POST", "/orders/quote", body);
+  }
+
+  createOrder(body: OrderRequest) {
+    return this.request<OrderResult>("POST", "/orders", body);
+  }
+
+  getOrder(uuid: string) {
+    return this.request<OrderResult>("GET", `/orders/${encodeURIComponent(uuid)}`);
+  }
+}
+
+function feedQuery(cursor: string | undefined, limit: number): string {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  return params.toString();
+}
