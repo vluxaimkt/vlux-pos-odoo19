@@ -32,6 +32,11 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     target: "es2022",
+    // Browsers with native oklch colors (Chrome/Edge 111+, Safari 16.4+,
+    // Firefox 113+). Older targets make the CSS minifier convert daisyUI's
+    // colors with floating-point math that rounds differently on Windows and
+    // Linux, so the committed build would never match the one CI makes.
+    cssTarget: ["chrome111", "edge111", "firefox113", "safari16.4"],
   },
   server: {
     // `npm run dev` against a local Odoo on 8069.
