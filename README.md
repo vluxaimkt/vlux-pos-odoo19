@@ -101,6 +101,7 @@ infraestructura real de firma.
 - [Decisión: Odoo como backend, interfaces propias](docs/ARQUITECTURA_HEADLESS.md)
 - [Plan de iniciativas: API VLUX v1 e interfaces propias](docs/PLAN_INICIATIVAS.md)
 - [API VLUX v1: contrato, autenticación y alcances](docs/API_V1.md)
+- [POS VLUX como PWA: estructura, desarrollo y compilación](docs/POS_PWA.md)
 - [Instalación en Windows](docs/INSTALACION_WINDOWS.md)
 - [Configuración funcional](docs/CONFIGURACION_FUNCIONAL.md)
 - [Hardware de la caja](docs/HARDWARE.md)

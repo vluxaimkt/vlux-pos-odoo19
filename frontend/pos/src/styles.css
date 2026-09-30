@@ -1,0 +1,11 @@
+@import "tailwindcss" source(none);
+@source "./";
+@source "../index.html";
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark;
+}
+
+html,
+body {
+  overscroll-behavior: none;
+}

@@ -81,10 +81,11 @@ Se adopta la **opción C**:
 
 ## Decisiones pendientes (antes de la iniciativa 3)
 
-- **Stack de las interfaces.** Las reglas de la iniciativa actual prohíben un
-  "React paralelo" como fuente de verdad; una interfaz que sólo consume la API
-  no lo es, pero el framework, el empaquetado (PWA, escritorio o móvil) y el
-  soporte offline se decidirán en un documento propio.
+- ~~**Stack de las interfaces.**~~ **Decidido 2026-09-27/28:** PWA con
+  Preact + Vite + TypeScript, estilos Tailwind + daisyUI (sólo CSS), datos sin
+  red en IndexedDB con Dexie; compilada en el CI y guardada en el addon
+  `vlux_pos_app`. No es un "React paralelo" como fuente de verdad: sólo consume
+  la API. Detalle en [POS_PWA.md](POS_PWA.md).
 - **Hardware.** Impresora de tickets, cajón y báscula: agente local (el
   instalador Windows ya incluye un service host) frente a WebUSB/WebSerial.
 - **Cálculo de impuestos en el cliente.** Reutilizar la lógica de impuestos de

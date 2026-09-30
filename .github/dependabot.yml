@@ -1,0 +1,11 @@
+# Security and version updates for the register PWA's npm packages.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /frontend/pos
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      build-tooling:
+        dependency-type: development
