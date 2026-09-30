@@ -52,6 +52,8 @@ entradas/salidas de efectivo: siguen en el POS de Odoo.
 descuentos y devoluciones siguen en el POS de Odoo (ver `VLUX_SEGUIMIENTO`: M26,
 M27).
 
+**Pruebas físicas:** [PRUEBAS_PWA.md](PRUEBAS_PWA.md).
+
 ## Dónde está cada cosa
 
 | Ruta | Qué |
