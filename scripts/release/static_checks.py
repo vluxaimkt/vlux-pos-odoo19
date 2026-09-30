@@ -19,7 +19,7 @@ SECRET_RE = re.compile(
 # repeated in files that cannot import each other (Python for Odoo, the cloud
 # CLI, the release builder, C#, batch, shell, Dockerfile). This check is the
 # single source of truth: adding an addon here fails until every copy agrees.
-PRODUCT_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_pos_credit")
+PRODUCT_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_pos_credit", "vlux_pos_api", "vlux_pos_app")
 PRODUCT_ADDON_COPIES = {
     "packaging/cloud/vlux_cloud.py": r"PRODUCTIVE_ADDONS = \(([^)]*)\)",
     "scripts/release/build_release.py": r"PRODUCT_ADDONS = \(([^)]*)\)",

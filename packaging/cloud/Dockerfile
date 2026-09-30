@@ -109,6 +109,8 @@ COPY vlux_mobile_scanner /opt/vlux/pos/addons/vlux_mobile_scanner
 COPY vlux_owner /opt/vlux/pos/addons/vlux_owner
 COPY vlux_pos_catalog /opt/vlux/pos/addons/vlux_pos_catalog
 COPY vlux_pos_credit /opt/vlux/pos/addons/vlux_pos_credit
+COPY vlux_pos_api /opt/vlux/pos/addons/vlux_pos_api
+COPY vlux_pos_app /opt/vlux/pos/addons/vlux_pos_app
 COPY packaging/cloud/entrypoint.sh /usr/local/bin/vlux-entrypoint
 
 RUN chmod 0755 /usr/local/bin/vlux-entrypoint \
