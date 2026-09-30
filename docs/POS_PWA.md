@@ -28,8 +28,14 @@ impuestos, sesiones, corte, contabilidad) vive en el servidor.
   y "Reintentar".
 - Se instala (manifest) y abre sin red (service worker).
 
-**Siguiente entrega:** corte de caja desde la PWA. Crédito, abonos,
-descuentos y devoluciones siguen en el POS de Odoo.
+- **Corte de caja:** efectivo esperado (fondo + ventas + movimientos) y cada
+  forma de pago, lo contado y la diferencia en vivo; aviso anticipado del límite
+  ($30): por encima sólo cierra un encargado (lo decide el servidor, la caja
+  sigue abierta si lo rechaza); no deja cerrar con ventas sin enviar (no
+  estarían en el corte); hoja de corte imprimible a 80 mm con firma.
+
+**Falta en la PWA:** crédito (fiado), abonos, descuentos, devoluciones y
+entradas/salidas de efectivo: siguen en el POS de Odoo.
 
 ## Cómo se decide el total
 
