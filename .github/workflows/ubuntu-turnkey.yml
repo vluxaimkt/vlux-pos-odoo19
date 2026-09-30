@@ -30,6 +30,8 @@ on:
       - "vlux_owner/**"
       - "vlux_pos_catalog/**"
       - "vlux_pos_credit/**"
+      - "vlux_pos_api/**"
+      - "vlux_pos_app/**"
       - "requirements-extra.txt"
 
 env:

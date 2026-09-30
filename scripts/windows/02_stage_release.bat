@@ -37,6 +37,8 @@ if not exist "%STAGED%\addons\vlux_owner\__manifest__.py" exit /b 48
 if not exist "%STAGED%\addons\vlux_facturacion\__manifest__.py" exit /b 49
 if not exist "%STAGED%\addons\vlux_pos_catalog\__manifest__.py" exit /b 50
 if not exist "%STAGED%\addons\vlux_pos_credit\__manifest__.py" exit /b 51
+if not exist "%STAGED%\addons\vlux_pos_api\__manifest__.py" exit /b 52
+if not exist "%STAGED%\addons\vlux_pos_app\__manifest__.py" exit /b 53
 
 echo %STAGED%>"%ODOO_HOME%\last_vlux_staged.txt"
 echo [stage] OK: %STAGED%

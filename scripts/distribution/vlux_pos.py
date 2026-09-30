@@ -19,8 +19,8 @@ from pathlib import Path
 
 PRODUCTIVE_EDITIONS = {
     "local_core": ("vlux_core",),
-    "local_complete": ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_pos_credit"),
-    "cloud_managed": ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_pos_credit"),
+    "local_complete": ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_pos_credit", "vlux_pos_api", "vlux_pos_app"),
+    "cloud_managed": ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_pos_credit", "vlux_pos_api", "vlux_pos_app"),
 }
 DB_NAME = "vlux_pos"
 DB_ROLE = "vlux_app"

@@ -607,7 +607,7 @@ public sealed class VluxPosWorker : BackgroundService
                 "--db_host", "127.0.0.1",
                 "--db_port", PostgresPort.ToString(),
                 "--db_user", OdooDbUser,
-                "-i", "vlux_core,vlux_mobile_scanner,vlux_owner,vlux_pos_catalog,vlux_pos_credit",
+                "-i", "vlux_core,vlux_mobile_scanner,vlux_owner,vlux_pos_catalog,vlux_pos_credit,vlux_pos_api,vlux_pos_app",
                 "--stop-after-init",
                 "--without-demo=all",
             },

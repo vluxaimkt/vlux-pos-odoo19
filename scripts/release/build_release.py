@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PRODUCT_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_pos_credit")
+PRODUCT_ADDONS = ("vlux_core", "vlux_mobile_scanner", "vlux_owner", "vlux_pos_catalog", "vlux_pos_credit", "vlux_pos_api", "vlux_pos_app")
 REGRESSION_ADDONS = ("vlux_facturacion",)
 ADDON_PROFILES = {
     "local_core": ("vlux_core",),
