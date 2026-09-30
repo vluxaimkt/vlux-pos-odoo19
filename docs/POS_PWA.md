@@ -17,13 +17,32 @@ impuestos, sesiones, corte, contabilidad) vive en el servidor.
 - Inicio de sesión del empleado con PIN **sin red** (cajas con `pos_hr`).
 - Abrir la caja con el efectivo inicial.
 - Buscar productos en la copia local por nombre (sin acentos, por prefijos) o
-  por código de barras.
-- Cola de ventas sin red (`outbox`) con reintentos: lista, probada, todavía sin
-  pantalla de cobro que la use.
+  por código de barras; **lector de código**: escribe el código y Enter lo
+  agrega al carrito.
+- **Carrito** que sobrevive a recargar la app: cantidades, quitar, cancelar.
+- **Cobro** en efectivo (montos rápidos, cambio) y tarjeta, o mixto. El
+  cambio sólo sale del efectivo, igual que en el servidor.
+- **Ticket** imprimible a 80 mm con los datos fiscales de la tienda; muestra
+  "folio pendiente" sin internet y el folio del servidor cuando llega.
+- **Ventas por enviar / por revisar** visibles en pantalla, con "Enviar ahora"
+  y "Reintentar".
 - Se instala (manifest) y abre sin red (service worker).
 
-**Siguiente entrega:** carrito, cobro en efectivo y tarjeta con cambio, ticket,
-cola visible con las ventas por revisar, corte de caja. Crédito, abonos,
+**Siguiente entrega:** corte de caja desde la PWA. Crédito, abonos,
+descuentos y devoluciones siguen en el POS de Odoo.
+
+## Cómo se decide el total
+
+- **Con internet**, el total lo cotiza el servidor (`POST /orders/quote`) con
+  el mismo motor de impuestos que contabiliza; la venta se envía con esos
+  precios y con `expected_total`.
+- **Sin internet**, la caja calcula el total con su copia del catálogo y de
+  los impuestos, **sólo si es exacto al centavo**: todos los impuestos de la
+  venta son porcentajes incluidos en el precio (IVA incluido, lo normal en
+  México) y la caja no usa listas de precios. Si no, la caja pide internet en
+  vez de cobrar una cantidad que el servidor contabilizaría distinta.
+- El servidor rechaza (queda "por revisar", nunca se pierde) una venta cuyo
+  total no coincide con `expected_total`. Crédito, abonos,
 descuentos y devoluciones siguen en el POS de Odoo (ver `VLUX_SEGUIMIENTO`: M26,
 M27).
 
