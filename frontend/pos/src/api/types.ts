@@ -10,9 +10,19 @@ export interface Envelope<T> {
   request_id?: string;
 }
 
+export interface TokenInfo {
+  name: string;
+  prefix: string;
+  scopes: string[];
+  /** The register this token is bound to; null when it serves any register. */
+  register_id: number | null;
+  expires_at: string | null;
+  renewable: boolean;
+}
+
 export interface Me {
   api_version: string;
-  token: { name: string; prefix: string; scopes: string[] };
+  token: TokenInfo;
   user: { id: number; name: string; login: string };
   company: { id: number; name: string; country: string | null; currency: string };
   server_time: string;

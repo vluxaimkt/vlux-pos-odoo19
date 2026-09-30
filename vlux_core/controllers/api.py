@@ -228,6 +228,22 @@ def api_route(path, scope, methods=("GET",), summary=None, params=None):
     return decorator
 
 
+def _stamp(value):
+    return fields.Datetime.to_string(value) + "Z" if value else None
+
+
+def _token_payload(token):
+    return {
+        "name": token.name,
+        "prefix": token.token_prefix,
+        "scopes": token.scopes.split(),
+        # The register this token is bound to (null: any register of the company).
+        "register_id": token.pos_config_id.id or None,
+        "expires_at": _stamp(token.expires_at),
+        "renewable": bool(token.lifetime_days),
+    }
+
+
 class VluxApiV1(http.Controller):
 
     @api_route("/me", scope="system:read", summary="Identidad, alcances y tienda del token")
@@ -237,7 +253,7 @@ class VluxApiV1(http.Controller):
         company = request.env.company
         return {
             "api_version": API_VERSION,
-            "token": {"name": token.name, "prefix": token.token_prefix, "scopes": token.scopes.split()},
+            "token": _token_payload(token),
             "user": {"id": user.id, "name": user.name, "login": user.login},
             "company": {
                 "id": company.id,
@@ -247,6 +263,18 @@ class VluxApiV1(http.Controller):
             },
             "server_time": fields.Datetime.to_string(fields.Datetime.now()) + "Z",
         }
+
+    @api_route("/token/rotate", scope=None, methods=("POST",), summary="Renovar el token de este dispositivo")
+    def rotate_token(self, token, **kwargs):
+        """Replace the caller's renewable token and return the new one, once.
+
+        The new token has the same scopes, user and register and a fresh
+        lifetime. The old one keeps working for 24 hours, so a device that
+        lost this answer can simply ask again (the unused replacement is then
+        revoked). ``VALIDATION_ERROR`` when the token is not renewable.
+        """
+        new, raw = token.rotate()
+        return {"token": raw, **_token_payload(new)}
 
     @http.route(
         API_ROOT + "/openapi.json", type="http", auth="public", methods=["GET"],

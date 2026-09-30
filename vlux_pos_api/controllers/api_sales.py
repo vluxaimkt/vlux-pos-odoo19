@@ -16,13 +16,15 @@ from odoo.addons.vlux_core.controllers.api import VluxApiError, api_route, json_
 from odoo.addons.vlux_pos_api.models.pos_order import VluxSaleRefused
 
 
-def _register(register_id):
-    """The register of the token's company, or NOT_FOUND."""
+def _register(register_id, token):
+    """The register of the token's company, or NOT_FOUND; FORBIDDEN for another register's token."""
     config = request.env["pos.config"].search(
         [("id", "=", register_id), ("company_id", "=", request.env.company.id)], limit=1,
     )
     if not config:
         raise VluxApiError("NOT_FOUND", "La caja no existe.")
+    if not token.allows_register(config):
+        raise VluxApiError("FORBIDDEN", "Este token es de otra caja.")
     return config
 
 
@@ -113,11 +115,12 @@ def _partner(partner_id):
     return partner
 
 
-def _register_from_body(body):
+def _register_from_body(body, token):
     try:
-        return _register(int(body.get("register_id")))
+        register_id = int(body.get("register_id"))
     except (TypeError, ValueError):
         raise VluxApiError("VALIDATION_ERROR", "register_id debe ser un entero.")
+    return _register(register_id, token)
 
 
 class VluxApiSales(http.Controller):
@@ -132,7 +135,7 @@ class VluxApiSales(http.Controller):
         ``employee_login`` says whether sales, openings and closings must carry
         an ``employee_id``; ``max_difference`` is the closing limit.
         """
-        return _register_state(_register(register_id))
+        return _register_state(_register(register_id, token))
 
     @api_route("/registers/<int:register_id>/employees", scope="orders:write",
                summary="Empleados que pueden usar la caja, con PIN cifrado")
@@ -142,7 +145,7 @@ class VluxApiSales(http.Controller):
         The register checks a PIN without the network, as the Odoo POS does.
         Empty when the register does not use employee login.
         """
-        return {"items": _register(register_id)._vlux_api_employees()}
+        return {"items": _register(register_id, token)._vlux_api_employees()}
 
     @api_route("/registers/<int:register_id>/session/open", scope="session:manage", methods=("POST",),
                summary="Abrir la caja con el efectivo inicial")
@@ -153,7 +156,7 @@ class VluxApiSales(http.Controller):
         ``already_open: true`` and nothing changes. ``CONFLICT`` while the
         register is being closed.
         """
-        config = _register(register_id)
+        config = _register(register_id, token)
         body = json_body()
         session = config.current_session_id
         if session and session.state == "opened":
@@ -176,7 +179,7 @@ class VluxApiSales(http.Controller):
                summary="Lo esperado en el corte de la sesión abierta")
     def closing_summary(self, token, register_id, **kwargs):
         """What the closing expects: sales, cash (opening, sales, moves) and other methods."""
-        config = _register(register_id)
+        config = _register(register_id, token)
         session = config.current_session_id
         if not session:
             raise VluxApiError("NO_OPEN_SESSION", "La caja no tiene una sesión abierta.")
@@ -213,7 +216,7 @@ class VluxApiSales(http.Controller):
         ``session_id`` must be the open session, so a stale screen cannot
         close a session it never saw.
         """
-        config = _register(register_id)
+        config = _register(register_id, token)
         body = json_body()
         session = config.current_session_id
         if not session:
@@ -271,7 +274,7 @@ class VluxApiSales(http.Controller):
         the catalog.
         """
         body = json_body()
-        config = _register_from_body(body)
+        config = _register_from_body(body, token)
         quote = config._vlux_api_quote(body.get("lines"), _partner(body.get("partner_id")))
         return _quote_payload(quote)
 
@@ -288,7 +291,7 @@ class VluxApiSales(http.Controller):
         nothing is written and the register keeps the sale queued.
         """
         body = json_body()
-        config = _register_from_body(body)
+        config = _register_from_body(body, token)
         try:
             order, duplicate = request.env["pos.order"]._vlux_api_register_sale(config, body)
         except VluxSaleRefused as refusal:
@@ -299,6 +302,6 @@ class VluxApiSales(http.Controller):
     def get_order(self, token, uuid, **kwargs):
         """The sale recorded with ``uuid``: how a register confirms what reached the server."""
         order = request.env["pos.order"]._vlux_api_find(uuid)
-        if not order or order.company_id != request.env.company:
+        if not order or order.company_id != request.env.company or not token.allows_register(order.config_id):
             raise VluxApiError("NOT_FOUND", _("No hay una venta con ese uuid."))
         return order._vlux_api_payload()

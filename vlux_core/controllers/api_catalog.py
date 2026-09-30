@@ -386,6 +386,9 @@ class VluxApiCatalog(http.Controller):
         company = request.env.company
         currency = company.currency_id
         registers = request.env["pos.config"].search([("company_id", "=", company.id)], order="name")
+        if token.pos_config_id:
+            # A register's token only sees its own register.
+            registers = registers.filtered(token.allows_register)
         return {
             "company": {
                 "id": company.id,

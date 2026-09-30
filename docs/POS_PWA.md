@@ -10,7 +10,8 @@ impuestos, sesiones, corte, contabilidad) vive en el servidor.
 **Estructura (primera entrega).** Funciona hoy:
 
 - Vincular el equipo a una caja con un token de la API (Ajustes → API VLUX →
-  Emitir token; alcances `system:read catalog:read orders:write session:manage`).
+  Emitir token, eligiendo la caja; alcances `system:read catalog:read
+  orders:write session:manage`). El token decide qué caja es el equipo.
 - Descargar el catálogo y los clientes a IndexedDB con sincronización
   incremental (cursor, bajas, `RESYNC_REQUIRED`), cada 5 minutos con red.
 - Inicio de sesión del empleado con PIN **sin red** (cajas con `pos_hr`).
@@ -86,9 +87,13 @@ con certificado propio no debe quedar bloqueada por él.
 **En la app:**
 
 - **Mínimo privilegio del token:** la caja rechaza un token al que le falte un
-  permiso **o que tenga permisos de más** (`catalog:write`, `dashboard:read`).
-  Si el equipo se pierde, el token no sirve para editar el catálogo ni ver el
-  negocio, y se revoca en Odoo.
+  permiso **o que tenga permisos de más** (`catalog:write`, `dashboard:read`),
+  y uno que **no esté atado a una caja**: el servidor no deja usarlo en otra.
+  Si el equipo se pierde, el token no sirve para editar el catálogo, ver el
+  negocio ni operar otra caja, y se revoca en Odoo.
+- **Renovación automática:** el token de una caja caduca a los 30 días y la
+  app lo renueva sola cuando le quedan menos de 15 (`POST /token/rotate`); un
+  token robado deja de servir por sí solo.
 - **Formato del token** revisado antes de enviarlo: un pegado equivocado (una
   contraseña, un texto) nunca sale del equipo.
 - **PIN:** tras 5 PIN incorrectos seguidos el teclado se bloquea 30 s, luego
@@ -114,8 +119,8 @@ abre con la red cortada.
   en el mismo origen podría leerlo. Lo impiden la CSP y Trusted Types; el daño
   lo limitan el mínimo privilegio y la revocación.
 - El PIN se valida sin red con su SHA-1, como en el POS de Odoo (F35).
-- **Pendiente (F36):** atar cada token a una sola caja en el servidor, y dar
-  a los tokens de caja caducidad con renovación automática.
+- Un equipo apagado más de 30 días tiene que volver a vincularse con un token
+  nuevo (su token caducó).
 
 ## Desarrollo
 
