@@ -9,3 +9,20 @@ html,
 body {
   overscroll-behavior: none;
 }
+
+/* The ticket prints alone, at 80 mm (thermal printer roll). */
+@page {
+  size: 80mm auto;
+  margin: 0;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff;
+  }
+  .receipt {
+    width: 80mm;
+    padding: 2mm;
+  }
+}

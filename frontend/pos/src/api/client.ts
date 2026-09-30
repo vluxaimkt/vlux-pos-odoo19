@@ -1,3 +1,4 @@
+import type { TaxInfo } from "../sale/pricing";
 import type {
   ClosingSummary, Customer, Employee, Envelope, FeedPage, Me, OrderRequest, OrderResult, Product, Quote,
   RegisterState, SaleLine, StoreConfig, TokenInfo,
@@ -121,6 +122,10 @@ export class ApiClient {
 
   customersPage(cursor?: string, limit = 500) {
     return this.request<FeedPage<Customer>>("GET", `/catalog/customers?${feedQuery(cursor, limit)}`);
+  }
+
+  taxes() {
+    return this.request<{ items: TaxInfo[] }>("GET", "/catalog/taxes");
   }
 
   registerState(registerId: number) {

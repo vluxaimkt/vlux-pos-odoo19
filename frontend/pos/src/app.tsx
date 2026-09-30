@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 
 import { ApiClient, ApiError } from "./api/client";
 import type { Employee, RegisterState } from "./api/types";
@@ -8,7 +8,9 @@ import { LoginScreen } from "./screens/LoginScreen";
 import { RegisterScreen } from "./screens/RegisterScreen";
 import { SellScreen } from "./screens/SellScreen";
 import { SetupScreen } from "./screens/SetupScreen";
-import { META_EMPLOYEES, META_SETUP, META_TOKEN, PosContext, type PosContextValue, type Setup, usePos } from "./state";
+import type { TaxInfo } from "./sale/pricing";
+import { QueueScreen } from "./screens/QueueScreen";
+import { META_EMPLOYEES, META_SETUP, META_TAXES, META_TOKEN, PosContext, type PosContextValue, type Setup, usePos } from "./state";
 import { syncFeed } from "./sync/catalog";
 import { flushOutbox } from "./sync/outbox";
 import { renewIfDue } from "./sync/token";
@@ -58,6 +60,8 @@ function Register({ db, paired, onForget, onRenewed }: {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [registerState, setRegisterState] = useState<RegisterState | null>(null);
   const [catalogReady, setCatalogReady] = useState(false);
+  const [taxes, setTaxes] = useState<Map<number, TaxInfo>>(new Map());
+  const [view, setView] = useState<"register" | "queue">("register");
   const [status, setStatus] = useState({ syncing: false, pending: 0, attention: 0, error: null as string | null });
 
   // Unpairing wipes everything this device knows about the store (token,
@@ -91,6 +95,7 @@ function Register({ db, paired, onForget, onRenewed }: {
     void (async () => {
       setEmployees((await getMeta<Employee[]>(db, META_EMPLOYEES)) ?? []);
       setRegisterState((await getMeta<RegisterState>(db, META_REGISTER_STATE)) ?? null);
+      setTaxes(new Map(((await getMeta<TaxInfo[]>(db, META_TAXES)) ?? []).map((tax) => [tax.id, tax])));
       setCatalogReady((await db.products.count()) > 0);
     })();
   }, [db]);
@@ -116,6 +121,9 @@ function Register({ db, paired, onForget, onRenewed }: {
       if (renewed) onRenewed(renewed);
       await syncFeed(client, db, "products");
       await syncFeed(client, db, "customers");
+      const { items } = await client.taxes();
+      await setMeta(db, META_TAXES, items);
+      setTaxes(new Map(items.map((tax) => [tax.id, tax])));
       await refreshRegister();
       setCatalogReady(true);
       setStatus((s) => ({ ...s, error: null }));
@@ -129,8 +137,14 @@ function Register({ db, paired, onForget, onRenewed }: {
     }
   }, [client, db, refreshRegister, onRenewed]);
 
+  // One send at a time: the timer and "Enviar ahora" must not overlap
+  // (a double send would be harmless, the uuid dedupes it, but wasteful).
+  const flushing = useRef<Promise<unknown> | null>(null);
   const flush = useCallback(async () => {
-    if (online) await flushOutbox(client, db);
+    if (online) {
+      flushing.current ??= flushOutbox(client, db).finally(() => { flushing.current = null; });
+      await flushing.current;
+    }
     const pending = await db.outbox.where("status").equals("pending").count();
     const attention = await db.outbox.where("status").equals("attention").count();
     setStatus((s) => ({ ...s, pending, attention }));
@@ -140,7 +154,8 @@ function Register({ db, paired, onForget, onRenewed }: {
   useInterval(flush, OUTBOX_EVERY_MS);
 
   const context: PosContextValue = {
-    db, client, setup: paired.setup, employees, employee, online, setEmployee, forget,
+    db, client, setup: paired.setup, employees, employee, online, registerState, taxes, setEmployee, forget,
+    flushNow: flush,
   };
 
   const waiting = online ? null : "Conéctate a internet para la primera carga de esta caja.";
@@ -148,12 +163,13 @@ function Register({ db, paired, onForget, onRenewed }: {
   if (!catalogReady) body = <Splash text={waiting ?? "Descargando catálogo…"} />;
   else if (!registerState) body = <Splash text={waiting ?? "Consultando la caja…"} />;
   else if (registerState.employee_login && !employee) body = <LoginScreen />;
+  else if (view === "queue") body = <QueueScreen onClose={() => setView("register")} />;
   else body = <Opened state={registerState} onOpened={applyRegisterState} />;
 
   return (
     <PosContext.Provider value={context}>
       <div class="min-h-screen flex flex-col bg-base-200">
-        <Header status={status} />
+        <Header status={status} onQueue={() => setView("queue")} />
         {status.error && <div role="alert" class="alert alert-error rounded-none">{status.error}</div>}
         <main class="flex-1">{body}</main>
       </div>
@@ -165,21 +181,25 @@ function Opened({ state, onOpened }: { state: RegisterState; onOpened: (state: R
   return state.session?.state === "opened" ? <SellScreen /> : <RegisterScreen state={state} onOpened={onOpened} />;
 }
 
-function Header({ status }: { status: { syncing: boolean; pending: number; attention: number } }) {
+function Header({ status, onQueue }: {
+  status: { syncing: boolean; pending: number; attention: number };
+  onQueue: () => void;
+}) {
   const { setup, employee, online, setEmployee, forget } = usePos();
   return (
-    <header class="navbar bg-base-100 shadow-sm gap-2">
+    <header class="navbar bg-base-100 shadow-sm gap-2 print:hidden">
       <div class="flex-1 flex flex-col items-start">
         <span class="font-bold">{setup.register.name}</span>
         <span class="text-xs opacity-60">{setup.store.company.name}</span>
       </div>
-      {status.attention > 0 && <span class="badge badge-error">{status.attention} por revisar</span>}
-      {status.pending > 0 && <span class="badge badge-warning">{status.pending} por enviar</span>}
+      {status.attention > 0 && <button class="badge badge-error" onClick={onQueue}>{status.attention} por revisar</button>}
+      {status.pending > 0 && <button class="badge badge-warning" onClick={onQueue}>{status.pending} por enviar</button>}
       {status.syncing && <span class="loading loading-dots loading-sm" aria-label="Sincronizando" />}
       <span class={`badge ${online ? "badge-success" : "badge-neutral"}`}>{online ? "En línea" : "Sin internet"}</span>
       <div class="dropdown dropdown-end">
         <button class="btn btn-ghost btn-sm" tabIndex={0}>{employee?.name ?? "Menú"}</button>
         <ul tabIndex={0} class="dropdown-content menu bg-base-100 rounded-box z-10 w-56 p-2 shadow">
+          <li><button onClick={onQueue}>Ventas por enviar</button></li>
           {employee && <li><button onClick={() => setEmployee(null)}>Cambiar de empleado</button></li>}
           <li><button onClick={() => { if (confirm("¿Desvincular este equipo? Se borran de este equipo el token, el catálogo, los clientes y los empleados. Las ventas por enviar se conservan.")) void forget(); }}>Desvincular equipo</button></li>
         </ul>
