@@ -9,6 +9,7 @@ import { RegisterScreen } from "./screens/RegisterScreen";
 import { SellScreen } from "./screens/SellScreen";
 import { SetupScreen } from "./screens/SetupScreen";
 import type { TaxInfo } from "./sale/pricing";
+import { CloseScreen } from "./screens/CloseScreen";
 import { QueueScreen } from "./screens/QueueScreen";
 import { META_EMPLOYEES, META_SETUP, META_TAXES, META_TOKEN, PosContext, type PosContextValue, type Setup, usePos } from "./state";
 import { syncFeed } from "./sync/catalog";
@@ -61,7 +62,7 @@ function Register({ db, paired, onForget, onRenewed }: {
   const [registerState, setRegisterState] = useState<RegisterState | null>(null);
   const [catalogReady, setCatalogReady] = useState(false);
   const [taxes, setTaxes] = useState<Map<number, TaxInfo>>(new Map());
-  const [view, setView] = useState<"register" | "queue">("register");
+  const [view, setView] = useState<"register" | "queue" | "closing">("register");
   const [status, setStatus] = useState({ syncing: false, pending: 0, attention: 0, error: null as string | null });
 
   // Unpairing wipes everything this device knows about the store (token,
@@ -164,12 +165,28 @@ function Register({ db, paired, onForget, onRenewed }: {
   else if (!registerState) body = <Splash text={waiting ?? "Consultando la caja…"} />;
   else if (registerState.employee_login && !employee) body = <LoginScreen />;
   else if (view === "queue") body = <QueueScreen onClose={() => setView("register")} />;
+  else if (view === "closing") {
+    body = (
+      <CloseScreen
+        onCancel={() => setView("register")}
+        onQueue={() => setView("queue")}
+        onClosed={(state) => {
+          applyRegisterState(state);
+          setView("register");
+        }}
+      />
+    );
+  }
   else body = <Opened state={registerState} onOpened={applyRegisterState} />;
 
   return (
     <PosContext.Provider value={context}>
       <div class="min-h-screen flex flex-col bg-base-200">
-        <Header status={status} onQueue={() => setView("queue")} />
+        <Header
+          status={status}
+          onQueue={() => setView("queue")}
+          onClosing={registerState?.session?.state === "opened" ? () => setView("closing") : null}
+        />
         {status.error && <div role="alert" class="alert alert-error rounded-none">{status.error}</div>}
         <main class="flex-1">{body}</main>
       </div>
@@ -181,9 +198,10 @@ function Opened({ state, onOpened }: { state: RegisterState; onOpened: (state: R
   return state.session?.state === "opened" ? <SellScreen /> : <RegisterScreen state={state} onOpened={onOpened} />;
 }
 
-function Header({ status, onQueue }: {
+function Header({ status, onQueue, onClosing }: {
   status: { syncing: boolean; pending: number; attention: number };
   onQueue: () => void;
+  onClosing: (() => void) | null;
 }) {
   const { setup, employee, online, setEmployee, forget } = usePos();
   return (
@@ -200,6 +218,7 @@ function Header({ status, onQueue }: {
         <button class="btn btn-ghost btn-sm" tabIndex={0}>{employee?.name ?? "Menú"}</button>
         <ul tabIndex={0} class="dropdown-content menu bg-base-100 rounded-box z-10 w-56 p-2 shadow">
           <li><button onClick={onQueue}>Ventas por enviar</button></li>
+          {onClosing && <li><button onClick={onClosing}>Corte de caja</button></li>}
           {employee && <li><button onClick={() => setEmployee(null)}>Cambiar de empleado</button></li>}
           <li><button onClick={() => { if (confirm("¿Desvincular este equipo? Se borran de este equipo el token, el catálogo, los clientes y los empleados. Las ventas por enviar se conservan.")) void forget(); }}>Desvincular equipo</button></li>
         </ul>
