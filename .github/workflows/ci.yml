@@ -53,6 +53,13 @@ jobs:
             echo "::error::vlux_pos_app/static/dist is stale: run 'npm run build' in frontend/pos and commit it."
             exit 1
           }
+      - name: Keep the CI build for comparison
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pos-pwa-dist-ci
+          path: vlux_pos_app/static/dist
+          retention-days: 7
 
   test:
     runs-on: ubuntu-24.04
