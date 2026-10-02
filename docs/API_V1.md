@@ -150,6 +150,11 @@ print(raw)   # única vez
 | POST | `/orders/quote` | `orders:write` | Precios, impuestos y total de un carrito (no registra nada) |
 | POST | `/orders` | `orders:write` | Registrar una venta pagada, idempotente por `uuid` |
 | GET | `/orders/<uuid>` | `orders:write` | Consultar una venta por su `uuid` |
+| GET | `/credit/customers` | `catalog:read` | Clientes con crédito autorizado o que deben: límite, saldo, disponible |
+| GET | `/credit/customers/<id>` | `catalog:read` | Crédito de un cliente, al momento |
+| POST | `/credit/customers/<id>` | `orders:write` | Autorizar o retirar crédito y fijar límite (sólo encargado o dueño) |
+| POST | `/credit/abonos` | `orders:write` | Abono de un cliente, idempotente por `uuid` |
+| POST | `/customers` | `orders:write` | Alta de cliente desde la caja (permiso de Odoo *Creación de contactos*) |
 
 `/me` es también la prueba de vida que debe ejecutar una caja al arrancar:
 confirma token, tienda, moneda y hora del servidor.
@@ -328,6 +333,35 @@ y pagos para imprimir el ticket.
 otra sesión). La regla de diferencia máxima (D6, $30) la aplica el servidor: por
 encima del límite sólo cierra un encargado (el empleado que cuenta); si no,
 `CLOSING_REFUSED` y la caja **sigue abierta**.
+
+### 4.4 Crédito (fiado)
+
+Módulo `vlux_pos_credit`, con las mismas reglas que en el POS de Odoo (D7) y
+sus mismos métodos:
+
+- **Saldos.** `GET /credit/customers` lista a los clientes con crédito
+  autorizado o con saldo: `allowed`, `limit` (0 = sin límite), `balance`,
+  `available` (`null` sin límite) y `over_limit`. El saldo sale de los pagos
+  a cuenta de cliente del POS (ventas a crédito suman, abonos y devoluciones
+  restan), igual que en la caja de Odoo y el panel del dueño.
+- **Autorizar.** `POST /credit/customers/<id>`
+  `{"register_id", "employee_id", "allowed": true, "limit": 1000}`: sólo el
+  encargado o el dueño (si no, `FORBIDDEN`). Queda registrado en el cliente.
+- **Vender a crédito.** `POST /orders` con un pago de la forma de pago
+  *Crédito* (tipo `pay_later`) y `partner_id` (obligatorio). El servidor **no
+  rechaza** una venta a crédito que rompe una regla (la vendió una cajera, el
+  cliente no está autorizado o rebasa su límite): la guarda y la **marca** para
+  el dueño, porque la mercancía ya salió. La respuesta trae `credit` con
+  `amount`, `previous_balance`, `new_balance`, `flagged` e `issues` para el
+  ticket "VENTA A CRÉDITO".
+- **Abonos.** `POST /credit/abonos`
+  `{"uuid", "register_id", "partner_id", "amount", "payment_method_id", "employee_id"}`:
+  cualquier cajera, en efectivo o tarjeta, nunca más de lo que debe; entra a
+  la sesión abierta, así que el efectivo cuenta en el corte. Reenviar el
+  mismo `uuid` devuelve el mismo abono. Sin caja abierta: `NO_OPEN_SESSION`.
+- **Clientes nuevos.** `POST /customers` `{"name", "phone"?, "email"?, "vat"?}`
+  se crea como el usuario del token: decide el permiso de Odoo *Creación de
+  contactos*, igual que en el POS de Odoo.
 
 La fase D añade métricas y diagnóstico de la API (ver
 [PLAN_INICIATIVAS.md](PLAN_INICIATIVAS.md)).
