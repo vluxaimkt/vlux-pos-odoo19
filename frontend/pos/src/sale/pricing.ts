@@ -18,7 +18,10 @@ export interface PricedLine {
   productId: number;
   name: string;
   qty: number;
+  /** The unit price sent to the server (as the catalog holds it). */
   priceUnit: number;
+  /** What one unit costs the customer, taxes included: what the ticket shows. */
+  displayUnit: number;
   total: number;
   tax: number;
 }
@@ -49,6 +52,7 @@ export function fromQuote(cart: Cart, quote: Quote): Pricing {
       name: quoted.name,
       qty: quoted.qty,
       priceUnit: quoted.price_unit,
+      displayUnit: round(quoted.price_subtotal_incl / quoted.qty),
       total: quoted.price_subtotal_incl,
       tax: round(quoted.price_subtotal_incl - quoted.price_subtotal),
     };
@@ -83,7 +87,7 @@ export function localPricing(cart: Cart, taxes: Map<number, TaxInfo>, usesPricel
     const tax = simple && rate ? round(total - total / (1 + rate)) : 0;
     return {
       lineUuid: line.uuid, productId: line.product.id, name: line.product.name, qty: line.qty,
-      priceUnit: line.product.list_price, total, tax,
+      priceUnit: line.product.list_price, displayUnit: round(total / line.qty), total, tax,
     };
   });
   const total = sum(lines.map((line) => line.total));

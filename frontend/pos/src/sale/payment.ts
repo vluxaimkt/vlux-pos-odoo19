@@ -45,3 +45,22 @@ export function cashSuggestions(remaining: number): number[] {
   }
   return [...options].sort((a, b) => a - b);
 }
+
+export type AddPayment = { payments: Payment[]; error: null } | { payments: null; error: string };
+
+/**
+ * Add a payment with `method`. An empty amount pays what is left. Cash may
+ * exceed it (the excess is change); any other method may not, so a mixed
+ * payment is: type what one method covers, pick it, then pay the rest.
+ */
+export function addPayment(total: number, payments: Payment[], method: Payment["method"], typed: string, decimals = 2): AddPayment {
+  const { remaining } = paymentState(total, payments);
+  if (remaining <= 0) return { payments: null, error: "La venta ya está pagada." };
+  const text = typed.trim().replace(",", ".");
+  const amount = text === "" ? remaining : round(Number(text), decimals);
+  if (!Number.isFinite(amount) || amount <= 0) return { payments: null, error: "Escribe un monto mayor que cero." };
+  if (!method.is_cash && amount > remaining) {
+    return { payments: null, error: `Con ${method.name} no se puede cobrar más de lo que falta.` };
+  }
+  return { payments: [...payments, { method, amount }], error: null };
+}

@@ -225,6 +225,7 @@ class VluxApiSales(http.Controller):
             raise VluxApiError("CONFLICT", "La sesión indicada no es la sesión abierta de la caja.",
                                details={"session_id": session.id})
         employee = config._vlux_api_employee(body.get("employee_id"))
+        config._vlux_api_check_closer(employee)
         notes = _text(body.get("notes"), "notes")
         if employee:
             # The person who counts is the one the closing rules judge.

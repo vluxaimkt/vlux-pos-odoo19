@@ -40,6 +40,13 @@ export function SellScreen() {
     void setMeta(db, META_CART, next);
   }
 
+  // A notice clears itself; typing or scanning again also clears it.
+  useEffect(() => {
+    if (!notice) return;
+    const id = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(id);
+  }, [notice]);
+
   useEffect(() => {
     let current = true;
     void (async () => {
@@ -121,13 +128,16 @@ export function SellScreen() {
       <div class="flex flex-col gap-3">
         <input
           ref={search}
-          class="input input-bordered input-lg w-full"
+          class="input input-lg w-full"
           type="search"
           placeholder="Escanea o busca un producto"
           autofocus
           autocomplete="off"
           value={query}
-          onInput={(event) => setQuery(event.currentTarget.value)}
+          onInput={(event) => {
+            setQuery(event.currentTarget.value);
+            setNotice(null);
+          }}
           onKeyDown={(event) => void onEnter(event)}
         />
         {notice && <div role="alert" class="alert alert-warning">{notice}</div>}

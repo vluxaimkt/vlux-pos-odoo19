@@ -215,8 +215,9 @@ function Header({ status, onQueue, onClosing }: {
       {status.syncing && <span class="loading loading-dots loading-sm" aria-label="Sincronizando" />}
       <span class={`badge ${online ? "badge-success" : "badge-neutral"}`}>{online ? "En línea" : "Sin internet"}</span>
       <div class="dropdown dropdown-end">
-        <button class="btn btn-ghost btn-sm" tabIndex={0}>{employee?.name ?? "Menú"}</button>
-        <ul tabIndex={0} class="dropdown-content menu bg-base-100 rounded-box z-10 w-56 p-2 shadow">
+        <button class="btn btn-ghost btn-sm" tabIndex={0}>{employee?.name ?? "Menú"} ▾</button>
+        <ul tabIndex={0} class="dropdown-content menu bg-base-200 border border-base-300 rounded-box z-20 w-60 p-2 mt-2 shadow-2xl"
+          onClick={closeMenu}>
           <li><button onClick={onQueue}>Ventas por enviar</button></li>
           {onClosing && <li><button onClick={onClosing}>Corte de caja</button></li>}
           {employee && <li><button onClick={() => setEmployee(null)}>Cambiar de empleado</button></li>}
@@ -225,6 +226,11 @@ function Header({ status, onQueue, onClosing }: {
       </div>
     </header>
   );
+}
+
+/** A daisyUI dropdown stays open while it has focus: drop it after a choice. */
+function closeMenu() {
+  (document.activeElement as HTMLElement | null)?.blur();
 }
 
 function Splash({ text = "Cargando…" }: { text?: string }) {
