@@ -56,6 +56,25 @@ cobrar (prueba 8). Confirma con el dueño cómo están capturados.
 | 17 | Revocar | En Odoo revocar el token (Ajustes → API VLUX → Tokens) y esperar a la siguiente sincronización (≤ 5 min) o recargar | La app avisa que el token fue revocado |
 | 18 | Instalada y sin red | Cerrar la app instalada, desconectar internet, abrirla | Abre y deja vender (con precios con IVA incluido) |
 
+## Crédito (fiado) y clientes
+
+Requisitos: la caja tiene la forma de pago **Crédito**; entra como
+**encargado** (con PIN) para autorizar y fiar; los abonos los recibe cualquier
+cajera.
+
+| # | Prueba | Qué hacer | Qué debe pasar |
+| --- | --- | --- | --- |
+| 19 | Lista de clientes | Menú → *Clientes y crédito* | Clientes con crédito: "Debe $X", límite y disponible; arriba el total por cobrar. Buscar por nombre o teléfono encuentra a cualquier cliente |
+| 20 | Cliente nuevo | *Nuevo cliente*: nombre y teléfono → *Guardar* | Aparece en la lista; en Odoo existe el contacto |
+| 21 | Autorizar crédito | Como encargado: en el cliente → *Crédito…* → activar, límite 300 → *Guardar*. Luego como cajera: el botón *Crédito…* no aparece | El cliente muestra "Límite $300 · disponible $300"; una cajera no puede autorizar |
+| 22 | Venta a crédito | Como encargado: en la venta → *Elegir cliente* → el autorizado; productos; *Cobrar* → *Fiar a …* → *Terminar venta* | Ticket **VENTA A CRÉDITO** con cliente, saldo anterior, esta compra, saldo nuevo y línea de firma; en la lista ahora debe esa cantidad |
+| 23 | Rebasar el límite | Fiar una venta mayor a lo disponible | Mensaje "… debe $X y su límite es $Y: esta venta de $Z lo rebasa…"; no se fía (puede pagar una parte en efectivo y fiar el resto) |
+| 24 | Cajera no fía | Como cajera, con cliente elegido, *Cobrar* | No aparece *Fiar a…*; dice "Sólo el encargado o el dueño pueden fiar" |
+| 25 | Abono | Como cajera: cliente que debe → *Abonar* → monto parcial en efectivo → *Registrar abono* | Ticket **ABONO A CUENTA** con saldo anterior, abono y saldo nuevo; el saldo baja en la lista |
+| 26 | Liquidar | *Abonar* → *Liquidar todo* → *Registrar abono* | "CUENTA LIQUIDADA"; el cliente ya no debe |
+| 27 | Corte con fiado y abonos | Corte de caja después de 22–26 | El fiado del día aparece aparte ("no entra al cajón"); el efectivo esperado incluye los abonos en efectivo |
+| 28 | Mismo saldo en Odoo | En el POS de Odoo, lista de clientes, y en la app del dueño (Créditos) | El mismo saldo que en la PWA |
+
 ## Si algo falla
 
 - Anota la hora, qué hiciste y qué salió; si hay venta, el folio o los
