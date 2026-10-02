@@ -5,10 +5,11 @@ import type { OrderRequest } from "../api/types";
 import { getMeta, type ProductRow, setMeta } from "../db/db";
 import { productByBarcode, searchProducts } from "../db/search";
 import { formatMoney } from "../lib/money";
-import { addProduct, type Cart, emptyCart, itemCount, removeLine, setQty } from "../sale/cart";
+import { addProduct, type Cart, emptyCart, itemCount, removeLine, setCustomer, setQty } from "../sale/cart";
 import { fromQuote, localPricing, type Pricing } from "../sale/pricing";
 import { META_CART, usePos } from "../state";
-import { PayScreen } from "./PayScreen";
+import { CreditLine, CustomersScreen } from "./CustomersScreen";
+import { type CreditTicket, PayScreen } from "./PayScreen";
 import { ReceiptScreen } from "./ReceiptScreen";
 import { explain } from "./SetupScreen";
 
@@ -16,12 +17,13 @@ const newId = () => crypto.randomUUID();
 
 type Stage =
   | { name: "cart" }
+  | { name: "customer" }
   | { name: "pay"; pricing: Pricing }
-  | { name: "receipt"; order: OrderRequest; pricing: Pricing };
+  | { name: "receipt"; order: OrderRequest; pricing: Pricing; credit: CreditTicket | null };
 
 /** Ring up a sale: scan or search, adjust the cart, charge, print the ticket. */
 export function SellScreen() {
-  const { db, client, setup, online, taxes } = usePos();
+  const { db, client, setup, online, taxes, credit } = usePos();
   const [cart, setCart] = useState<Cart | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ProductRow[]>([]);
@@ -90,6 +92,7 @@ export function SellScreen() {
           const quote = await client.quote({
             register_id: setup.register.id,
             lines: cart.lines.map((line) => ({ uuid: line.uuid, product_id: line.product.id, qty: line.qty })),
+            ...(cart.customer ? { partner_id: cart.customer.id } : {}),
           });
           pricing = fromQuote(cart, quote);
         } catch (error) {
@@ -109,17 +112,28 @@ export function SellScreen() {
     }
   }
 
-  function finished(order: OrderRequest, pricing: Pricing) {
+  function finished(order: OrderRequest, pricing: Pricing, creditTicket: CreditTicket | null) {
     update(emptyCart(newId));
-    setStage({ name: "receipt", order, pricing });
+    setStage({ name: "receipt", order, pricing, credit: creditTicket });
   }
 
   if (!cart) return null;
+  if (stage.name === "customer") {
+    return (
+      <CustomersScreen
+        onClose={() => setStage({ name: "cart" })}
+        onPick={(customer) => {
+          update(setCustomer(cart, customer));
+          setStage({ name: "cart" });
+        }}
+      />
+    );
+  }
   if (stage.name === "pay") {
     return <PayScreen cart={cart} pricing={stage.pricing} onBack={() => setStage({ name: "cart" })} onPaid={finished} />;
   }
   if (stage.name === "receipt") {
-    return <ReceiptScreen order={stage.order} pricing={stage.pricing} onNext={() => setStage({ name: "cart" })} />;
+    return <ReceiptScreen order={stage.order} pricing={stage.pricing} credit={stage.credit} onNext={() => setStage({ name: "cart" })} />;
   }
 
   const estimate = localPricing(cart, taxes, setup.register.use_pricelist);
@@ -160,6 +174,18 @@ export function SellScreen() {
       <aside class="card bg-base-100 shadow">
         <div class="card-body gap-2 p-4">
           <h2 class="card-title">Venta <span class="badge">{itemCount(cart)}</span></h2>
+          <div class="flex items-start gap-2 text-sm">
+            {cart.customer ? (
+              <div class="flex-1">
+                <div>Cliente: <strong>{cart.customer.name}</strong></div>
+                <CreditLine row={credit.get(cart.customer.id)} money={(n) => formatMoney(n, setup.store.currency)} />
+              </div>
+            ) : (
+              <span class="flex-1 opacity-70">Sin cliente</span>
+            )}
+            <button class="btn btn-xs" onClick={() => setStage({ name: "customer" })}>{cart.customer ? "Cambiar" : "Elegir cliente"}</button>
+            {cart.customer && <button class="btn btn-xs btn-ghost" aria-label="Quitar cliente" onClick={() => update(setCustomer(cart, null))}>✕</button>}
+          </div>
           {!cart.lines.length && <p class="opacity-60">Escanea un producto para empezar.</p>}
           <ul class="flex flex-col gap-2 max-h-[55vh] overflow-y-auto">
             {cart.lines.map((line) => (

@@ -34,8 +34,17 @@ impuestos, sesiones, corte, contabilidad) vive en el servidor.
   sigue abierta si lo rechaza); no deja cerrar con ventas sin enviar (no
   estarían en el corte); hoja de corte imprimible a 80 mm con firma.
 
-**Falta en la PWA:** crédito (fiado), abonos, descuentos, devoluciones y
-entradas/salidas de efectivo: siguen en el POS de Odoo.
+- **Clientes y crédito (fiado)**, como en el POS de Odoo (D7): lista de
+  clientes con lo que deben, su límite y lo disponible, búsqueda por nombre o
+  teléfono, alta de cliente; el encargado autoriza crédito y fija el límite;
+  venta a crédito ("Fiar a…", sólo encargado y con cliente elegido, respeta el
+  límite) con ticket **VENTA A CRÉDITO** (saldo anterior, esta compra, saldo
+  nuevo, firma); **abonos** de cualquier cajera en efectivo o tarjeta, con
+  "Liquidar todo" y ticket **ABONO A CUENTA** ("CUENTA LIQUIDADA"). El corte
+  muestra el fiado del día aparte del efectivo.
+
+**Falta en la PWA:** descuentos, devoluciones y entradas/salidas de efectivo:
+siguen en el POS de Odoo.
 
 ## Cómo se decide el total
 

@@ -26,6 +26,7 @@ export function buildOrder(cart: Cart, pricing: Pricing, payments: Payment[], co
     register_id: context.registerId,
     ...(context.sessionId ? { session_id: context.sessionId } : {}),
     ...(context.employeeId ? { employee_id: context.employeeId } : {}),
+    ...(cart.customer ? { partner_id: cart.customer.id } : {}),
     lines: pricing.lines.map((line) => ({
       uuid: line.lineUuid,
       product_id: line.productId,

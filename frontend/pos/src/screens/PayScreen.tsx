@@ -1,13 +1,23 @@
 import { useState } from "preact/hooks";
 
-import type { OrderRequest, PaymentMethod } from "../api/types";
+import { isRetryable } from "../api/client";
+import type { CreditRow, OrderRequest, PaymentMethod } from "../api/types";
 import { formatMoney } from "../lib/money";
 import type { Cart } from "../sale/cart";
+import { creditRefusal, withBalance } from "../sale/credit";
+import { round } from "../sale/money";
 import { buildOrder } from "../sale/order";
 import { addPayment, cashSuggestions, type Payment, paymentState } from "../sale/payment";
 import type { Pricing } from "../sale/pricing";
 import { usePos } from "../state";
 import { enqueueSale } from "../sync/outbox";
+
+/** What a sale on credit prints: the customer and the balances. */
+export interface CreditTicket {
+  name: string;
+  previous: number;
+  amount: number;
+}
 
 /**
  * Collect the payment. The sale is stored in the local queue before anything
@@ -18,10 +28,15 @@ export function PayScreen({ cart, pricing, onBack, onPaid }: {
   cart: Cart;
   pricing: Pricing;
   onBack: () => void;
-  onPaid: (order: OrderRequest, pricing: Pricing) => void;
+  onPaid: (order: OrderRequest, pricing: Pricing, credit: CreditTicket | null) => void;
 }) {
-  const { db, setup, employee, registerState, flushNow } = usePos();
-  const methods = setup.register.payment_methods.filter((method) => method.type !== "pay_later");
+  const { db, client, online, setup, employee, registerState, flushNow, credit, saveCredit, canSellOnCredit } = usePos();
+  // "Crédito" (Odoo's customer account) only for the encargado/owner and a
+  // chosen customer, as on the Odoo POS (D7).
+  const creditMethod = setup.register.payment_methods.find((method) => method.type === "pay_later");
+  const offerCredit = !!creditMethod && canSellOnCredit && !!cart.customer;
+  const methods = setup.register.payment_methods.filter((method) => method.type !== "pay_later" || offerCredit);
+  const [creditRow, setCreditRow] = useState<CreditRow | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
@@ -29,12 +44,38 @@ export function PayScreen({ cart, pricing, onBack, onPaid }: {
   const currency = setup.store.currency;
   const state = paymentState(pricing.total, payments);
 
+  const money = (value: number) => formatMoney(value, currency);
+
+  /** The customer's credit now: fresh from the server, or the last known offline. */
+  async function creditStatus(partnerId: number): Promise<CreditRow | undefined> {
+    if (online) {
+      try {
+        const fresh = await client.creditCustomer(partnerId);
+        saveCredit(fresh);
+        return fresh;
+      } catch (err) {
+        if (!isRetryable(err)) throw err;
+      }
+    }
+    return credit.get(partnerId);
+  }
+
   /** Pay `typed` (empty: what is left) with `method`. */
-  function pay(method: PaymentMethod, typed = amount) {
+  async function pay(method: PaymentMethod, typed = amount) {
     const result = addPayment(pricing.total, payments, method, typed, currency.decimal_places);
     if (result.error !== null) {
       setError(result.error);
       return;
+    }
+    if (method.type === "pay_later" && cart.customer) {
+      const onCredit = round(result.payments.filter((p) => p.method.id === method.id).reduce((t, p) => t + p.amount, 0));
+      const row = await creditStatus(cart.customer.id);
+      const refusal = creditRefusal(row, cart.customer.name, onCredit, money);
+      if (refusal) {
+        setError(refusal);
+        return;
+      }
+      setCreditRow(row ?? null);
     }
     setPayments(result.payments);
     setAmount("");
@@ -53,7 +94,14 @@ export function PayScreen({ cart, pricing, onBack, onPaid }: {
       });
       await enqueueSale(db, order);
       void flushNow();
-      onPaid(order, pricing);
+      const onCredit = round(payments.filter((p) => p.method.id === creditMethod?.id).reduce((t, p) => t + p.amount, 0));
+      let creditTicket: CreditTicket | null = null;
+      if (onCredit > 0 && cart.customer && creditRow) {
+        // The register's copy moves now; the server's figures replace it on sync.
+        saveCredit(withBalance(creditRow, creditRow.balance + onCredit));
+        creditTicket = { name: cart.customer.name, previous: creditRow.balance, amount: onCredit };
+      }
+      onPaid(order, pricing, creditTicket);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setBusy(false);
@@ -97,7 +145,7 @@ export function PayScreen({ cart, pricing, onBack, onPaid }: {
           {cashMethod && (
             <div class="flex flex-wrap gap-2">
               {cashSuggestions(state.remaining).map((value) => (
-                <button key={value} class="btn" onClick={() => pay(cashMethod, String(value))}>
+                <button key={value} class="btn" onClick={() => void pay(cashMethod, String(value))}>
                   {formatMoney(value, currency)}
                 </button>
               ))}
@@ -119,10 +167,16 @@ export function PayScreen({ cart, pricing, onBack, onPaid }: {
               Pago mixto: escribe cuánto paga con una forma (p. ej. 50), tócala, y paga lo que falta con otra.
             </p>
           </fieldset>
+          {creditMethod && !offerCredit && (
+            <p class="text-xs opacity-70">
+              {canSellOnCredit ? "Para fiar, elige al cliente en la venta." : "Sólo el encargado o el dueño pueden fiar."}
+            </p>
+          )}
           <div class="grid grid-cols-2 gap-2">
             {methods.map((method) => (
-              <button key={method.id} class="btn btn-lg btn-outline" disabled={state.remaining <= 0} onClick={() => pay(method)}>
-                Pagar con {method.name}
+              <button key={method.id} class={`btn btn-lg ${method.type === "pay_later" ? "btn-warning btn-outline" : "btn-outline"}`}
+                disabled={state.remaining <= 0} onClick={() => void pay(method)}>
+                {method.type === "pay_later" ? `Fiar a ${cart.customer?.name ?? ""}` : `Pagar con ${method.name}`}
               </button>
             ))}
           </div>

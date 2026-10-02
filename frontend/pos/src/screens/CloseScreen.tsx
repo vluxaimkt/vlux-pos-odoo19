@@ -134,6 +134,11 @@ export function CloseScreen({ onClosed, onCancel, onQueue }: {
         )}
       </div>
 
+      {summary.other_methods.filter((m) => m.type === "pay_later" && m.expected).map((m) => (
+        <div key={m.payment_method_id} class="text-sm opacity-80">
+          {m.name} (fiado) del día: {formatMoney(m.expected, currency)} · no entra al cajón; los abonos en efectivo sí.
+        </div>
+      ))}
       {count.cash && (
         <fieldset class="fieldset">
           <legend class="fieldset-legend">Efectivo contado en el cajón</legend>

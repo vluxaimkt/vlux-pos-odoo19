@@ -13,10 +13,17 @@ export interface CartLine {
   qty: number;
 }
 
+export interface CartCustomer {
+  id: number;
+  name: string;
+}
+
 export interface Cart {
   /** Becomes the order's uuid: the key that makes resending harmless. */
   uuid: string;
   lines: CartLine[];
+  /** Needed to sell on credit; optional otherwise. */
+  customer?: CartCustomer | null;
 }
 
 export const MAX_QTY = 9999;
@@ -42,6 +49,10 @@ export function setQty(cart: Cart, lineUuid: string, qty: number): Cart {
 
 export function removeLine(cart: Cart, lineUuid: string): Cart {
   return { ...cart, lines: cart.lines.filter((line) => line.uuid !== lineUuid) };
+}
+
+export function setCustomer(cart: Cart, customer: CartCustomer | null): Cart {
+  return { ...cart, customer };
 }
 
 export function itemCount(cart: Cart): number {
