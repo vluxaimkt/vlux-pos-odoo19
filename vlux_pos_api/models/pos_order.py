@@ -107,6 +107,7 @@ class PosOrder(models.Model):
                 )
 
         payments, change = self._vlux_api_payments(config, session, data.get("payments"), total)
+        self._vlux_api_before_sale(config, partner, payments)
         now = fields.Datetime.now()
         vals = {
             "uuid": uuid,
@@ -165,6 +166,17 @@ class PosOrder(models.Model):
         return order, False
 
     @api.model
+    def _vlux_api_method_refusal(self, method):
+        """Why ``method`` cannot pay an API sale, or None. vlux_pos_credit lifts it for credit."""
+        if method.type == "pay_later":
+            return _("Esta caja no vende a crédito por la API.")
+        return None
+
+    @api.model
+    def _vlux_api_before_sale(self, config, partner, payments):
+        """Last check before the sale is recorded (hook; nothing by default)."""
+
+    @api.model
     def _vlux_api_payments(self, config, session, payments, amount_total):
         """Validate the payments against the server total; return them and the change."""
         currency = config.currency_id
@@ -183,8 +195,9 @@ class PosOrder(models.Model):
             method = allowed.filtered(lambda m: m.id == method_id)
             if not method:
                 raise ValidationError(_("La forma de pago %s no está en esta caja.", method_id))
-            if method.type == "pay_later":
-                raise ValidationError(_("Las ventas a crédito se registran en el POS de Odoo por ahora."))
+            refusal = self._vlux_api_method_refusal(method)
+            if refusal:
+                raise ValidationError(refusal)
             if currency.compare_amounts(amount, 0.0) <= 0:
                 raise ValidationError(_("El pago %s debe ser mayor que cero.", index))
             parsed.append({"method": method, "amount": amount})
