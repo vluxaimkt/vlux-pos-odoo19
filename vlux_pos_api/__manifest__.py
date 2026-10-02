@@ -7,7 +7,7 @@
         "precios e impuestos calculados en el servidor y ventas idempotentes por uuid "
         "sobre pos.order.sync_from_ui."
     ),
-    "version": "19.0.1.1.0",
+    "version": "19.0.1.2.0",
     "category": "Sales/Point of Sale",
     "author": "VLUX",
     "website": "https://vlux.com.mx",

@@ -89,7 +89,7 @@ export function SetupScreen({ db, onReady }: { db: PosDb; onReady: (token: strin
                 Pega el token de esta caja. Se emite en Odoo: Ajustes → API VLUX → Emitir token.
               </p>
               <input
-                class="input input-bordered w-full font-mono"
+                class="input w-full font-mono"
                 type="password"
                 autocomplete="off"
                 autocapitalize="off"

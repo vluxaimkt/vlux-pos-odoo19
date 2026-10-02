@@ -291,3 +291,21 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         new, _new_raw = token.rotate()
         self.assertEqual(new.pos_config_id, self.config)
         self.assertEqual(new.company_id, self.config.company_id)
+
+    def test_a_manager_without_a_pin_cannot_close(self):
+        # A real manager (POS manager user) whose PIN was never set.
+        boss = self.manager1
+        boss.pin = False
+        _response, opened = self._open(opening_cash=100.0)
+        response, body = self._call("POST", "/registers/%d/session/close" % self.config.id, {
+            "session_id": opened["data"]["session"]["id"], "employee_id": boss.id, "counted_cash": 40.0,
+        })
+        self.assertEqual((response.status_code, body["error"]), (400, "VALIDATION_ERROR"), body)
+        self.assertIn("PIN", body["message"])
+        self.assertEqual(self.env["pos.session"].browse(opened["data"]["session"]["id"]).state, "opened")
+
+        boss.pin = "7391"
+        response, body = self._call("POST", "/registers/%d/session/close" % self.config.id, {
+            "session_id": opened["data"]["session"]["id"], "employee_id": boss.id, "counted_cash": 40.0,
+        })
+        self.assertEqual(response.status_code, 200, body)

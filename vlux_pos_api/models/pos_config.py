@@ -71,6 +71,27 @@ class PosConfig(models.Model):
             raise ValidationError(_("El empleado %s no puede usar esta caja.", employee_id))
         return employee.sudo(False)
 
+    def _vlux_api_is_manager(self, employee):
+        """Manager on this register, as pos_hr decides it (POS manager user or advanced access)."""
+        self.ensure_one()
+        if not employee:
+            return False
+        user = employee.sudo().user_id
+        return bool(
+            (user and user.has_group("point_of_sale.group_pos_manager"))
+            or employee in self.advanced_employee_ids
+        )
+
+    def _vlux_api_check_closer(self, employee):
+        """A manager may close above the difference limit, so a manager without
+        a PIN would let anyone at the register do it: refuse until one is set."""
+        self.ensure_one()
+        if employee and self._vlux_api_is_manager(employee) and not employee.sudo().pin:
+            raise ValidationError(_(
+                "%s es encargado y no tiene PIN: ponle uno en Odoo (Empleados → Ajustes → PIN) antes de cerrar la caja.",
+                employee.name,
+            ))
+
     # --- prices ---------------------------------------------------------------
 
     def _vlux_api_pricelist(self, partner):

@@ -39,10 +39,10 @@ export function RegisterScreen({ state, onOpened }: { state: RegisterState; onOp
   return (
     <form class="p-4 max-w-sm mx-auto flex flex-col gap-3" onSubmit={open}>
       <h2 class="text-xl">Abrir {state.name}</h2>
-      <label class="form-control">
-        <span class="label-text">Efectivo inicial en el cajón</span>
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">Efectivo inicial en el cajón</legend>
         <input
-          class="input input-bordered input-lg"
+          class="input input-lg w-full"
           type="number"
           inputMode="decimal"
           min="0"
@@ -51,7 +51,7 @@ export function RegisterScreen({ state, onOpened }: { state: RegisterState; onOp
           onInput={(event) => setCash(event.currentTarget.value)}
           required={state.cash_control}
         />
-      </label>
+      </fieldset>
       {!online && <div role="alert" class="alert alert-warning">Abrir la caja necesita internet.</div>}
       {error && <div role="alert" class="alert alert-error">{error}</div>}
       <button class="btn btn-primary btn-lg" type="submit" disabled={busy || !online}>

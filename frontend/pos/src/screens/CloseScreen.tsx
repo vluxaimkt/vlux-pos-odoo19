@@ -94,20 +94,24 @@ export function CloseScreen({ onClosed, onCancel, onQueue }: {
 
       {pending > 0 && (
         <div role="alert" class="alert alert-warning">
-          <span>Hay {pending} venta(s) de esta caja sin enviar: el corte no las contaría. Envíalas primero.</span>
-          <button type="button" class="btn btn-sm" onClick={() => void load()}>Enviar y volver a calcular</button>
+          <div class="flex flex-col gap-2">
+            <span>Hay {pending} venta(s) de esta caja sin enviar: el corte no las contaría. Envíalas primero.</span>
+            <button type="button" class="btn btn-sm w-fit" onClick={() => void load()}>Enviar y volver a calcular</button>
+          </div>
         </div>
       )}
       {attention > 0 && (
-        <div role="alert" class="alert alert-error flex-col items-start">
+        <div role="alert" class="alert alert-error">
+          <div class="flex flex-col gap-2">
           <span>Hay {attention} venta(s) rechazada(s) por el servidor: no están en el corte. Revísalas con el encargado.</span>
-          <div class="flex gap-2">
+          <div class="flex flex-wrap gap-2 items-center">
             <button type="button" class="btn btn-sm" onClick={onQueue}>Ver ventas por revisar</button>
             <label class="label cursor-pointer gap-2">
               <input type="checkbox" class="checkbox checkbox-sm" checked={acceptAttention}
                 onChange={(event) => setAcceptAttention(event.currentTarget.checked)} />
               <span>Cerrar de todos modos</span>
             </label>
+          </div>
           </div>
         </div>
       )}
@@ -131,37 +135,39 @@ export function CloseScreen({ onClosed, onCancel, onQueue }: {
       </div>
 
       {count.cash && (
-        <label class="form-control">
-          <span class="label-text">Efectivo contado en el cajón</span>
-          <input class="input input-bordered input-lg" type="number" inputMode="decimal" min="0" step="0.01" required
+        <fieldset class="fieldset">
+          <legend class="fieldset-legend">Efectivo contado en el cajón</legend>
+          <input class="input input-lg w-full" type="number" inputMode="decimal" min="0" step="0.01" required
             value={cash} onInput={(event) => setCash(event.currentTarget.value)} />
           {cash !== "" && <Difference value={count.cash.difference} currency={currency} />}
-        </label>
+        </fieldset>
       )}
       {count.others.map((line) => (
-        <label key={line.paymentMethodId} class="form-control">
-          <span class="label-text">{line.name}: esperado {formatMoney(line.expected, currency)} (según terminal)</span>
-          <input class="input input-bordered" type="number" inputMode="decimal" min="0" step="0.01"
+        <fieldset key={line.paymentMethodId} class="fieldset">
+          <legend class="fieldset-legend">{line.name} (según terminal): esperado {formatMoney(line.expected, currency)}</legend>
+          <input class="input w-full" type="number" inputMode="decimal" min="0" step="0.01"
             placeholder={String(line.expected)} value={counted[line.paymentMethodId] ?? ""}
             onInput={(event) => setCounted({ ...counted, [line.paymentMethodId]: event.currentTarget.value })} />
           <Difference value={line.difference} currency={currency} />
-        </label>
+        </fieldset>
       ))}
-      <label class="form-control">
-        <span class="label-text">Notas (opcional)</span>
-        <textarea class="textarea textarea-bordered" maxLength={1000} value={notes}
+      <fieldset class="fieldset">
+        <legend class="fieldset-legend">Notas (opcional)</legend>
+        <textarea class="textarea w-full" maxLength={1000} value={notes}
           onInput={(event) => setNotes(event.currentTarget.value)} />
-      </label>
+      </fieldset>
 
       {!count.withinLimit && cash !== "" && (
-        <div role="alert" class="alert alert-warning flex-col items-start">
+        <div role="alert" class="alert alert-warning">
+          <div class="flex flex-col gap-2">
           <span>
             La diferencia ({formatMoney(count.largest, currency)}) supera la permitida
             ({formatMoney(summary.max_difference ?? 0, currency)}). Vuelve a contar; si es correcta, sólo un encargado puede cerrar.
           </span>
           {employee && employee.role !== "manager" && (
-            <button type="button" class="btn btn-sm" onClick={() => setEmployee(null)}>Entrar como encargado</button>
+            <button type="button" class="btn btn-sm w-fit whitespace-nowrap" onClick={() => setEmployee(null)}>Entrar como encargado</button>
           )}
+          </div>
         </div>
       )}
       {error && <div role="alert" class="alert alert-error">{error}</div>}
@@ -174,9 +180,9 @@ export function CloseScreen({ onClosed, onCancel, onQueue }: {
 }
 
 function Difference({ value, currency }: { value: number; currency: Parameters<typeof formatMoney>[1] }) {
-  if (value === 0) return <span class="label-text-alt text-success">Cuadra</span>;
+  if (value === 0) return <span class="label text-success">Cuadra</span>;
   return (
-    <span class={`label-text-alt ${value < 0 ? "text-error" : "text-warning"}`}>
+    <span class={`label ${value < 0 ? "text-error" : "text-warning"}`}>
       {value < 0 ? "Falta" : "Sobra"} {formatMoney(Math.abs(value), currency)}
     </span>
   );

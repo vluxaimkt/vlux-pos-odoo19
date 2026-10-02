@@ -3,9 +3,8 @@ import { useState } from "preact/hooks";
 import type { OrderRequest, PaymentMethod } from "../api/types";
 import { formatMoney } from "../lib/money";
 import type { Cart } from "../sale/cart";
-import { round } from "../sale/money";
 import { buildOrder } from "../sale/order";
-import { cashSuggestions, type Payment, paymentState } from "../sale/payment";
+import { addPayment, cashSuggestions, type Payment, paymentState } from "../sale/payment";
 import type { Pricing } from "../sale/pricing";
 import { usePos } from "../state";
 import { enqueueSale } from "../sync/outbox";
@@ -30,19 +29,16 @@ export function PayScreen({ cart, pricing, onBack, onPaid }: {
   const currency = setup.store.currency;
   const state = paymentState(pricing.total, payments);
 
-  function addPayment(method: PaymentMethod, value: number) {
-    const rounded = round(value, currency.decimal_places);
-    if (!(rounded > 0)) return;
-    setPayments([...payments, { method, amount: rounded }]);
+  /** Pay `typed` (empty: what is left) with `method`. */
+  function pay(method: PaymentMethod, typed = amount) {
+    const result = addPayment(pricing.total, payments, method, typed, currency.decimal_places);
+    if (result.error !== null) {
+      setError(result.error);
+      return;
+    }
+    setPayments(result.payments);
     setAmount("");
     setError(null);
-  }
-
-  function pay(method: PaymentMethod) {
-    const typed = Number(amount);
-    // Card: whatever is left; cash: what was typed, or exactly what is left.
-    const value = method.is_cash && amount ? typed : state.remaining;
-    addPayment(method, value);
   }
 
   async function confirm() {
@@ -101,26 +97,32 @@ export function PayScreen({ cart, pricing, onBack, onPaid }: {
           {cashMethod && (
             <div class="flex flex-wrap gap-2">
               {cashSuggestions(state.remaining).map((value) => (
-                <button key={value} class="btn" onClick={() => addPayment(cashMethod, value)}>
+                <button key={value} class="btn" onClick={() => pay(cashMethod, String(value))}>
                   {formatMoney(value, currency)}
                 </button>
               ))}
             </div>
           )}
-          <input
-            class="input input-bordered input-lg w-full"
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="0.01"
-            placeholder="Efectivo recibido (vacío = exacto)"
-            value={amount}
-            onInput={(event) => setAmount(event.currentTarget.value)}
-          />
+          <fieldset class="fieldset">
+            <legend class="fieldset-legend">Monto (vacío = lo que falta)</legend>
+            <input
+              class="input input-lg w-full"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="0.01"
+              placeholder={String(state.remaining)}
+              value={amount}
+              onInput={(event) => setAmount(event.currentTarget.value)}
+            />
+            <p class="label whitespace-normal">
+              Pago mixto: escribe cuánto paga con una forma (p. ej. 50), tócala, y paga lo que falta con otra.
+            </p>
+          </fieldset>
           <div class="grid grid-cols-2 gap-2">
             {methods.map((method) => (
-              <button key={method.id} class="btn btn-lg" disabled={state.remaining <= 0} onClick={() => pay(method)}>
-                {method.name}
+              <button key={method.id} class="btn btn-lg btn-outline" disabled={state.remaining <= 0} onClick={() => pay(method)}>
+                Pagar con {method.name}
               </button>
             ))}
           </div>

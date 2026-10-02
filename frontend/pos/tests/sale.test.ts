@@ -113,3 +113,36 @@ describe("order", () => {
       .toThrow();
   });
 });
+
+describe("M31 fixes", () => {
+  it("the ticket shows the unit price with taxes even when the catalog has it without", () => {
+    const cart = addProduct(emptyCart(newId), soda, newId, 2);
+    const quote: Quote = {
+      pricelist_id: 1, amount_untaxed: 30, amount_tax: 4.8, amount_total: 34.8,
+      lines: [{ uuid: null, product_id: 1, name: "Libreta", qty: 2, price_unit: 15, catalog_price: 15,
+        price_overridden: false, tax_ids: [16], price_subtotal: 30, price_subtotal_incl: 34.8 }],
+    };
+    const line = fromQuote(cart, quote).lines[0]!;
+    expect(line.priceUnit).toBe(15);
+    expect(line.displayUnit).toBe(17.4);
+  });
+
+  it("a mixed payment: part by card, the rest in cash", async () => {
+    const { addPayment } = await import("../src/sale/payment");
+    let result = addPayment(98.6, [], card, "50");
+    expect(result.error).toBeNull();
+    result = addPayment(98.6, result.payments!, cash, "");
+    expect(result.payments!.map((p) => p.amount)).toEqual([50, 48.6]);
+    expect(paymentState(98.6, result.payments!)).toMatchObject({ complete: true, change: 0 });
+  });
+
+  it("card never above what is left; cash may be, empty means the rest", async () => {
+    const { addPayment } = await import("../src/sale/payment");
+    expect(addPayment(98.6, [], card, "100").error).toContain("no se puede cobrar más");
+    expect(addPayment(98.6, [], cash, "200").payments![0]!.amount).toBe(200);
+    expect(addPayment(98.6, [], card, "").payments![0]!.amount).toBe(98.6);
+    expect(addPayment(98.6, [], cash, "abc").error).toBeTruthy();
+    expect(addPayment(98.6, [{ method: cash, amount: 100 }], card, "").error).toContain("ya está pagada");
+    expect(addPayment(98.6, [], cash, "48,60").payments![0]!.amount).toBe(48.6);
+  });
+});

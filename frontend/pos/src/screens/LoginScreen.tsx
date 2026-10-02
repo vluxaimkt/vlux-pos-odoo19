@@ -69,15 +69,37 @@ export function LoginScreen() {
     );
   }
 
+  /**
+   * A manager may close the register above the difference limit: without a
+   * PIN anyone could tap their card and do it. Managers must have a PIN.
+   */
+  function pick(employee: Employee) {
+    setError(null);
+    if (employee.pin_sha1) return setChosen(employee);
+    if (employee.role === "manager") {
+      setError(`${employee.name} es encargado y no tiene PIN. Ponle uno en Odoo (Empleados → ${employee.name} → Ajustes → PIN) y recarga esta página.`);
+      return;
+    }
+    setEmployee(employee);
+  }
+
   if (!chosen) {
     return (
-      <section class="p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {employees.map((employee) => (
-          <button key={employee.id} class="btn btn-lg h-auto py-6 flex-col" onClick={() => employee.pin_sha1 ? setChosen(employee) : setEmployee(employee)}>
-            <span class="text-lg">{employee.name}</span>
-            <span class="badge badge-ghost">{employee.role === "manager" ? "Encargado" : "Cajero"}</span>
-          </button>
-        ))}
+      <section class="p-4 flex flex-col gap-3">
+        <h2 class="text-xl">¿Quién está en la caja?</h2>
+        {error && <div role="alert" class="alert alert-warning">{error}</div>}
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {employees.map((employee) => (
+            <button key={employee.id}
+              class="btn btn-lg btn-outline h-auto py-6 flex-col gap-2 border-2 bg-base-100 hover:btn-primary"
+              onClick={() => pick(employee)}>
+              <span class="text-lg">{employee.name}</span>
+              <span class={`badge ${employee.role === "manager" ? "badge-primary" : "badge-neutral"}`}>
+                {employee.role === "manager" ? "Encargado" : "Cajero"}
+              </span>
+            </button>
+          ))}
+        </div>
       </section>
     );
   }
