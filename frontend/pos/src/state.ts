@@ -2,7 +2,7 @@ import { createContext } from "preact";
 import { useContext } from "preact/hooks";
 
 import type { ApiClient } from "./api/client";
-import type { Employee, Me, RegisterConfig, RegisterState, StoreConfig } from "./api/types";
+import type { CreditRow, Employee, Me, RegisterConfig, RegisterState, StoreConfig } from "./api/types";
 import type { PosDb } from "./db/db";
 import type { TaxInfo } from "./sale/pricing";
 
@@ -18,6 +18,7 @@ export const META_SETUP = "setup";
 export const META_EMPLOYEES = "employees";
 export const META_TAXES = "taxes";
 export const META_CART = "cart";
+export const META_CREDIT = "credit";
 
 export interface PosContextValue {
   db: PosDb;
@@ -28,6 +29,12 @@ export interface PosContextValue {
   online: boolean;
   registerState: RegisterState | null;
   taxes: Map<number, TaxInfo>;
+  /** Customers with credit or a balance, by partner id (last known, kept offline). */
+  credit: Map<number, CreditRow>;
+  /** Whether the person at the register may sell on credit (D7). */
+  canSellOnCredit: boolean;
+  saveCredit(row: CreditRow): void;
+  refreshCredit(): Promise<void>;
   setEmployee(employee: Employee | null): void;
   /** Try to send the queued sales now (after a sale, or from the queue screen). */
   flushNow(): Promise<void>;

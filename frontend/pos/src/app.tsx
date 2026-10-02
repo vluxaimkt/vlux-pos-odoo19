@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 
 import { ApiClient, ApiError } from "./api/client";
-import type { Employee, RegisterState } from "./api/types";
+import type { CreditRow, Employee, RegisterState } from "./api/types";
 import { getMeta, type PosDb, setMeta } from "./db/db";
 import { useInterval, useOnline } from "./hooks";
 import { LoginScreen } from "./screens/LoginScreen";
@@ -11,7 +11,9 @@ import { SetupScreen } from "./screens/SetupScreen";
 import type { TaxInfo } from "./sale/pricing";
 import { CloseScreen } from "./screens/CloseScreen";
 import { QueueScreen } from "./screens/QueueScreen";
-import { META_EMPLOYEES, META_SETUP, META_TAXES, META_TOKEN, PosContext, type PosContextValue, type Setup, usePos } from "./state";
+import { META_CREDIT, META_EMPLOYEES, META_SETUP, META_TAXES, META_TOKEN, PosContext, type PosContextValue, type Setup, usePos } from "./state";
+import { canSellOnCredit } from "./sale/credit";
+import { CustomersScreen } from "./screens/CustomersScreen";
 import { syncFeed } from "./sync/catalog";
 import { flushOutbox } from "./sync/outbox";
 import { renewIfDue } from "./sync/token";
@@ -62,7 +64,8 @@ function Register({ db, paired, onForget, onRenewed }: {
   const [registerState, setRegisterState] = useState<RegisterState | null>(null);
   const [catalogReady, setCatalogReady] = useState(false);
   const [taxes, setTaxes] = useState<Map<number, TaxInfo>>(new Map());
-  const [view, setView] = useState<"register" | "queue" | "closing">("register");
+  const [credit, setCredit] = useState<Map<number, CreditRow>>(new Map());
+  const [view, setView] = useState<"register" | "queue" | "closing" | "customers">("register");
   const [status, setStatus] = useState({ syncing: false, pending: 0, attention: 0, error: null as string | null });
 
   // Unpairing wipes everything this device knows about the store (token,
@@ -97,6 +100,7 @@ function Register({ db, paired, onForget, onRenewed }: {
       setEmployees((await getMeta<Employee[]>(db, META_EMPLOYEES)) ?? []);
       setRegisterState((await getMeta<RegisterState>(db, META_REGISTER_STATE)) ?? null);
       setTaxes(new Map(((await getMeta<TaxInfo[]>(db, META_TAXES)) ?? []).map((tax) => [tax.id, tax])));
+      setCredit(new Map(((await getMeta<CreditRow[]>(db, META_CREDIT)) ?? []).map((row) => [row.partner_id, row])));
       setCatalogReady((await db.products.count()) > 0);
     })();
   }, [db]);
@@ -104,6 +108,25 @@ function Register({ db, paired, onForget, onRenewed }: {
   const applyRegisterState = useCallback((state: RegisterState) => {
     setRegisterState(state);
     void setMeta(db, META_REGISTER_STATE, state);
+  }, [db]);
+
+  const storeCredit = useCallback((rows: Map<number, CreditRow>) => {
+    setCredit(rows);
+    void setMeta(db, META_CREDIT, [...rows.values()]);
+  }, [db]);
+
+  const refreshCredit = useCallback(async () => {
+    const { items } = await client.creditCustomers();
+    storeCredit(new Map(items.map((row) => [row.partner_id, row])));
+  }, [client, storeCredit]);
+
+  const saveCredit = useCallback((row: CreditRow) => {
+    setCredit((current) => {
+      const next = new Map(current);
+      next.set(row.partner_id, row);
+      void setMeta(db, META_CREDIT, [...next.values()]);
+      return next;
+    });
   }, [db]);
 
   const refreshRegister = useCallback(async () => {
@@ -126,6 +149,7 @@ function Register({ db, paired, onForget, onRenewed }: {
       await setMeta(db, META_TAXES, items);
       setTaxes(new Map(items.map((tax) => [tax.id, tax])));
       await refreshRegister();
+      await refreshCredit();
       setCatalogReady(true);
       setStatus((s) => ({ ...s, error: null }));
     } catch (error) {
@@ -136,7 +160,7 @@ function Register({ db, paired, onForget, onRenewed }: {
     } finally {
       setStatus((s) => ({ ...s, syncing: false }));
     }
-  }, [client, db, refreshRegister, onRenewed]);
+  }, [client, db, refreshRegister, refreshCredit, onRenewed]);
 
   // One send at a time: the timer and "Enviar ahora" must not overlap
   // (a double send would be harmless, the uuid dedupes it, but wasteful).
@@ -157,6 +181,8 @@ function Register({ db, paired, onForget, onRenewed }: {
   const context: PosContextValue = {
     db, client, setup: paired.setup, employees, employee, online, registerState, taxes, setEmployee, forget,
     flushNow: flush,
+    credit, saveCredit, refreshCredit,
+    canSellOnCredit: canSellOnCredit(!!registerState?.employee_login, employee?.role),
   };
 
   const waiting = online ? null : "Conéctate a internet para la primera carga de esta caja.";
@@ -165,6 +191,7 @@ function Register({ db, paired, onForget, onRenewed }: {
   else if (!registerState) body = <Splash text={waiting ?? "Consultando la caja…"} />;
   else if (registerState.employee_login && !employee) body = <LoginScreen />;
   else if (view === "queue") body = <QueueScreen onClose={() => setView("register")} />;
+  else if (view === "customers") body = <CustomersScreen onClose={() => setView("register")} />;
   else if (view === "closing") {
     body = (
       <CloseScreen
@@ -185,6 +212,7 @@ function Register({ db, paired, onForget, onRenewed }: {
         <Header
           status={status}
           onQueue={() => setView("queue")}
+          onCustomers={() => setView("customers")}
           onClosing={registerState?.session?.state === "opened" ? () => setView("closing") : null}
         />
         {status.error && <div role="alert" class="alert alert-error rounded-none">{status.error}</div>}
@@ -198,9 +226,10 @@ function Opened({ state, onOpened }: { state: RegisterState; onOpened: (state: R
   return state.session?.state === "opened" ? <SellScreen /> : <RegisterScreen state={state} onOpened={onOpened} />;
 }
 
-function Header({ status, onQueue, onClosing }: {
+function Header({ status, onQueue, onCustomers, onClosing }: {
   status: { syncing: boolean; pending: number; attention: number };
   onQueue: () => void;
+  onCustomers: () => void;
   onClosing: (() => void) | null;
 }) {
   const { setup, employee, online, setEmployee, forget } = usePos();
@@ -218,6 +247,7 @@ function Header({ status, onQueue, onClosing }: {
         <button class="btn btn-ghost btn-sm" tabIndex={0}>{employee?.name ?? "Menú"} ▾</button>
         <ul tabIndex={0} class="dropdown-content menu bg-base-200 border border-base-300 rounded-box z-20 w-60 p-2 mt-2 shadow-2xl"
           onClick={closeMenu}>
+          <li><button onClick={onCustomers}>Clientes y crédito</button></li>
           <li><button onClick={onQueue}>Ventas por enviar</button></li>
           {onClosing && <li><button onClick={onClosing}>Corte de caja</button></li>}
           {employee && <li><button onClick={() => setEmployee(null)}>Cambiar de empleado</button></li>}

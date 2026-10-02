@@ -196,6 +196,8 @@ export interface OrderResult {
   change: number;
   price_overridden: boolean;
   duplicate?: boolean;
+  /** Present with vlux_pos_credit: null when nothing was on credit. */
+  credit?: CreditFigures | null;
   lines: { uuid: string; product_id: number; name: string; qty: number; price_unit: number; price_subtotal_incl: number }[];
   payments: { payment_method_id: number; name: string; amount: number; is_change: boolean }[];
 }
@@ -213,4 +215,43 @@ export interface ClosingSummary {
     expected: number;
   } | null;
   other_methods: { payment_method_id: number; name: string; type: string; expected: number; count: number }[];
+}
+
+/** A customer's credit (fiado), as GET /credit/customers returns it. */
+export interface CreditRow {
+  partner_id: number;
+  name: string;
+  phone: string | null;
+  allowed: boolean;
+  /** 0: no limit. */
+  limit: number;
+  balance: number;
+  /** null when there is no limit. */
+  available: number | null;
+  over_limit: boolean;
+}
+
+/** Credit figures of a recorded sale on credit or abono. */
+export interface CreditFigures {
+  amount: number;
+  abono: boolean;
+  previous_balance: number;
+  new_balance: number;
+  flagged: boolean;
+  issues: string[];
+}
+
+export interface AbonoTicket {
+  order_id: number;
+  uuid: string;
+  reference: string | null;
+  date: string;
+  partner_id: number;
+  partner_name: string;
+  method: string;
+  amount: number;
+  previous_balance: number;
+  new_balance: number;
+  cashier: string;
+  customer: CreditRow;
 }

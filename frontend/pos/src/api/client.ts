@@ -1,5 +1,6 @@
 import type { TaxInfo } from "../sale/pricing";
 import type {
+  AbonoTicket, CreditRow,
   ClosingSummary, Customer, Employee, Envelope, FeedPage, Me, OrderRequest, OrderResult, Product, Quote,
   RegisterState, SaleLine, StoreConfig, TokenInfo,
 } from "./types";
@@ -155,6 +156,28 @@ export class ApiClient {
     },
   ) {
     return this.request<RegisterState>("POST", `/registers/${registerId}/session/close`, body);
+  }
+
+  creditCustomers() {
+    return this.request<{ items: CreditRow[] }>("GET", "/credit/customers");
+  }
+
+  creditCustomer(partnerId: number) {
+    return this.request<CreditRow>("GET", `/credit/customers/${partnerId}`);
+  }
+
+  setCredit(partnerId: number, body: { register_id: number; allowed: boolean; limit: number; employee_id?: number }) {
+    return this.request<CreditRow>("POST", `/credit/customers/${partnerId}`, body);
+  }
+
+  registerAbono(body: {
+    uuid: string; register_id: number; partner_id: number; amount: number; payment_method_id: number; employee_id?: number;
+  }) {
+    return this.request<AbonoTicket>("POST", "/credit/abonos", body);
+  }
+
+  createCustomer(body: { name: string; phone?: string; email?: string; vat?: string }) {
+    return this.request<Pick<Customer, "id" | "name" | "phone" | "email" | "vat">>("POST", "/customers", body);
   }
 
   quote(body: { register_id: number; lines: SaleLine[]; partner_id?: number | null }) {
