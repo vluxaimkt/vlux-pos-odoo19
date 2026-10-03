@@ -46,15 +46,17 @@ export function App({ db }: { db: PosDb }) {
       paired={paired}
       onForget={() => setPaired(null)}
       onRenewed={(token) => setPaired((current) => (current ? { ...current, token } : current))}
+      onSetup={(setup) => setPaired((current) => (current ? { ...current, setup } : current))}
     />
   );
 }
 
-function Register({ db, paired, onForget, onRenewed }: {
+function Register({ db, paired, onForget, onRenewed, onSetup }: {
   db: PosDb;
   paired: Paired;
   onForget: () => void;
   onRenewed: (token: string) => void;
+  onSetup: (setup: Setup) => void;
 }) {
   const online = useOnline();
   const client = useMemo(() => new ApiClient({ token: paired.token }), [paired.token]);
@@ -143,6 +145,15 @@ function Register({ db, paired, onForget, onRenewed }: {
       // Renew the token before it ages out; the next round uses the new one.
       const renewed = await renewIfDue(client, db);
       if (renewed) onRenewed(renewed);
+      // The store and this register's settings (payment methods, receipt
+      // header…) change in Odoo: keep the paired copy current.
+      const store = await client.storeConfig();
+      const register = store.registers.find((r) => r.id === registerId);
+      if (register) {
+        const setup: Setup = { ...paired.setup, store, register };
+        await setMeta(db, META_SETUP, setup);
+        onSetup(setup);
+      }
       await syncFeed(client, db, "products");
       await syncFeed(client, db, "customers");
       const { items } = await client.taxes();
@@ -160,7 +171,7 @@ function Register({ db, paired, onForget, onRenewed }: {
     } finally {
       setStatus((s) => ({ ...s, syncing: false }));
     }
-  }, [client, db, refreshRegister, refreshCredit, onRenewed]);
+  }, [client, db, refreshRegister, refreshCredit, onRenewed, onSetup, paired.setup, registerId]);
 
   // One send at a time: the timer and "Enviar ahora" must not overlap
   // (a double send would be harmless, the uuid dedupes it, but wasteful).
