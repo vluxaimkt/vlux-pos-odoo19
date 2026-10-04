@@ -10,10 +10,16 @@ Every write runs inside the savepoint ``api_route`` opens: a refused closing
 or sale leaves nothing behind.
 """
 from odoo import _, fields, http
+from odoo.exceptions import ValidationError
 from odoo.http import request
 
 from odoo.addons.vlux_core.controllers.api import VluxApiError, api_route, json_body
+from odoo.addons.vlux_core.controllers.api_catalog import _product_payload
+from odoo.addons.vlux_pos_api.models.employee_session import LOCK_MINUTES, PIN_ATTEMPTS
 from odoo.addons.vlux_pos_api.models.pos_order import VluxSaleRefused
+
+# The employee session token (POST /registers/<id>/employees/login) travels here.
+EMPLOYEE_HEADER = "X-Vlux-Employee"
 
 
 def _register(register_id, token):
@@ -26,6 +32,32 @@ def _register(register_id, token):
     if not token.allows_register(config):
         raise VluxApiError("FORBIDDEN", "Este token es de otra caja.")
     return config
+
+
+def _acting_employee(config, token, body, required=False, session_raw=None):
+    """Who is at the register: ``(employee, verified)``.
+
+    ``verified`` means the server checked the PIN (a valid employee session
+    for this register and device). ``required`` refuses anything else: for
+    actions that need to know for real (open, close, credit). Registers
+    without employee login act as the token's user.
+    """
+    Employee = request.env["hr.employee"]
+    if not config.module_pos_hr:
+        return Employee, True
+    raw = session_raw if session_raw is not None else request.httprequest.headers.get(EMPLOYEE_HEADER, "")
+    claimed = body.get("employee_id")
+    if raw:
+        employee = request.env["vlux.pos.employee.session"]._resolve(raw, config, token)
+        if employee:
+            if claimed not in (None, "", employee.id):
+                raise VluxApiError("VALIDATION_ERROR", "El empleado no coincide con su sesión.")
+            return employee, True
+        if required:
+            raise VluxApiError("PIN_REQUIRED", "Tu sesión venció: vuelve a entrar con tu PIN.")
+    elif required:
+        raise VluxApiError("PIN_REQUIRED", "Entra con tu PIN (con internet) para hacer esto.")
+    return config._vlux_api_employee(claimed), False
 
 
 def _amount(value, name, required=True):
@@ -78,6 +110,8 @@ def _register_state(config):
         "cash_control": bool(config.cash_control),
         "max_difference": config.amount_authorized_diff if config.set_maximum_difference else None,
         "session": _session_payload(session),
+        # Store options the screen adapts to (each module adds its own).
+        "options": config._vlux_api_register_options(),
     }
 
 
@@ -147,6 +181,51 @@ class VluxApiSales(http.Controller):
         """
         return {"items": _register(register_id, token)._vlux_api_employees()}
 
+    @api_route("/registers/<int:register_id>/employees/login", scope="orders:write", methods=("POST",),
+               summary="Entrar a la caja con PIN, verificado por el servidor")
+    def employee_login(self, token, register_id, **kwargs):
+        """Body ``{"employee_id", "pin"}``: answers a session token for header ``X-Vlux-Employee``.
+
+        The PIN is compared on the server. After 5 wrong PINs the employee is
+        locked on this register for 15 minutes (``PIN_LOCKED``). A manager
+        must have a PIN. The session lasts a shift (12 h) and only works on
+        this register and with this device's token.
+        """
+        body = json_body()
+        config = _register(register_id, token)
+        if not config.module_pos_hr:
+            raise VluxApiError("VALIDATION_ERROR", "Esta caja no usa inicio de sesión por empleado.")
+        employee = config._vlux_api_employee(body.get("employee_id"))
+        limiter = request.env["vlux.rate.limit"].sudo()
+        identity = "%s:%s" % (config.id, employee.id)
+        if limiter.exhausted("pin", identity, PIN_ATTEMPTS, LOCK_MINUTES * 60):
+            raise VluxApiError("PIN_LOCKED", "Demasiados PIN incorrectos: espera %d minutos." % LOCK_MINUTES)
+        manager = config._vlux_api_is_manager(employee)
+        if manager and not employee.sudo().pin:
+            raise VluxApiError("VALIDATION_ERROR",
+                               "%s es encargado y no tiene PIN: ponle uno en Odoo." % employee.name)
+        Session = request.env["vlux.pos.employee.session"]
+        if not Session._pin_matches(employee, body.get("pin")):
+            limiter.consume("pin", identity, PIN_ATTEMPTS, LOCK_MINUTES * 60)
+            raise VluxApiError("INVALID_PIN", "PIN incorrecto.")
+        limiter.reset("pin", identity)
+        session, raw = Session._issue(config, employee, token)
+        return {
+            "session": raw,
+            "expires_at": _stamp(session.expires_at),
+            "employee": {"id": employee.id, "name": employee.name, "role": "manager" if manager else "cashier"},
+        }
+
+    @api_route("/registers/<int:register_id>/employees/logout", scope="orders:write", methods=("POST",),
+               summary="Salir: la sesión del empleado deja de servir")
+    def employee_logout(self, token, register_id, **kwargs):
+        """Ends the employee session sent in ``X-Vlux-Employee`` (idempotent)."""
+        _register(register_id, token)
+        raw = request.httprequest.headers.get(EMPLOYEE_HEADER, "")
+        Session = request.env["vlux.pos.employee.session"].sudo()
+        Session.search([("token_hash", "=", Session._hash(raw))]).write({"active": False}) if raw else None
+        return {"ended": True}
+
     @api_route("/registers/<int:register_id>/session/open", scope="session:manage", methods=("POST",),
                summary="Abrir la caja con el efectivo inicial")
     def open_session(self, token, register_id, **kwargs):
@@ -164,7 +243,7 @@ class VluxApiSales(http.Controller):
         if session and session.state != "opening_control":
             raise VluxApiError("CONFLICT", "La caja está en corte; termina el cierre antes de abrirla.",
                                details={"session_id": session.id, "state": session.state})
-        employee = config._vlux_api_employee(body.get("employee_id"))
+        employee, _verified = _acting_employee(config, token, body, required=True)
         opening_cash = _amount(body.get("opening_cash"), "opening_cash", required=config.cash_control) or 0.0
         notes = _text(body.get("notes"), "notes")
         if not session:
@@ -194,7 +273,8 @@ class VluxApiSales(http.Controller):
                 "name": cash["name"],
                 "opening": cash["opening"],
                 "sales": cash["payment_amount"],
-                "moves": [{"name": move["name"], "amount": move["amount"]} for move in cash["moves"]],
+                "moves": [{"name": move["name"], "amount": move["amount"], "employee": move.get("cashier_name") or None}
+                          for move in cash["moves"]],
                 "expected": cash["amount"],
             } if cash else None,
             "other_methods": [
@@ -202,6 +282,8 @@ class VluxApiSales(http.Controller):
                  "expected": method["amount"], "count": method["number"]}
                 for method in data["non_cash_payment_methods"]
             ],
+            # Extra sections from other modules (credit: who was given credit, abonos).
+            **session._vlux_api_closing_extra(),
         }
 
     @api_route("/registers/<int:register_id>/session/close", scope="session:manage", methods=("POST",),
@@ -224,7 +306,7 @@ class VluxApiSales(http.Controller):
         if body.get("session_id") != session.id:
             raise VluxApiError("CONFLICT", "La sesión indicada no es la sesión abierta de la caja.",
                                details={"session_id": session.id})
-        employee = config._vlux_api_employee(body.get("employee_id"))
+        employee, _verified = _acting_employee(config, token, body, required=True)
         config._vlux_api_check_closer(employee)
         notes = _text(body.get("notes"), "notes")
         if employee:
@@ -262,6 +344,98 @@ class VluxApiSales(http.Controller):
                                details={"redirect": bool(result.get("redirect"))})
         return {**_register_state(config), "closed_session": _session_payload(session)}
 
+    # --- cash in and out ------------------------------------------------------
+
+    @api_route("/registers/<int:register_id>/session/cash-moves", scope="session:manage",
+               summary="Entradas y salidas de efectivo de la sesión abierta")
+    def cash_moves(self, token, register_id, **kwargs):
+        config = _register(register_id, token)
+        session = config.current_session_id
+        if not session:
+            raise VluxApiError("NO_OPEN_SESSION", "La caja no tiene una sesión abierta.")
+        return {"session_id": session.id, "items": session._vlux_api_cash_moves()}
+
+    @api_route("/registers/<int:register_id>/session/cash-move", scope="session:manage", methods=("POST",),
+               summary="Meter o sacar efectivo de la caja (encargado; idempotente por uuid)")
+    def cash_move(self, token, register_id, **kwargs):
+        """Body ``{"session_id", "uuid", "type": "in"|"out", "amount", "reason"}``.
+
+        A manager of the register puts cash in or takes it out. A cashier may
+        take it out (e.g. to pay a supplier) only where the register allows it
+        (``vlux_cashier_cash_out``, off by default as in Odoo); the move stays
+        under their name with its reason. Always with a checked PIN; the
+        closing then expects the drawer to hold that much more (or less).
+        """
+        config = _register(register_id, token)
+        body = json_body()
+        session = config.current_session_id
+        if not session or session.state != "opened":
+            raise VluxApiError("NO_OPEN_SESSION", "La caja no tiene una sesión abierta.")
+        if body.get("session_id") != session.id:
+            raise VluxApiError("CONFLICT", "La sesión indicada no es la sesión abierta de la caja.",
+                               details={"session_id": session.id})
+        employee, _verified = _acting_employee(config, token, body, required=True)
+        kind = body.get("type")
+        if kind not in ("in", "out"):
+            raise VluxApiError("VALIDATION_ERROR", "type debe ser \"in\" o \"out\".")
+        if config.module_pos_hr and not config._vlux_api_is_manager(employee):
+            if employee in config.minimal_employee_ids:
+                raise VluxApiError("FORBIDDEN", "Tu acceso a la caja no permite mover efectivo.")
+            if kind != "out":
+                raise VluxApiError("FORBIDDEN", "Sólo un encargado puede meter efectivo a la caja.")
+            if not config.vlux_cashier_cash_out:
+                raise VluxApiError("FORBIDDEN", "En esta caja sólo un encargado puede sacar efectivo.")
+        amount = config.currency_id.round(_amount(body.get("amount"), "amount"))
+        if amount <= 0:
+            raise VluxApiError("VALIDATION_ERROR", "El importe debe ser mayor que cero.")
+        reason = _text(body.get("reason"), "reason", limit=200).strip()
+        if not reason:
+            raise VluxApiError("VALIDATION_ERROR", "Escribe el motivo.")
+        move_uuid = _text(body.get("uuid"), "uuid", limit=64)
+        if not move_uuid:
+            raise VluxApiError("VALIDATION_ERROR", "Falta uuid.")
+        line, duplicate = session._vlux_api_cash_move(employee, kind, amount, reason, move_uuid)
+        move = next(row for row in session._vlux_api_cash_moves() if row["id"] == line.id)
+        return {**move, "session_id": session.id, "duplicate": duplicate}
+
+    # --- quick product creation ------------------------------------------------
+
+    @api_route("/registers/<int:register_id>/products", scope="orders:write", methods=("POST",),
+               summary="Alta rápida de un producto desde la caja (encargado con PIN)")
+    def quick_product(self, token, register_id, **kwargs):
+        """Body ``{"name", "barcode", "list_price", "taxes_ids"?}`` (needs vlux_pos_catalog).
+
+        A scanned code the store does not know becomes a sellable product.
+        As the POS's own quick create, a person must be allowed to: here a
+        manager of the register (or an employee whose user has the
+        quick-create group), proven by PIN. A taken barcode answers
+        ``CONFLICT``. Returns the product as the catalog feed sends it.
+        """
+        Template = request.env["product.template"]
+        if not hasattr(Template, "_vlux_quick_create_for"):
+            raise VluxApiError("NOT_FOUND", "El alta rápida no está instalada en esta tienda.")
+        config = _register(register_id, token)
+        body = json_body()
+        session = config.current_session_id
+        if not session or session.state != "opened":
+            raise VluxApiError("NO_OPEN_SESSION", "La caja no tiene una sesión abierta.")
+        employee, _verified = _acting_employee(config, token, body, required=True)
+        user = employee.sudo().user_id if employee else request.env.user
+        allowed = (config._vlux_api_is_manager(employee) if employee else False) or (
+            user and user.has_group("vlux_pos_catalog.group_vlux_catalog_quick_create"))
+        if not allowed:
+            raise VluxApiError("FORBIDDEN", "Sólo un encargado puede dar de alta productos.")
+        values = {key: body[key] for key in ("name", "barcode", "list_price", "taxes_ids") if key in body}
+        try:
+            result = Template._vlux_quick_create_for(values, config)
+        except ValidationError as error:
+            raise VluxApiError("VALIDATION_ERROR", str(error.args[0]) if error.args else "Datos inválidos.")
+        if not result.get("ok"):
+            raise VluxApiError("CONFLICT", "El código de barras ya está asignado a otro producto.",
+                               details={"existing": result.get("existing")})
+        product = request.env["product.product"].browse(result["product_id"])
+        return _product_payload(product)
+
     # --- selling ------------------------------------------------------------
 
     @api_route("/orders/quote", scope="orders:write", methods=("POST",),
@@ -293,8 +467,105 @@ class VluxApiSales(http.Controller):
         """
         body = json_body()
         config = _register_from_body(body, token)
+        # A queued sale carries the session it was made under; a sale whose
+        # PIN was only checked offline is kept and marked unverified.
+        employee, verified = _acting_employee(
+            config, token, body, session_raw=body.get("employee_session") or None,
+        )
         try:
-            order, duplicate = request.env["pos.order"]._vlux_api_register_sale(config, body)
+            order, duplicate = request.env["pos.order"]._vlux_api_register_sale(
+                config, body, employee=employee, verified=verified,
+            )
+        except VluxSaleRefused as refusal:
+            raise VluxApiError(refusal.code, refusal.message, details=refusal.details)
+        return {**order._vlux_api_payload(), "duplicate": duplicate}
+
+    # --- returns ----------------------------------------------------------------------
+
+    @api_route("/orders/recent", scope="orders:write", summary="Ventas recientes de la caja (devolver, reimprimir)",
+               params=[{"name": "register_id", "in": "query", "schema": {"type": "integer"}},
+                       {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 30, "maximum": 100}}])
+    def recent_orders(self, token, register_id=None, limit=None, **kwargs):
+        """The register's latest sales and returns, newest first (default 30)."""
+        try:
+            config = _register(int(register_id), token)
+        except (TypeError, ValueError):
+            raise VluxApiError("VALIDATION_ERROR", "register_id debe ser un entero.")
+        try:
+            limit = max(1, min(100, int(limit or 30)))
+        except (TypeError, ValueError):
+            limit = 30
+        orders = request.env["pos.order"].search(
+            [("config_id", "=", config.id), ("state", "in", ("paid", "done", "invoiced"))],
+            order="date_order desc, id desc", limit=limit,
+        )
+        return {"items": [order._vlux_api_payload() for order in orders]}
+
+    @api_route("/orders/lookup", scope="orders:write", summary="Buscar una venta por su folio",
+               params=[{"name": "reference", "in": "query", "schema": {"type": "string"}}])
+    def lookup_order(self, token, reference=None, **kwargs):
+        """Sales of the token's company whose folio (or name) matches ``reference``."""
+        reference = (reference or "").strip()
+        if len(reference) < 3 or len(reference) > 64:
+            raise VluxApiError("VALIDATION_ERROR", "Escribe el folio del ticket.")
+        orders = request.env["pos.order"].search(
+            [("company_id", "=", request.env.company.id), ("is_refund", "=", False),
+             ("state", "in", ("paid", "done", "invoiced")),
+             "|", ("pos_reference", "ilike", reference), ("name", "ilike", reference)],
+            order="date_order desc", limit=10,
+        )
+        if token.pos_config_id:
+            orders = orders.filtered(lambda order: token.allows_register(order.config_id))
+        return {"items": [order._vlux_api_payload() for order in orders]}
+
+    def _refund_original(self, body):
+        try:
+            order_id = int(body.get("order_id"))
+        except (TypeError, ValueError):
+            raise VluxApiError("VALIDATION_ERROR", "order_id debe ser un entero.")
+        original = request.env["pos.order"].search(
+            [("id", "=", order_id), ("company_id", "=", request.env.company.id), ("is_refund", "=", False)], limit=1,
+        )
+        if not original:
+            raise VluxApiError("NOT_FOUND", "La venta no existe.")
+        return original
+
+    @api_route("/orders/refund/quote", scope="orders:write", methods=("POST",),
+               summary="Cuánto se devuelve de una venta (precios e impuestos de la venta)")
+    def refund_quote(self, token, **kwargs):
+        """Body ``{"register_id", "order_id", "lines": [{"line_id", "qty"}]}``; nothing is recorded."""
+        body = json_body()
+        _register_from_body(body, token)
+        original = self._refund_original(body)
+        Order = request.env["pos.order"]
+        quote = Order._vlux_api_refund_quote(original, Order._vlux_api_refund_lines(original, body.get("lines")))
+        return {
+            "order_id": original.id,
+            "amount_refund": -quote["amount_total"],
+            "amount_tax": -quote["amount_tax"],
+            "lines": [{"line_id": row["line"].id, "qty": -row["qty"], "amount": -row["price_subtotal_incl"]}
+                      for row in quote["lines"]],
+            "paid_with": [{"payment_method_id": payment.payment_method_id.id, "name": payment.payment_method_id.name,
+                           "type": payment.payment_method_id.type, "amount": payment.amount}
+                          for payment in original.payment_ids if not payment.is_change],
+        }
+
+    @api_route("/orders/refund", scope="orders:write", methods=("POST",),
+               summary="Registrar una devolución (idempotente por uuid; requiere PIN)")
+    def create_refund(self, token, **kwargs):
+        """Body ``{"uuid", "register_id", "order_id", "lines", "payments"}``.
+
+        Money goes back with ``payments`` (positive amounts, summing exactly
+        the return). Needs an employee session: cash leaves the drawer.
+        """
+        body = json_body()
+        config = _register_from_body(body, token)
+        employee, verified = _acting_employee(config, token, body, required=True)
+        original = self._refund_original(body)
+        try:
+            order, duplicate = request.env["pos.order"]._vlux_api_register_refund(
+                config, original, body, employee, verified,
+            )
         except VluxSaleRefused as refusal:
             raise VluxApiError(refusal.code, refusal.message, details=refusal.details)
         return {**order._vlux_api_payload(), "duplicate": duplicate}

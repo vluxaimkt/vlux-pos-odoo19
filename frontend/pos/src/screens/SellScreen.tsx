@@ -2,16 +2,24 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { isRetryable } from "../api/client";
 import type { OrderRequest } from "../api/types";
-import { getMeta, type ProductRow, setMeta } from "../db/db";
+import { getMeta, productRow, type ProductRow, setMeta } from "../db/db";
 import { productByBarcode, searchProducts } from "../db/search";
+import { parseBarcode } from "../lib/barcode";
 import { formatMoney } from "../lib/money";
-import { addProduct, type Cart, emptyCart, itemCount, removeLine, setCustomer, setQty } from "../sale/cart";
+import {
+  addProduct, type AddOptions, type Cart, emptyCart, isWeighed, itemCount, qtyLabel, removeLine, setCustomer, setQty, unitPrice,
+} from "../sale/cart";
 import { fromQuote, localPricing, type Pricing } from "../sale/pricing";
 import { META_CART, usePos } from "../state";
 import { CreditLine, CustomersScreen } from "./CustomersScreen";
 import { type CreditTicket, PayScreen } from "./PayScreen";
 import { ReceiptScreen } from "./ReceiptScreen";
 import { explain } from "./SetupScreen";
+import { ProductGrid } from "./ProductGrid";
+import { QuickProductDialog } from "./QuickProductDialog";
+import { WeighDialog } from "./WeighDialog";
+import { type ScanOutcome } from "../input/sources";
+import { PhoneScannerButton, usePhoneScanner } from "./PhoneScanner";
 
 const newId = () => crypto.randomUUID();
 
@@ -23,21 +31,35 @@ type Stage =
 
 /** Ring up a sale: scan or search, adjust the cart, charge, print the ticket. */
 export function SellScreen() {
-  const { db, client, setup, online, taxes, credit } = usePos();
+  const { db, client, setup, online, taxes, credit, employee, registerState } = usePos();
   const [cart, setCart] = useState<Cart | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ProductRow[]>([]);
   const [stage, setStage] = useState<Stage>({ name: "cart" });
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** A product sold by weight waiting for its kilos (new line, or re-weighing a line). */
+  const [weighing, setWeighing] = useState<{ product: ProductRow | Cart["lines"][number]["product"]; lineUuid?: string; qty?: number } | null>(null);
+  /** A scanned code the store does not know: a manager may add it on the spot. */
+  const [unknown, setUnknown] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const canCreate = online && (!registerState?.employee_login || employee?.role === "manager");
   const search = useRef<HTMLInputElement>(null);
+  const rounding = setup.store.tax_rounding;
+
+  // The latest cart, for scans that arrive one after another (phone, scanner).
+  const cartRef = useRef<Cart | null>(null);
 
   // The cart survives a reload of the app (power cut, accidental refresh).
   useEffect(() => {
-    void getMeta<Cart>(db, META_CART).then((saved) => setCart(saved ?? emptyCart(newId)));
+    void getMeta<Cart>(db, META_CART).then((saved) => {
+      cartRef.current = saved ?? emptyCart(newId);
+      setCart(cartRef.current);
+    });
   }, [db]);
 
   function update(next: Cart) {
+    cartRef.current = next;
     setCart(next);
     void setMeta(db, META_CART, next);
   }
@@ -45,7 +67,8 @@ export function SellScreen() {
   // A notice clears itself; typing or scanning again also clears it.
   useEffect(() => {
     if (!notice) return;
-    const id = setTimeout(() => setNotice(null), 4000);
+    // Longer when it offers to add the unknown product.
+    const id = setTimeout(() => { setNotice(null); setUnknown(null); }, unknown && canCreate ? 15000 : 4000);
     return () => clearTimeout(id);
   }, [notice]);
 
@@ -60,25 +83,69 @@ export function SellScreen() {
     };
   }, [db, query]);
 
-  function add(product: ProductRow) {
-    if (!cart) return;
-    update(addProduct(cart, product, newId));
+  /** Add to the cart; false when it waits for the weight. */
+  function add(product: ProductRow, qty?: number, options: AddOptions = {}): boolean {
+    const current = cartRef.current;
+    if (!current) return false;
     setQuery("");
     setNotice(null);
+    // Sold by weight with no weight yet: ask for the kilos.
+    if (product.to_weight && qty === undefined && options.priceUnit === undefined) {
+      setWeighing({ product });
+      return false;
+    }
+    update(addProduct(current, product, newId, qty ?? 1, options));
+    search.current?.focus();
+    return true;
+  }
+
+  function weighed(kilos: number) {
+    const current = cartRef.current;
+    if (!current || !weighing) return;
+    update(weighing.lineUuid ? setQty(current, weighing.lineUuid, kilos) : addProduct(current, weighing.product, newId, kilos));
+    setWeighing(null);
     search.current?.focus();
   }
 
-  /** A barcode scanner types the code and presses Enter. */
+  /**
+   * One read from any barcode source (keyboard-wedge scanner, linked phone…):
+   * the same rules whatever the device, and an outcome the device can show.
+   */
+  async function handleScan(code: string): Promise<ScanOutcome> {
+    const added = (product: ProductRow, ok: boolean): ScanOutcome => ok
+      ? { status: "delivered", code: "ADDED_TO_CART", message: "Agregado", product: { id: product.id, name: product.name, price: product.list_price } }
+      : { status: "delivered", code: "WEIGHT_REQUIRED", message: "Captura el peso en la caja", product: { id: product.id, name: product.name, price: product.list_price } };
+    // A scale label carries the weight or the price; the product has the code with that part zeroed.
+    const parsed = parseBarcode(code, setup.store.barcode_nomenclature);
+    if ((parsed.type === "weight" || parsed.type === "price") && parsed.value > 0) {
+      const labelled = (await productByBarcode(db, parsed.baseCode)) ?? (await productByBarcode(db, code));
+      if (labelled) {
+        return added(labelled, parsed.type === "weight" ? add(labelled, parsed.value) : add(labelled, 1, { priceUnit: parsed.value }));
+      }
+    }
+    const product = await productByBarcode(db, code);
+    if (product) return added(product, add(product));
+    setNotice(`No se encontró "${code}" en esta caja.`);
+    // A scale label of an unknown product is not a product code: set that product up in Odoo.
+    setUnknown(parsed.type === "weight" || parsed.type === "price" ? null : code);
+    setQuery("");
+    return { status: "not_found", code: "PRODUCT_NOT_FOUND", message: "No está en esta caja" };
+  }
+  const scanRef = useRef(handleScan);
+  scanRef.current = handleScan;
+  usePhoneScanner((code) => scanRef.current(code));
+
+  /** A keyboard-wedge scanner types the code and presses Enter; typing a name and Enter picks the only match. */
   async function onEnter(event: KeyboardEvent) {
     if (event.key !== "Enter") return;
     event.preventDefault();
     const code = query.trim();
     if (!code) return;
-    const product = await productByBarcode(db, code);
-    if (product) return add(product);
-    if (results.length === 1 && results[0]) return add(results[0]);
-    setNotice(`No se encontró "${code}" en esta caja.`);
-    setQuery("");
+    if (!(await productByBarcode(db, code)) && results.length === 1 && results[0] && !/^\d{8,}$/.test(code)) {
+      add(results[0]);
+      return;
+    }
+    await handleScan(code);
   }
 
   async function charge() {
@@ -91,7 +158,10 @@ export function SellScreen() {
         try {
           const quote = await client.quote({
             register_id: setup.register.id,
-            lines: cart.lines.map((line) => ({ uuid: line.uuid, product_id: line.product.id, qty: line.qty })),
+            lines: cart.lines.map((line) => ({
+              uuid: line.uuid, product_id: line.product.id, qty: line.qty,
+              ...(line.priceFromBarcode ? { price_unit: unitPrice(line), price_from_barcode: true } : {}),
+            })),
             ...(cart.customer ? { partner_id: cart.customer.id } : {}),
           });
           pricing = fromQuote(cart, quote);
@@ -99,7 +169,7 @@ export function SellScreen() {
           if (!isRetryable(error)) throw error;
         }
       }
-      pricing ??= localPricing(cart, taxes, setup.register.use_pricelist);
+      pricing ??= localPricing(cart, taxes, setup.register.use_pricelist, rounding);
       if (!pricing.exact) {
         setNotice("Sin internet no se puede calcular el total exacto de esta venta (impuestos o precios especiales). Conéctate para cobrarla.");
         return;
@@ -136,10 +206,10 @@ export function SellScreen() {
     return <ReceiptScreen order={stage.order} pricing={stage.pricing} credit={stage.credit} onNext={() => setStage({ name: "cart" })} />;
   }
 
-  const estimate = localPricing(cart, taxes, setup.register.use_pricelist);
+  const estimate = localPricing(cart, taxes, setup.register.use_pricelist, rounding);
   return (
-    <section class="p-3 grid gap-3 lg:grid-cols-[1fr_24rem]">
-      <div class="flex flex-col gap-3">
+    <section class="p-3 grid gap-3 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_24rem]">
+      <div class="flex flex-col gap-3 min-w-0">
         <input
           ref={search}
           class="input input-lg w-full"
@@ -154,24 +224,18 @@ export function SellScreen() {
           }}
           onKeyDown={(event) => void onEnter(event)}
         />
-        {notice && <div role="alert" class="alert alert-warning">{notice}</div>}
-        <ul class="list bg-base-100 rounded-box">
-          {results.map((product) => (
-            <li key={product.id}>
-              <button class="list-row w-full text-left items-center hover:bg-base-200" onClick={() => add(product)}>
-                <div class="list-col-grow">
-                  <div>{product.name}</div>
-                  <div class="text-xs opacity-60 font-mono">{product.barcode ?? product.default_code ?? ""}</div>
-                </div>
-                <div class="font-semibold">{formatMoney(product.list_price, setup.store.currency)}</div>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div class="flex justify-end"><PhoneScannerButton /></div>
+        {notice && (
+          <div role="alert" class="alert alert-warning">
+            <span class="flex-1">{notice}</span>
+            {unknown && canCreate && <button class="btn btn-sm" onClick={() => setCreating(true)}>Dar de alta</button>}
+          </div>
+        )}
+        <ProductGrid searched={query.trim() ? results : null} onPick={(product) => add(product)} />
         {query && !results.length && <p class="opacity-60">Sin resultados en esta caja.</p>}
       </div>
 
-      <aside class="card bg-base-100 shadow">
+      <aside class="card bg-base-100 shadow min-w-0">
         <div class="card-body gap-2 p-4">
           <h2 class="card-title">Venta <span class="badge">{itemCount(cart)}</span></h2>
           <div class="flex items-start gap-2 text-sm">
@@ -192,13 +256,22 @@ export function SellScreen() {
               <li key={line.uuid} class="flex items-center gap-2">
                 <div class="flex-1 min-w-0">
                   <div class="truncate">{line.product.name}</div>
-                  <div class="text-xs opacity-60">{formatMoney(line.product.list_price, setup.store.currency)} c/u</div>
+                  <div class="text-xs opacity-60">
+                    {isWeighed(line)
+                      ? `${qtyLabel(line.qty, line.product.uom?.name ?? "kg")} x ${formatMoney(unitPrice(line), setup.store.currency)} = ${formatMoney(unitPrice(line) * line.qty, setup.store.currency)}`
+                      : `${formatMoney(unitPrice(line), setup.store.currency)} c/u`}
+                    {line.priceFromBarcode && " · precio de etiqueta"}
+                  </div>
                 </div>
-                <div class="join">
-                  <button class="btn btn-sm join-item" aria-label="Menos" onClick={() => update(setQty(cart, line.uuid, line.qty - 1))}>−</button>
-                  <span class="btn btn-sm join-item pointer-events-none">{line.qty}</span>
-                  <button class="btn btn-sm join-item" aria-label="Más" onClick={() => update(setQty(cart, line.uuid, line.qty + 1))}>+</button>
-                </div>
+                {isWeighed(line) ? (
+                  <button class="btn btn-sm" onClick={() => setWeighing({ product: line.product, lineUuid: line.uuid, qty: line.qty })}>Pesar</button>
+                ) : (
+                  <div class="join">
+                    <button class="btn btn-sm join-item" aria-label="Menos" onClick={() => update(setQty(cart, line.uuid, line.qty - 1))}>−</button>
+                    <span class="btn btn-sm join-item pointer-events-none">{line.qty}</span>
+                    <button class="btn btn-sm join-item" aria-label="Más" onClick={() => update(setQty(cart, line.uuid, line.qty + 1))}>+</button>
+                  </div>
+                )}
                 <button class="btn btn-ghost btn-sm" aria-label="Quitar" onClick={() => update(removeLine(cart, line.uuid))}>✕</button>
               </li>
             ))}
@@ -219,6 +292,22 @@ export function SellScreen() {
           )}
         </div>
       </aside>
+      {creating && unknown && (
+        <QuickProductDialog barcode={unknown}
+          onCancel={() => { setCreating(false); search.current?.focus(); }}
+          onCreated={async (product) => {
+            // Into the local catalog now; the next sync brings the same row.
+            const row = productRow(product);
+            await db.products.put(row);
+            setCreating(false);
+            setUnknown(null);
+            add(row);
+          }} />
+      )}
+      {weighing && (
+        <WeighDialog product={weighing.product} initial={weighing.qty} currency={setup.store.currency}
+          onDone={weighed} onCancel={() => { setWeighing(null); search.current?.focus(); }} />
+      )}
     </section>
   );
 }

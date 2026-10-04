@@ -1,3 +1,5 @@
+import type { Nomenclature } from "../lib/barcode";
+
 // The parts of the VLUX API v1 contract the register uses (docs/API_V1.md).
 // v1 only grows: fields may be added, never removed or changed.
 
@@ -45,6 +47,18 @@ export interface RegisterConfig {
   payment_methods: PaymentMethod[];
   receipt_header: string | null;
   receipt_footer: string | null;
+  /** The register shows only these POS categories (Odoo "limitar categorías"). */
+  limit_categories?: boolean;
+  available_pos_category_ids?: number[];
+}
+
+/** A POS category: the tabs above the product grid. */
+export interface PosCategory {
+  id: number;
+  name: string;
+  parent_id: number | null;
+  sequence: number;
+  has_image: boolean;
 }
 
 export interface Currency {
@@ -67,9 +81,19 @@ export interface StoreConfig {
     zip: string | null;
     phone: string | null;
     timezone: string;
+    /** BCP 47 locale for money and dates ("es-MX"); older servers omit it. */
+    locale?: string;
   };
+  /** The company's default sale taxes (what a new product gets). */
+  default_sale_tax_ids?: number[];
+  /** Whether prices include taxes unless a tax says otherwise. */
+  price_include_default?: string | boolean;
   currency: Currency;
   registers: RegisterConfig[];
+  /** How the company rounds taxes ("round_per_line" | "round_globally"); older servers omit it. */
+  tax_rounding?: string;
+  /** Scale labels (weight or price inside the barcode); null when the store has none. */
+  barcode_nomenclature?: Nomenclature | null;
 }
 
 export interface Product {
@@ -85,6 +109,10 @@ export interface Product {
   active: boolean;
   available_in_pos: boolean;
   sale_ok: boolean;
+  /** Sold by weight: the register asks for the kilos (or reads them from a scale label). */
+  to_weight?: boolean;
+  /** Plain text the register shows on the product's card (never HTML). */
+  description?: string | null;
   image_version: string | null;
   sync_date: string;
 }
@@ -126,7 +154,18 @@ export interface RegisterState {
   cash_control: boolean;
   max_difference: number | null;
   session: Session | null;
+  /** Store options the screen adapts to; each server module adds its own. */
+  options?: RegisterOptions;
   already_open?: boolean;
+}
+
+export interface RegisterOptions {
+  /** Cashiers may take cash out of the drawer. */
+  cashier_cash_out?: boolean;
+  /** Quick reasons for cash in and out, as the store wrote them. */
+  cash_reasons?: { in: string[]; out: string[] };
+  /** With vlux_pos_credit: who may sell on credit ("managers" | "all"). */
+  credit_sellers?: string;
 }
 
 export interface Employee {
@@ -136,6 +175,23 @@ export interface Employee {
   user_id: number | null;
   pin_sha1: string | null;
   barcode_sha1: string | null;
+  /** May manage employees from this register (the register's option decides who). */
+  can_manage_staff?: boolean;
+}
+
+export type StaffRole = "manager" | "cashier" | "minimal" | "none";
+
+/** An employee of the store as the employees module shows it. */
+export interface StaffMember {
+  id: number;
+  name: string;
+  role: StaffRole;
+  active: boolean;
+  has_pin: boolean;
+  /** A POS manager user in Odoo: always a manager, changed only in Odoo. */
+  odoo_manager: boolean;
+  owner: boolean;
+  user: string | null;
 }
 
 export interface SaleLine {
@@ -143,6 +199,8 @@ export interface SaleLine {
   product_id: number;
   qty: number;
   price_unit?: number;
+  /** The price came from a scale label: the store's price, not a manual change. */
+  price_from_barcode?: boolean;
 }
 
 export interface QuoteLine {
@@ -176,6 +234,8 @@ export interface OrderRequest {
   payments: { payment_method_id: number; amount: number }[];
   expected_total?: number;
   created_at?: string;
+  /** The employee session the sale was made under (absent: PIN checked offline). */
+  employee_session?: string;
 }
 
 export interface OrderResult {
@@ -185,6 +245,8 @@ export interface OrderResult {
   pos_reference: string | null;
   tracking_number: string | null;
   state: string;
+  is_refund?: boolean;
+  refunded_order_id?: number | null;
   register_id: number;
   session_id: number;
   employee_id: number | null;
@@ -198,8 +260,24 @@ export interface OrderResult {
   duplicate?: boolean;
   /** Present with vlux_pos_credit: null when nothing was on credit. */
   credit?: CreditFigures | null;
-  lines: { uuid: string; product_id: number; name: string; qty: number; price_unit: number; price_subtotal_incl: number }[];
+  lines: {
+    id: number; uuid: string; product_id: number; name: string; qty: number; price_unit: number;
+    price_subtotal: number; price_subtotal_incl: number; refundable_qty: number;
+  }[];
   payments: { payment_method_id: number; name: string; amount: number; is_change: boolean }[];
+}
+
+/** Cash put in or taken out of the drawer (POST /registers/<id>/session/cash-move). */
+export interface CashMove {
+  id: number;
+  type: "in" | "out";
+  /** Always positive; `type` says which way. */
+  amount: number;
+  name: string;
+  employee: string | null;
+  date: string | null;
+  session_id?: number;
+  duplicate?: boolean;
 }
 
 export interface ClosingSummary {
@@ -211,10 +289,18 @@ export interface ClosingSummary {
     name: string;
     opening: number;
     sales: number;
-    moves: { name: string; amount: number }[];
+    /** Cash in (+) and out (−); `employee` who did it. */
+    moves: { name: string; amount: number; employee?: string | null }[];
     expected: number;
   } | null;
   other_methods: { payment_method_id: number; name: string; type: string; expected: number; count: number }[];
+  /** With vlux_pos_credit: each sale on credit and each abono of the session. */
+  credit?: {
+    sales: { customer: string; reference: string; amount: number; flagged: boolean }[];
+    abonos: { customer: string; reference: string; method: string; amount: number }[];
+    total_sales: number;
+    total_abonos: number;
+  };
 }
 
 /** A customer's credit (fiado), as GET /credit/customers returns it. */

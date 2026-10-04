@@ -5,10 +5,16 @@ import { round } from "./money";
 const TOLERANCE = 0.005;
 
 /**
- * Who may sell on credit: the encargado or the owner (decision D7), or anyone
- * on a register without employee login. The server re-checks and flags.
+ * Who may sell on credit: the register's option (`credit_sellers`: only the
+ * encargado and the owner by default, or any cashier), or anyone on a
+ * register without employee login. The server re-checks and flags.
  */
-export function canSellOnCredit(employeeLogin: boolean, role: string | null | undefined): boolean {
+export function canSellOnCredit(employeeLogin: boolean, role: string | null | undefined, sellers = "managers"): boolean {
+  return !employeeLogin || role === "manager" || (sellers === "all" && role === "cashier");
+}
+
+/** Authorising credit and setting limits stays with the encargado or the owner. */
+export function canAuthorizeCredit(employeeLogin: boolean, role: string | null | undefined): boolean {
   return !employeeLogin || role === "manager";
 }
 

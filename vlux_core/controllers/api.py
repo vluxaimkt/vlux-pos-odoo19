@@ -52,6 +52,10 @@ ERROR_CODES = {
     "CLOSING_REFUSED": 409,
     "PAYMENT_MISMATCH": 409,
     "TOTAL_MISMATCH": 409,
+    # Employees: the PIN is checked by the server, not only on the device.
+    "INVALID_PIN": 401,
+    "PIN_REQUIRED": 401,
+    "PIN_LOCKED": 429,
 }
 # Registered endpoints, for the OpenAPI document: path -> method -> metadata.
 API_PATHS = {}

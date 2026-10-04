@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 
 import type { OutboxRow } from "../db/db";
+import { formatDateTime } from "../lib/locale";
 import { formatMoney } from "../lib/money";
 import { usePos } from "../state";
 import { retrySale } from "../sync/outbox";
@@ -69,7 +70,7 @@ export function QueueScreen({ onClose }: { onClose: () => void }) {
                 </span>
                 <span class="font-mono text-xs opacity-60">{row.result?.pos_reference ?? row.uuid.slice(0, 8)}</span>
               </div>
-              <div class="text-sm">{new Date(row.createdAt).toLocaleString("es-MX")}</div>
+              <div class="text-sm">{formatDateTime(row.createdAt)}</div>
               {row.lastError && row.status !== "sent" && <div class="text-sm text-error">{row.lastError.message}</div>}
             </div>
             <div class="font-semibold">{formatMoney(row.body.expected_total ?? 0, setup.store.currency)}</div>

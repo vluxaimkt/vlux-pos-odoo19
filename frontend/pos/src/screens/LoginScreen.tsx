@@ -1,5 +1,6 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 
+import { ApiError, isRetryable } from "../api/client";
 import type { Employee } from "../api/types";
 import { getMeta, setMeta } from "../db/db";
 import { type GuardState, lockedFor, OPEN, recordFailure, recordSuccess } from "../lib/guard";
@@ -9,12 +10,21 @@ import { usePos } from "../state";
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
 const META_GUARD = "pin_guard";
 
+/** The digit a key stands for: top-row numbers and the numeric keypad (with or without Num Lock). */
+export function pinKey(event: Pick<KeyboardEvent, "key" | "code">): string | null {
+  if (/^[0-9]$/.test(event.key)) return event.key;
+  const pad = /^Numpad([0-9])$/.exec(event.code);
+  if (pad) return pad[1] ?? null;
+  if (event.key === "Backspace" || event.key === "Delete") return "⌫";
+  return null;
+}
+
 /**
  * Who is at the register. Works without the network: PINs are checked
  * locally. Repeated wrong PINs lock the keypad for a while (lib/guard).
  */
 export function LoginScreen() {
-  const { db, employees, setEmployee } = usePos();
+  const { db, client, setup, online, employees, setEmployee } = usePos();
   const [chosen, setChosen] = useState<Employee | null>(null);
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -37,19 +47,70 @@ export function LoginScreen() {
     await setMeta(db, META_GUARD, next);
   }
 
+  /**
+   * With internet the server checks the PIN and answers an employee session
+   * (needed to open, close and give credit). Without it, the register checks
+   * the PIN itself: sales still work and are marked unverified on the server.
+   */
   async function submit(value: string) {
     if (!chosen || lockedFor(guard, Date.now())) return;
     setPin("");
+    if (online) {
+      try {
+        const answer = await client.employeeLogin(setup.register.id, chosen.id, value);
+        client.employeeSession = answer.session;
+        await saveGuard(recordSuccess());
+        setEmployee(chosen);
+        return;
+      } catch (err) {
+        if (err instanceof ApiError && err.code === "INVALID_PIN") {
+          await failed();
+          return;
+        }
+        if (!isRetryable(err)) {
+          // Locked out, a manager without a PIN…: the server's own words.
+          setError(err instanceof Error ? err.message : String(err));
+          return;
+        }
+        // The server could not be reached: fall back to the offline check.
+      }
+    }
     if (await pinMatches(chosen, value)) {
+      client.employeeSession = null;
       await saveGuard(recordSuccess());
       setEmployee(chosen);
       return;
     }
+    await failed();
+  }
+
+  async function failed() {
     const next = recordFailure(guard, Date.now());
     await saveGuard(next);
     setNow(Date.now());
     setError(lockedFor(next, Date.now()) ? null : "PIN incorrecto.");
   }
+
+  // Typing the PIN on the keyboard (number row or numeric keypad) works like tapping it.
+  const pressRef = useRef<(key: string) => void>(() => undefined);
+  pressRef.current = press;
+  useEffect(() => {
+    if (!chosen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
+      if (event.key === "Escape") {
+        setChosen(null);
+        setPin("");
+        return;
+      }
+      const key = pinKey(event);
+      if (!key) return;
+      event.preventDefault();
+      pressRef.current(key);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [chosen]);
 
   function press(key: string) {
     if (waitMs) return;
@@ -114,6 +175,7 @@ export function LoginScreen() {
         </div>
       )}
       {error && <div role="alert" class="alert alert-error">{error}</div>}
+      <p class="text-sm opacity-60">Puedes escribirlo con el teclado o el teclado numérico.</p>
       <div class="grid grid-cols-3 gap-2 w-64">
         {KEYS.map((key, index) =>
           key ? (

@@ -46,6 +46,11 @@ class PosOrder(models.Model):
     _inherit = "pos.order"
 
     source = fields.Selection(selection_add=[("vlux_api", "VLUX")], ondelete={"vlux_api": "set default"})
+    vlux_api_employee_verified = fields.Boolean(
+        string="Empleado verificado", readonly=True, copy=False, default=True,
+        help="La caja VLUX demostró con el PIN, en el servidor, quién hizo la venta. Falso: la caja lo "
+             "validó sin internet; las reglas que dependen de quién vende lo tratan como cajero.",
+    )
     vlux_api_price_overridden = fields.Boolean(
         string="Precio distinto al catálogo",
         readonly=True,
@@ -58,10 +63,12 @@ class PosOrder(models.Model):
         return self.search([("uuid", "=", uuid)], limit=1)
 
     @api.model
-    def _vlux_api_register_sale(self, config, data):
+    def _vlux_api_register_sale(self, config, data, employee=None, verified=True):
         """Record ``data`` as a paid sale of ``config``; return ``(order, duplicate)``.
 
         ``data`` is the request body of ``POST /orders`` (see ``docs/API_V1.md``).
+        ``employee``/``verified``: who sold and whether the server checked
+        their PIN (an employee session); resolved from ``data`` when omitted.
         """
         uuid = _valid_uuid(data.get("uuid"))
         existing = self._vlux_api_find(uuid)
@@ -82,7 +89,8 @@ class PosOrder(models.Model):
             # A sale made before a closing arrives after it: like Odoo's
             # _get_valid_session, it lands in the session open now.
 
-        employee = config._vlux_api_employee(data.get("employee_id"))
+        if employee is None:
+            employee = config._vlux_api_employee(data.get("employee_id"))
         partner = self.env["res.partner"]
         if data.get("partner_id"):
             partner = partner.search([("id", "=", data["partner_id"])], limit=1)
@@ -118,6 +126,7 @@ class PosOrder(models.Model):
             "fiscal_position_id": quote["fiscal_position"].id or False,
             "date_order": fields.Datetime.to_string(_client_date(data.get("created_at"), now)),
             "source": "vlux_api",
+            "vlux_api_employee_verified": bool(verified),
             "state": "paid",
             "to_invoice": False,
             "amount_total": total,
@@ -233,6 +242,8 @@ class PosOrder(models.Model):
             "pos_reference": self.pos_reference or None,
             "tracking_number": self.tracking_number or None,
             "state": self.state,
+            "is_refund": self.is_refund,
+            "refunded_order_id": self.refunded_order_id.id or None,
             "register_id": self.config_id.id,
             "session_id": self.session_id.id,
             "employee_id": self.employee_id.id or None,
@@ -245,8 +256,11 @@ class PosOrder(models.Model):
             "price_overridden": self.vlux_api_price_overridden,
             "lines": [
                 {
+                    "id": line.id,
                     "uuid": line.uuid,
                     "product_id": line.product_id.id,
+                    # What can still be returned of a sold line (0 on a return's own lines).
+                    "refundable_qty": max(0.0, line.qty - line.refunded_qty) if line.qty > 0 else 0.0,
                     "name": line.full_product_name or line.product_id.display_name,
                     "qty": line.qty,
                     "price_unit": line.price_unit,
@@ -265,6 +279,165 @@ class PosOrder(models.Model):
                 for payment in self.payment_ids
             ],
         }
+
+
+class PosOrderRefund(models.Model):
+    """Returns through the API: the same kind of order the Odoo POS records.
+
+    A return is an order flagged ``is_refund`` whose lines point at the sold
+    lines (``refunded_orderline_id``) with negative quantities, at the price
+    and taxes of the sale. It goes through ``sync_from_ui`` like any sale, so
+    stock comes back and the closing books the money out.
+    """
+    _inherit = "pos.order"
+
+    @api.model
+    def _vlux_api_refund_lines(self, original, lines):
+        """Validate ``[{"line_id", "qty"}]`` against what is left to return of ``original``."""
+        if not isinstance(lines, list) or not lines:
+            raise ValidationError(_("Elige qué productos se devuelven."))
+        sold = {line.id: line for line in original.lines if line.qty > 0}
+        picked = []
+        for index, entry in enumerate(lines, start=1):
+            try:
+                line = sold[int(entry.get("line_id"))]
+                qty = float(entry.get("qty"))
+            except (KeyError, TypeError, ValueError, AttributeError):
+                raise ValidationError(_("La línea %s no es de esta venta.", index))
+            left = line.qty - line.refunded_qty
+            if qty <= 0 or qty > left + 1e-6:
+                raise ValidationError(_("De %(name)s se pueden devolver hasta %(left)s.",
+                                        name=line.full_product_name or line.product_id.display_name, left=left))
+            picked.append((line, qty))
+        return picked
+
+    @api.model
+    def _vlux_api_refund_quote(self, original, picked):
+        """Price a return with the sale's own prices and taxes; negative totals."""
+        AccountTax = self.env["account.tax"]
+        company = original.company_id
+        currency = original.currency_id
+        base_lines = [
+            AccountTax._prepare_base_line_for_taxes_computation(
+                None, id=index, currency_id=currency, product_id=line.product_id,
+                product_uom_id=line.product_uom_id, tax_ids=line.tax_ids_after_fiscal_position,
+                price_unit=line.price_unit, quantity=-qty, discount=line.discount,
+                partner_id=original.partner_id.commercial_partner_id,
+            )
+            for index, (line, qty) in enumerate(picked)
+        ]
+        AccountTax._add_tax_details_in_base_lines(base_lines, company)
+        AccountTax._round_base_lines_tax_details(base_lines, company)
+        totals = AccountTax._get_tax_totals_summary(base_lines=base_lines, currency=currency, company=company)
+        priced = []
+        for (line, qty), base_line in zip(picked, base_lines):
+            details = base_line["tax_details"]
+            excluded = details["total_excluded_currency"] + details.get("delta_total_excluded_currency", 0.0)
+            tax_amount = sum(tax["tax_amount_currency"] for tax in details["taxes_data"])
+            priced.append({"line": line, "qty": -qty, "price_subtotal": currency.round(excluded),
+                           "price_subtotal_incl": currency.round(excluded + tax_amount)})
+        return {
+            "lines": priced,
+            "amount_tax": currency.round(totals["tax_amount_currency"]),
+            "amount_total": currency.round(totals["total_amount_currency"]),
+        }
+
+    @api.model
+    def _vlux_api_register_refund(self, config, original, data, employee, verified):
+        """Record a return of ``original``; return ``(order, duplicate)``. Idempotent on ``uuid``."""
+        uuid = _valid_uuid(data.get("uuid"))
+        existing = self._vlux_api_find(uuid)
+        if existing:
+            if existing.config_id != config or not existing.is_refund:
+                raise VluxSaleRefused("CONFLICT", _("El uuid %s ya pertenece a otra operación.", uuid))
+            return existing, True
+        session = config.current_session_id
+        if not session or session.state != "opened":
+            raise VluxSaleRefused("NO_OPEN_SESSION", _("Abre la caja para hacer devoluciones."))
+        picked = self._vlux_api_refund_lines(original, data.get("lines"))
+        quote = self._vlux_api_refund_quote(original, picked)
+        currency = config.currency_id
+        total = quote["amount_total"]  # negative
+        payments = data.get("payments")
+        if not isinstance(payments, list) or not payments:
+            raise ValidationError(_("Elige cómo se devuelve el dinero."))
+        parsed = []
+        for index, payment in enumerate(payments, start=1):
+            try:
+                method_id = int(payment.get("payment_method_id"))
+                amount = currency.round(float(payment.get("amount")))
+            except (TypeError, ValueError, AttributeError):
+                raise ValidationError(_("El reembolso %s tiene datos inválidos.", index))
+            method = session.payment_method_ids.filtered(lambda m: m.id == method_id)
+            if not method:
+                raise ValidationError(_("La forma de pago %s no está en esta caja.", method_id))
+            refusal = self._vlux_api_method_refusal(method)
+            if refusal:
+                raise ValidationError(refusal)
+            if currency.compare_amounts(amount, 0.0) <= 0:
+                raise ValidationError(_("El reembolso %s debe ser mayor que cero.", index))
+            parsed.append({"method": method, "amount": amount})
+        refunded = currency.round(sum(p["amount"] for p in parsed))
+        if currency.compare_amounts(refunded, -total) != 0:
+            raise VluxSaleRefused(
+                "PAYMENT_MISMATCH",
+                _("Se devuelven %(refunded)s pero la devolución es de %(total)s.",
+                  refunded=currency.format(refunded), total=currency.format(-total)),
+                {"amount_total": total, "amount_refunded": refunded},
+            )
+        self._vlux_api_before_sale(config, original.partner_id, parsed)
+        now = fields.Datetime.now()
+        vals = {
+            "uuid": uuid,
+            "session_id": session.id,
+            "user_id": self.env.uid,
+            "partner_id": original.partner_id.id or False,
+            "pricelist_id": original.pricelist_id.id or False,
+            "fiscal_position_id": original.fiscal_position_id.id or False,
+            "date_order": fields.Datetime.to_string(now),
+            "source": "vlux_api",
+            "vlux_api_employee_verified": bool(verified),
+            "is_refund": True,
+            "state": "paid",
+            "to_invoice": False,
+            "amount_total": total,
+            "amount_tax": quote["amount_tax"],
+            "amount_paid": total,
+            "amount_return": 0.0,
+            "lines": [
+                [0, 0, {
+                    "uuid": str(uuid_lib.uuid4()),
+                    "product_id": row["line"].product_id.id,
+                    "full_product_name": row["line"].full_product_name or row["line"].product_id.display_name,
+                    "qty": row["qty"],
+                    "price_unit": row["line"].price_unit,
+                    "discount": row["line"].discount,
+                    "tax_ids": [[6, 0, row["line"].tax_ids.ids]],
+                    "price_subtotal": row["price_subtotal"],
+                    "price_subtotal_incl": row["price_subtotal_incl"],
+                    "refunded_orderline_id": row["line"].id,
+                }]
+                for row in quote["lines"]
+            ],
+            "payment_ids": [
+                [0, 0, {
+                    "uuid": str(uuid_lib.uuid4()),
+                    "payment_method_id": p["method"].id,
+                    "amount": -p["amount"],
+                    "payment_date": fields.Datetime.to_string(now),
+                }]
+                for p in parsed
+            ],
+        }
+        if employee:
+            vals["employee_id"] = employee.id
+        try:
+            with self.env.cr.savepoint():
+                self.sync_from_ui([vals])
+        except psycopg2.errors.UniqueViolation:
+            raise VluxSaleRefused("CONFLICT", _("La devolución %s se está registrando en otra solicitud; reintenta.", uuid),
+                                  {"retry": True})
+        return self._vlux_api_find(uuid), False
 
 
 def _client_date(value, now):

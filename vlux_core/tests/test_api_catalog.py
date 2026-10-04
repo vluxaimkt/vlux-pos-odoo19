@@ -20,6 +20,15 @@ class TestCatalogSyncModel(TransactionCase):
     def _template(self, name, **values):
         return self.env["product.template"].create({"name": name, "list_price": 10.0, **values})
 
+    def test_the_description_reaches_the_register_as_plain_text(self):
+        html = self._template("Café", public_description="<p>Molido <b>fino</b></p><script>alert(1)</script>")
+        payload = api_catalog._product_payload(html.product_variant_id)
+        self.assertIn("Molido", payload["description"])
+        self.assertNotIn("<", payload["description"], "never HTML: the register shows text")
+        sales = self._template("Té", description_sale="Caja con 20 sobres")
+        self.assertEqual(api_catalog._product_payload(sales.product_variant_id)["description"], "Caja con 20 sobres")
+        self.assertIsNone(api_catalog._product_payload(self._template("Agua").product_variant_id)["description"])
+
     def test_template_write_moves_every_variant_and_variant_write_only_itself(self):
         attribute = self.env["product.attribute"].create({
             "name": "Talla", "value_ids": [(0, 0, {"name": "S"}), (0, 0, {"name": "M"})],

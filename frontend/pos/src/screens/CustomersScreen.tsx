@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 
 import type { AbonoTicket, CreditRow, Customer } from "../api/types";
 import { customerRow } from "../db/db";
+import { formatDateTime } from "../lib/locale";
 import { formatMoney } from "../lib/money";
 import { normalize } from "../lib/text";
 import type { CartCustomer } from "../sale/cart";
@@ -21,7 +22,7 @@ type Mode =
  * receives abonos. With `onPick`, it chooses the customer of a sale.
  */
 export function CustomersScreen({ onClose, onPick }: { onClose: () => void; onPick?: (customer: CartCustomer) => void }) {
-  const { db, setup, credit, canSellOnCredit, online, refreshCredit } = usePos();
+  const { db, setup, credit, canAuthorizeCredit, online, refreshCredit } = usePos();
   const [mode, setMode] = useState<Mode>({ name: "list" });
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<Customer[]>([]);
@@ -104,7 +105,7 @@ export function CustomersScreen({ onClose, onPick }: { onClose: () => void; onPi
                   {row && row.balance > 0 && (
                     <button class="btn btn-sm btn-primary" disabled={!online} onClick={() => setMode({ name: "abono", customer: pick })}>Abonar</button>
                   )}
-                  {canSellOnCredit && (
+                  {canAuthorizeCredit && (
                     <button class="btn btn-sm" disabled={!online} onClick={() => setMode({ name: "credit", customer: pick })}>Crédito…</button>
                   )}
                 </div>
@@ -309,7 +310,7 @@ function AbonoReceipt({ ticket, onDone }: { ticket: AbonoTicket; onDone: () => v
       <article class="receipt bg-white text-black font-mono text-sm p-4 w-[80mm] max-w-full shadow print:shadow-none">
         <div class="text-center font-bold text-base">{company.name}</div>
         <div class="text-center font-bold text-base border border-black mt-2 py-1">ABONO A CUENTA</div>
-        <div class="mt-2">{new Date(ticket.date.replace(" ", "T") + "Z").toLocaleString("es-MX")}</div>
+        <div class="mt-2">{formatDateTime(ticket.date.replace(" ", "T") + "Z")}</div>
         <div>Folio: {ticket.reference ?? ticket.uuid.slice(0, 8)}</div>
         <div>Cliente: {ticket.partner_name}</div>
         <div>Atendió: {ticket.cashier}</div>

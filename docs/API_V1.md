@@ -249,6 +249,10 @@ de 500, p95 = 121 ms por página en proceso (283 ms extremo a extremo por HTTP
 en el host de desarrollo), 10 consultas por página constantes, y la
 sincronización incremental entrega exactamente los cambios y las bajas.
 
+Cada producto del catálogo lleva `description`: la descripción del POS (o la
+de venta) en **texto plano**, nunca HTML, para mostrarla en la ficha del
+producto sin riesgo de inyección.
+
 ### 4.2 Alta rápida
 
 `POST /catalog/products` con cuerpo JSON: `config_id` (caja) y `name`,
@@ -258,6 +262,14 @@ Aplica las mismas reglas que el diálogo del POS: el usuario del token necesita
 el grupo de alta rápida y ser operador de POS, la caja debe ser de su compañía
 y tener una sesión abierta (el stock inicial entra a la ubicación de esa
 caja). Un código ya usado responde `CONFLICT` con `details.existing`.
+
+Desde la caja VLUX (PWA) la persona no es un usuario de Odoo sino un empleado
+con PIN: `POST /registers/<id>/products` (alcance `orders:write`)
+`{"name", "barcode", "list_price", "taxes_ids"?}` hace la misma alta rápida
+si quien está en la caja es encargado (o su usuario tiene el grupo de alta
+rápida), con PIN verificado y la caja abierta. Responde el producto como lo
+manda el catálogo, para venderlo en ese momento; `CONFLICT` si el código ya
+existe. Requiere `vlux_pos_catalog`.
 
 ### 4.3 Operación de venta (fase C)
 
@@ -276,6 +288,24 @@ Odoo. **Riesgo aceptado:** un PIN de 4 dígitos en SHA-1 sin sal se descifra por
 fuerza bruta; por eso sólo se entrega a un token que ya puede vender en esa
 caja (`orders:write`), el mismo nivel de confianza que el POS de Odoo.
 
+**PIN verificado por el servidor.** `POST /registers/<id>/employees/login`
+`{"employee_id", "pin"}` compara el PIN en el servidor (comparación de tiempo
+constante) y responde una **sesión de empleado** (`session`, válida un turno de
+12 h, sólo en esa caja y con el token de ese equipo) que viaja en la cabecera
+`X-Vlux-Employee`. Cinco PIN incorrectos bloquean a ese empleado en esa caja 15
+minutos (`PIN_LOCKED`); un encargado sin PIN no puede entrar.
+`POST /registers/<id>/employees/logout` la termina.
+
+- **Requieren la sesión** (`PIN_REQUIRED` si falta o venció): abrir y cerrar
+  caja, autorizar crédito y registrar abonos.
+- **Ventas:** una venta lleva `employee_session` (la sesión con la que se hizo;
+  así una venta en cola se valida aunque se envíe después). Si la caja validó
+  el PIN sin internet no hay sesión: la venta **se registra igual** (nunca se
+  pierde) y queda `vlux_api_employee_verified = False`; las reglas que dependen
+  de quién vende (crédito) la tratan como venta de cajera y la marcan.
+- `pin_sha1` de `/registers/<id>/employees` sigue existiendo sólo para validar
+  sin internet.
+
 **Apertura.** `POST /registers/<id>/session/open`
 `{"opening_cash": 500, "employee_id": 7, "notes": "..."}`. Repetirla es
 inofensivo: con la sesión abierta responde `already_open: true` sin cambiar
@@ -289,6 +319,15 @@ devuelve cada línea con precio, impuestos y subtotales, y `amount_untaxed`,
 `price_unit` decide la lista de precios de la caja (o la del cliente si la caja
 la ofrece); con `price_unit`, la línea se cobra a ese precio y
 `price_overridden` dice si difiere del catálogo.
+
+**Productos por peso.** El catálogo marca `to_weight` en los productos que se
+venden por peso; `qty` acepta kilos con decimales (la caja usa gramos, tres
+decimales). `/store/config` publica `tax_rounding` (`round_per_line` o
+`round_globally`: con pesos los totales difieren por un centavo según el
+método) y `barcode_nomenclature` (reglas de etiquetas de báscula: peso
+`21.....{NNDDD}`, precio `23.....{NNNDD}`). Una línea con
+`"price_from_barcode": true` lleva el precio leído de una etiqueta de báscula:
+se cobra a `price_unit` y no se marca como precio cambiado a mano.
 
 **Venta.** `POST /orders`:
 
@@ -333,6 +372,51 @@ y pagos para imprimir el ticket.
 otra sesión). La regla de diferencia máxima (D6, $30) la aplica el servidor: por
 encima del límite sólo cierra un encargado (el empleado que cuenta); si no,
 `CLOSING_REFUSED` y la caja **sigue abierta**.
+
+**Opciones de la caja.** El estado de la caja (`GET /registers/<id>/session`
+y las respuestas de abrir/cerrar) trae `options`: lo que cada negocio decide en
+Punto de venta → Ajustes y la pantalla respeta. Base (`vlux_pos_api`):
+`cashier_cash_out` (cajeros pueden sacar efectivo, apagado por defecto) y
+`cash_reasons` (`{"in": [...], "out": [...]}`, motivos rápidos). Con
+`vlux_pos_credit`: `credit_sellers` (`"managers"` por defecto, o `"all"`). Cada
+módulo agrega sus llaves extendiendo `pos.config._vlux_api_register_options()`;
+la pantalla ignora las que no conoce. `/store/config` trae además
+`company.locale` (p. ej. `es-MX`) para escribir dinero y fechas.
+
+**Entradas y salidas de efectivo.** `POST /registers/<id>/session/cash-move`
+`{"session_id": 31, "uuid": "…", "type": "out", "amount": 350.0, "reason": "Pago a proveedor"}`
+mete (`in`) o saca (`out`) efectivo del cajón con el mismo registro que el POS
+de Odoo (línea de extracto de la sesión con el empleado), así que el corte
+espera esa cantidad de más o de menos. Como en Odoo, sólo un encargado de la
+caja con PIN verificado; un cajero sólo puede sacar si la caja lo permite (opción `vlux_cashier_cash_out`, apagada por defecto como en Odoo; el estado de la caja la publica como `cashier_cash_out`), a su nombre; motivo obligatorio;
+idempotente por `uuid` (`duplicate: true`). `GET /registers/<id>/session/cash-moves`
+lista los de la sesión abierta; el corte los incluye con quién los hizo.
+
+**Empleados (módulo del dueño).** `GET /registers/<id>/staff` lista los
+empleados de la tienda con su acceso a esta caja (`manager`, `cashier`,
+`minimal`, `none`), si tienen PIN y si son dueños. `POST /registers/<id>/staff/new`
+`{"name", "role", "pin"}` da de alta; `POST /registers/<id>/staff/<employee_id>`
+con cualquiera de `{"name", "role", "pin", "active"}` cambia nombre, acceso,
+PIN o da de baja (`active: false` archiva; nunca se borra). El acceso son las
+listas de pos_hr de la caja (las mismas del POS de Odoo). Sólo con PIN
+verificado y si la opción de la caja lo permite (`vlux_staff_admins`: el dueño
+por defecto, o encargados y dueño); nadie se quita su propio acceso, un
+gerente del POS en Odoo sigue siendo encargado, y la caja debe conservar al
+menos un cajero (en Odoo una lista vacía deja entrar a todos). La lista de
+`/employees` trae `can_manage_staff` para que la caja muestre el módulo.
+
+**Escáner del celular** (requiere `vlux_mobile_scanner`). La caja sin sesión
+de Odoo (PWA) vincula un celular igual que el POS de Odoo, por QR:
+`POST /registers/<id>/scanner/pair {"device_id"}` devuelve `code`,
+`qr_data_uri` y `scanner_url` (la página del celular no cambia). Mientras hay
+un celular vinculado, la caja pide las lecturas pendientes
+`GET /registers/<id>/scanner/events?pairing_id&device_id` (cada segundo) y
+contesta cada una con `POST /registers/<id>/scanner/ack`
+`{"device_id", "request_id", "status": "delivered"|"not_found"|"failed", "result_code", "message", "product_id"?, "product_name"?, "unit_price"?}`;
+el celular ve el resultado. Una lectura que la caja no recogió en 2 minutos se
+contesta como `EXPIRED` (no se agrega tarde). `GET .../scanner/status` y
+`POST .../scanner/revoke` consultan y terminan la vinculación. Cada
+vinculación es de una caja y de un equipo (`device_id`).
 
 ### 4.4 Crédito (fiado)
 

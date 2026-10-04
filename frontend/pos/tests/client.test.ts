@@ -46,3 +46,22 @@ describe("ApiClient", () => {
     expect(calls[0]?.path).toBe("/catalog/products?limit=200&cursor=c1");
   });
 });
+
+describe("employee session", () => {
+  it("is sent with every call once the PIN was checked by the server", async () => {
+    const { client, calls } = fakeClient(() => ok({ register_id: 1 }));
+    await client.registerState(1);
+    expect(calls[0]?.headers["X-Vlux-Employee"]).toBeUndefined();
+    client.employeeSession = "sess-1";
+    await client.registerState(1);
+    expect(calls[1]?.headers["X-Vlux-Employee"]).toBe("sess-1");
+  });
+
+  it("asks for the PIN again when the server says the session is gone", async () => {
+    const { client } = fakeClient(() => fail(401, "PIN_REQUIRED"));
+    let asked = 0;
+    client.onPinRequired = () => { asked += 1; };
+    await expect(client.closingSummary(1)).rejects.toMatchObject({ code: "PIN_REQUIRED" });
+    expect(asked).toBe(1);
+  });
+});

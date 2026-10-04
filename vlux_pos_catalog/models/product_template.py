@@ -239,7 +239,15 @@ class ProductTemplate(models.Model):
         ``{"ok": False, "code": "BARCODE_EXISTS", "existing": {...}}`` when the
         barcode is already assigned. Validation problems raise ValidationError.
         """
-        config = self._vlux_quick_create_config(config_id)
+        return self._vlux_quick_create_for(values, self._vlux_quick_create_config(config_id))
+
+    @api.model
+    def _vlux_quick_create_for(self, values, config):
+        """The quick create itself, for a register the caller was already authorised on.
+
+        Private (not callable over RPC): ``vlux_pos_quick_create`` authorises
+        the logged-in user; the VLUX API authorises the employee by PIN.
+        """
         company = config.company_id
         product_values, initial_qty = self._vlux_prepare_quick_create_values(values, config)
         self._vlux_lock_barcode(company, product_values["barcode"])

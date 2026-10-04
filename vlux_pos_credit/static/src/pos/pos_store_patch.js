@@ -2,9 +2,13 @@ import { patch } from "@web/core/utils/patch";
 import { PosStore } from "@point_of_sale/app/services/pos_store";
 
 patch(PosStore.prototype, {
-    /** The encargado or the owner is at the register (or no employee login). */
+    /** Who may sell on credit is the register's option; by default the encargado or the owner. */
     get vluxCanSellOnCredit() {
-        return !this.config.module_pos_hr || Boolean(this.employeeIsAdmin);
+        return (
+            this.config.vlux_credit_sellers === "all" ||
+            !this.config.module_pos_hr ||
+            Boolean(this.employeeIsAdmin)
+        );
     },
 
     /**

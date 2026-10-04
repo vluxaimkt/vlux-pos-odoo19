@@ -49,6 +49,15 @@ class VluxCreditReport(models.AbstractModel):
             row["balance"] += payment.amount
             key = "last_purchase" if payment.amount > 0 else "last_payment"
             row[key] = payment.payment_date
+        for opening in self.env["vlux.credit.opening"].sudo().search(
+                [("state", "=", "posted"), ("company_id", "in", self.env.companies.ids)]):
+            row = per_partner.setdefault(opening.partner_id.id, {
+                "partner": opening.partner_id, "balance": 0.0, "last_purchase": None, "last_payment": None,
+            })
+            row["balance"] += opening.amount
+            opened = fields.Datetime.to_datetime(opening.date)
+            if not row["last_purchase"] or opened > row["last_purchase"]:
+                row["last_purchase"] = opened
         currency = self.env.company.currency_id
         customers = []
         for row in per_partner.values():
@@ -84,6 +93,16 @@ class VluxCreditReport(models.AbstractModel):
         }
 
     @api.model
+    def _statement_items(self, order):
+        currency = order.currency_id
+        return [{
+            "name": line.full_product_name or line.product_id.display_name,
+            "qty": line.qty,
+            "price_unit": currency.round(line.price_subtotal_incl / line.qty) if line.qty else 0.0,
+            "total": currency.round(line.price_subtotal_incl),
+        } for line in order.lines]
+
+    @api.model
     def get_statement(self, partner_id):
         """A customer's account: every purchase on credit, abono and refund, with the running balance."""
         self._check_owner()
@@ -94,7 +113,29 @@ class VluxCreditReport(models.AbstractModel):
         currency = self.env.company.currency_id
         balance = 0.0
         moves = []
-        for payment in payments:
+        # The notebook's balance goes first, on its date, among the register's moves.
+        openings = self.env["vlux.credit.opening"]._vlux_posted([partner.id])
+        events = sorted(
+            [(fields.Datetime.to_datetime(opening.date), 0, opening) for opening in openings]
+            + [(payment.payment_date, 1, payment) for payment in payments],
+            key=lambda event: (event[0], event[1], event[2].id),
+        )
+        for when, kind_order, record in events:
+            if kind_order == 0:
+                balance += record.amount
+                moves.append({
+                    "date": fields.Datetime.to_string(when),
+                    "reference": record.note or "",
+                    "kind": _("Saldo inicial (libreta)"),
+                    "items": [],
+                    "ticket_total": currency.round(record.amount),
+                    "charge": currency.round(record.amount),
+                    "payment": 0.0,
+                    "balance": currency.round(balance),
+                    "cashier": "",
+                })
+                continue
+            payment = record
             order = payment.pos_order_id
             balance += payment.amount
             if order.vlux_credit_abono:
@@ -108,6 +149,10 @@ class VluxCreditReport(models.AbstractModel):
                 "date": fields.Datetime.to_string(payment.payment_date),
                 "reference": order.pos_reference or order.name,
                 "kind": kind,
+                # What was bought (or returned): the customer recognises the
+                # products, not the folio.
+                "items": [] if order.vlux_credit_abono else self._statement_items(order),
+                "ticket_total": currency.round(order.amount_total),
                 "charge": currency.round(payment.amount) if payment.amount > 0 else 0.0,
                 "payment": currency.round(-payment.amount) if payment.amount < 0 else 0.0,
                 "balance": currency.round(balance),

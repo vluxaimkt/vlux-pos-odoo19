@@ -32,8 +32,17 @@ class PosOrder(models.Model):
         if not partner and any(payment["method"].type == "pay_later" for payment in payments):
             raise ValidationError(_("Elige al cliente al que se le fía."))
 
+    def _vlux_sold_by_manager(self):
+        # A VLUX register that could not prove who sold (PIN checked offline)
+        # counts as a cashier: its sales on credit are flagged for the owner.
+        self.ensure_one()
+        if (self.source == "vlux_api" and not self.vlux_api_employee_verified
+                and self.session_id.config_id.vlux_credit_sellers != "all"):
+            return False
+        return super()._vlux_sold_by_manager()
+
     @api.model
-    def _vlux_api_register_sale(self, config, data):
+    def _vlux_api_register_sale(self, config, data, employee=None, verified=True):
         # The balance before this sale is what the ticket prints as "saldo
         # anterior"; the real balance is always recomputed from payments.
         previous = None
@@ -41,7 +50,7 @@ class PosOrder(models.Model):
             partner = self.env["res.partner"].search([("id", "=", data["partner_id"])], limit=1)
             if partner:
                 previous = partner.sudo().vlux_credit_balance
-        order, duplicate = super()._vlux_api_register_sale(config, data)
+        order, duplicate = super()._vlux_api_register_sale(config, data, employee=employee, verified=verified)
         if not duplicate and previous is not None and order.vlux_credit_amount:
             order.sudo().vlux_credit_prev_balance = previous
         return order, duplicate
@@ -66,6 +75,40 @@ class PosOrder(models.Model):
             "flagged": self.vlux_credit_flagged,
             "issues": (self.vlux_credit_issues or "").splitlines(),
         }
+
+
+class PosSession(models.Model):
+    _inherit = "pos.session"
+
+    def _vlux_api_closing_extra(self):
+        """Who was given credit and who paid back in this session, for the closing slip.
+
+        The net credit of the day hides both: a sale on credit and an abono of
+        the same amount cancel out. Here each one is listed with the customer.
+        """
+        extra = super()._vlux_api_closing_extra()
+        orders = self.env["pos.order"].search(
+            [("session_id", "=", self.id), ("state", "in", CREDIT_ORDER_STATES)], order="date_order, id",
+        )
+        currency = self.currency_id
+        sales, abonos = [], []
+        for order in orders:
+            reference = order.pos_reference or order.name
+            customer = order.partner_id.name or ""
+            if order.vlux_credit_abono:
+                paid = order.payment_ids.filtered(lambda payment: payment.payment_method_id.type != "pay_later")[:1]
+                abonos.append({"customer": customer, "reference": reference, "method": paid.payment_method_id.name or "",
+                               "amount": currency.round(paid.amount)})
+            elif order.vlux_credit_amount:
+                sales.append({"customer": customer, "reference": reference, "amount": currency.round(order.vlux_credit_amount),
+                              "flagged": order.vlux_credit_flagged})
+        extra["credit"] = {
+            "sales": sales,
+            "abonos": abonos,
+            "total_sales": currency.round(sum(row["amount"] for row in sales)),
+            "total_abonos": currency.round(sum(row["amount"] for row in abonos)),
+        }
+        return extra
 
 
 class ResPartner(models.Model):

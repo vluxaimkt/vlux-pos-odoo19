@@ -7,6 +7,8 @@ export interface SaleContext {
   registerId: number;
   sessionId: number | null;
   employeeId: number | null;
+  /** The server-checked employee session at the time of the sale, if any. */
+  employeeSession?: string | null;
   now: Date;
 }
 
@@ -27,11 +29,13 @@ export function buildOrder(cart: Cart, pricing: Pricing, payments: Payment[], co
     ...(context.sessionId ? { session_id: context.sessionId } : {}),
     ...(context.employeeId ? { employee_id: context.employeeId } : {}),
     ...(cart.customer ? { partner_id: cart.customer.id } : {}),
+    ...(context.employeeSession ? { employee_session: context.employeeSession } : {}),
     lines: pricing.lines.map((line) => ({
       uuid: line.lineUuid,
       product_id: line.productId,
       qty: line.qty,
       price_unit: line.priceUnit,
+      ...(line.priceFromBarcode ? { price_from_barcode: true } : {}),
     })),
     payments: payments.map((payment) => ({ payment_method_id: payment.method.id, amount: payment.amount })),
     expected_total: pricing.total,

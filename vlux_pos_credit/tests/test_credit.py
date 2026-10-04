@@ -66,6 +66,13 @@ class TestVluxCredit(TestPoSCommon):
         self.assertIn(ISSUE_NOT_MANAGER, order.vlux_credit_issues)
         self.assertAlmostEqual(self.customer.vlux_credit_balance, 18.0, msg="the debt still counts")
 
+    def test_a_store_may_let_any_cashier_sell_on_credit(self):
+        session = self.open_new_session(opening_cash=500.0)
+        session.config_id.vlux_credit_sellers = "all"
+        order = self._sell_on_credit(1, self.cajera)
+        self.assertFalse(order.vlux_credit_flagged, "the register's option, not a fixed rule")
+        self.assertEqual(session.config_id._vlux_api_register_options()["credit_sellers"], "all")
+
     def test_a_customer_without_credit_is_flagged(self):
         self.open_new_session()
         self.other_customer.vlux_credit_allowed = False

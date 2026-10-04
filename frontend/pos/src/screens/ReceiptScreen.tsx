@@ -1,7 +1,9 @@
 import { useEffect, useState } from "preact/hooks";
 
 import type { OrderRequest, OrderResult } from "../api/types";
+import { formatDateTime } from "../lib/locale";
 import { formatMoney } from "../lib/money";
+import { qtyLabel } from "../sale/cart";
 import { paymentState } from "../sale/payment";
 import type { Pricing } from "../sale/pricing";
 import { usePos } from "../state";
@@ -57,7 +59,7 @@ export function ReceiptScreen({ order, pricing, credit, onNext }: {
         </header>
         <hr class="my-2 border-dashed border-black" />
         <div class="text-center font-bold">{onCredit > 0 ? "VENTA A CRÉDITO" : "TICKET DE VENTA"}</div>
-        <div>{new Date(order.created_at ?? Date.now()).toLocaleString("es-MX")}</div>
+        <div>{formatDateTime(order.created_at ?? Date.now())}</div>
         <div>{register.name}{employee ? ` · ${employee.name}` : ""}</div>
         <div>Folio: {result?.pos_reference ?? result?.name ?? "pendiente (sin internet)"}</div>
         <hr class="my-2 border-dashed border-black" />
@@ -65,7 +67,7 @@ export function ReceiptScreen({ order, pricing, credit, onNext }: {
           <div key={line.lineUuid}>
             <div>{line.name}</div>
             <div class="flex justify-between">
-              <span>{line.qty} x {formatMoney(line.displayUnit, currency)}</span>
+              <span>{qtyLabel(line.qty, line.unit)} x {formatMoney(line.displayUnit, currency)}</span>
               <span>{formatMoney(line.total, currency)}</span>
             </div>
           </div>

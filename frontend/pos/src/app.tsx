@@ -12,8 +12,14 @@ import type { TaxInfo } from "./sale/pricing";
 import { CloseScreen } from "./screens/CloseScreen";
 import { QueueScreen } from "./screens/QueueScreen";
 import { META_CREDIT, META_EMPLOYEES, META_SETUP, META_TAXES, META_TOKEN, PosContext, type PosContextValue, type Setup, usePos } from "./state";
-import { canSellOnCredit } from "./sale/credit";
+import { canAuthorizeCredit, canSellOnCredit } from "./sale/credit";
+import { setLocale } from "./lib/locale";
 import { CustomersScreen } from "./screens/CustomersScreen";
+import { SalesScreen } from "./screens/SalesScreen";
+import { CashMoveScreen } from "./screens/CashMoveScreen";
+import { EmployeesScreen } from "./screens/EmployeesScreen";
+import { dropImageUrls } from "./sync/images";
+import { forgetPhoneScanner } from "./screens/PhoneScanner";
 import { syncFeed } from "./sync/catalog";
 import { flushOutbox } from "./sync/outbox";
 import { renewIfDue } from "./sync/token";
@@ -62,23 +68,47 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   const client = useMemo(() => new ApiClient({ token: paired.token }), [paired.token]);
   const registerId = paired.setup.register.id;
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [employee, setEmployee] = useState<Employee | null>(null);
+  const [employee, setEmployeeState] = useState<Employee | null>(null);
+
+  // Leaving the register (or the idle lock) ends the employee session on the
+  // server too; a new token (renewal) means a new PIN, since sessions are tied to it.
+  const setEmployee = useCallback((next: Employee | null) => {
+    if (!next && client.employeeSession) {
+      if (navigator.onLine) void client.employeeLogout(registerId).catch(() => undefined);
+      client.employeeSession = null;
+    }
+    setEmployeeState(next);
+  }, [client, registerId]);
+
+  useEffect(() => {
+    client.onPinRequired = () => setEmployee(null);
+    return () => {
+      client.onPinRequired = null;
+    };
+  }, [client, setEmployee]);
+
+  useEffect(() => {
+    setEmployeeState(null);
+  }, [client]);
   const [registerState, setRegisterState] = useState<RegisterState | null>(null);
   const [catalogReady, setCatalogReady] = useState(false);
   const [taxes, setTaxes] = useState<Map<number, TaxInfo>>(new Map());
   const [credit, setCredit] = useState<Map<number, CreditRow>>(new Map());
-  const [view, setView] = useState<"register" | "queue" | "closing" | "customers">("register");
+  const [view, setView] = useState<"register" | "queue" | "closing" | "customers" | "sales" | "cash" | "staff">("register");
   const [status, setStatus] = useState({ syncing: false, pending: 0, attention: 0, error: null as string | null });
 
   // Unpairing wipes everything this device knows about the store (token,
   // catalog, customers, employees and their PIN hashes). Sales not yet sent
   // stay: they are the store's money and go out when a register is paired again.
   const forget = useCallback(async () => {
-    await db.transaction("rw", db.meta, db.products, db.customers, async () => {
+    await db.transaction("rw", [db.meta, db.products, db.customers, db.images], async () => {
       await db.meta.clear();
       await db.products.clear();
       await db.customers.clear();
+      await db.images.clear();
     });
+    dropImageUrls();
+    forgetPhoneScanner();
     onForget();
   }, [db, onForget]);
 
@@ -94,7 +124,7 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
       clearTimeout(timer);
       for (const name of ACTIVITY_EVENTS) window.removeEventListener(name, activity);
     };
-  }, [employee, registerState?.employee_login]);
+  }, [employee, registerState?.employee_login, setEmployee]);
 
   // Cached copies first, so the register works from the first second offline.
   useEffect(() => {
@@ -189,11 +219,15 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   useInterval(syncCatalog, CATALOG_EVERY_MS, online);
   useInterval(flush, OUTBOX_EVERY_MS);
 
+  // Money and dates the way the store's language writes them.
+  setLocale(paired.setup.store.company.locale);
+
   const context: PosContextValue = {
     db, client, setup: paired.setup, employees, employee, online, registerState, taxes, setEmployee, forget,
     flushNow: flush,
     credit, saveCredit, refreshCredit,
-    canSellOnCredit: canSellOnCredit(!!registerState?.employee_login, employee?.role),
+    canSellOnCredit: canSellOnCredit(!!registerState?.employee_login, employee?.role, registerState?.options?.credit_sellers),
+    canAuthorizeCredit: canAuthorizeCredit(!!registerState?.employee_login, employee?.role),
   };
 
   const waiting = online ? null : "Conéctate a internet para la primera carga de esta caja.";
@@ -203,6 +237,9 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   else if (registerState.employee_login && !employee) body = <LoginScreen />;
   else if (view === "queue") body = <QueueScreen onClose={() => setView("register")} />;
   else if (view === "customers") body = <CustomersScreen onClose={() => setView("register")} />;
+  else if (view === "sales") body = <SalesScreen onClose={() => setView("register")} />;
+  else if (view === "cash") body = <CashMoveScreen onClose={() => setView("register")} />;
+  else if (view === "staff") body = <EmployeesScreen onClose={() => setView("register")} onChanged={refreshRegister} />;
   else if (view === "closing") {
     body = (
       <CloseScreen
@@ -224,7 +261,15 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
           status={status}
           onQueue={() => setView("queue")}
           onCustomers={() => setView("customers")}
+          onSales={() => setView("sales")}
           onClosing={registerState?.session?.state === "opened" ? () => setView("closing") : null}
+          // Managers move cash; cashiers take it out only where the register allows it. The server checks it too.
+          onCash={registerState?.session?.state === "opened"
+            && (!registerState.employee_login || employee?.role === "manager"
+              || (employee?.role === "cashier" && !!registerState.options?.cashier_cash_out))
+            ? () => setView("cash") : null}
+          // The employees module: whoever the register's option allows (the owner by default).
+          onStaff={registerState?.employee_login && employee?.can_manage_staff ? () => setView("staff") : null}
         />
         {status.error && <div role="alert" class="alert alert-error rounded-none">{status.error}</div>}
         <main class="flex-1">{body}</main>
@@ -237,11 +282,14 @@ function Opened({ state, onOpened }: { state: RegisterState; onOpened: (state: R
   return state.session?.state === "opened" ? <SellScreen /> : <RegisterScreen state={state} onOpened={onOpened} />;
 }
 
-function Header({ status, onQueue, onCustomers, onClosing }: {
+function Header({ status, onQueue, onCustomers, onSales, onClosing, onCash, onStaff }: {
   status: { syncing: boolean; pending: number; attention: number };
   onQueue: () => void;
   onCustomers: () => void;
+  onSales: () => void;
   onClosing: (() => void) | null;
+  onCash: (() => void) | null;
+  onStaff: (() => void) | null;
 }) {
   const { setup, employee, online, setEmployee, forget } = usePos();
   return (
@@ -258,9 +306,12 @@ function Header({ status, onQueue, onCustomers, onClosing }: {
         <button class="btn btn-ghost btn-sm" tabIndex={0}>{employee?.name ?? "Menú"} ▾</button>
         <ul tabIndex={0} class="dropdown-content menu bg-base-200 border border-base-300 rounded-box z-20 w-60 p-2 mt-2 shadow-2xl"
           onClick={closeMenu}>
+          <li><button onClick={onSales}>Ventas y devoluciones</button></li>
           <li><button onClick={onCustomers}>Clientes y crédito</button></li>
           <li><button onClick={onQueue}>Ventas por enviar</button></li>
+          {onCash && <li><button onClick={onCash}>Entradas y salidas de efectivo</button></li>}
           {onClosing && <li><button onClick={onClosing}>Corte de caja</button></li>}
+          {onStaff && <li><button onClick={onStaff}>Empleados</button></li>}
           {employee && <li><button onClick={() => setEmployee(null)}>Cambiar de empleado</button></li>}
           <li><button onClick={() => { if (confirm("¿Desvincular este equipo? Se borran de este equipo el token, el catálogo, los clientes y los empleados. Las ventas por enviar se conservan.")) void forget(); }}>Desvincular equipo</button></li>
         </ul>

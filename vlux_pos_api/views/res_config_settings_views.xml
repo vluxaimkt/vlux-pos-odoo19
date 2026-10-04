@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_vlux_pos_api" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.vlux.pos.api</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="point_of_sale.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <setting id="set_maximum_difference" position="after">
+                <setting id="vlux_cashier_cash_out" string="Cajeros pueden sacar efectivo"
+                         help="En la caja VLUX, los cajeros pueden registrar salidas de efectivo (con motivo, a su nombre). Las entradas siguen siendo del encargado.">
+                    <field name="pos_vlux_cashier_cash_out"/>
+                </setting>
+                <setting id="vlux_staff_admins" string="Empleados desde la caja"
+                         help="Quién puede dar de alta empleados, cambiar su acceso y su PIN desde la caja VLUX.">
+                    <field name="pos_vlux_staff_admins" widget="radio"/>
+                </setting>
+                <setting id="vlux_cash_reasons" string="Motivos de entradas y salidas"
+                         help="Botones de motivo en la caja VLUX, uno por renglón.">
+                    <div class="content-group">
+                        <label for="pos_vlux_cash_in_reasons" string="Entradas" class="fw-normal"/>
+                        <field name="pos_vlux_cash_in_reasons" placeholder="Cambio (morralla)"/>
+                        <label for="pos_vlux_cash_out_reasons" string="Salidas" class="fw-normal"/>
+                        <field name="pos_vlux_cash_out_reasons" placeholder="Pago a proveedor"/>
+                    </div>
+                </setting>
+            </setting>
+        </field>
+    </record>
+</odoo>
