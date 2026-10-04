@@ -2,7 +2,7 @@ import type { TaxInfo } from "../sale/pricing";
 import type {
   AbonoTicket, CashMove, CreditRow,
   ClosingSummary, Customer, Employee, Envelope, FeedPage, Me, OrderRequest, OrderResult, Product, Quote,
-  PosCategory, RegisterState, SaleLine, StoreConfig, TokenInfo,
+  PosCategory, RegisterState, SaleLine, StaffMember, StaffRole, StoreConfig, TokenInfo,
 } from "./types";
 
 export const API_ROOT = "/vlux/api/v1";
@@ -108,6 +108,20 @@ export class ApiClient {
       );
     }
     return envelope.data as T;
+  }
+
+  // --- employees module (owner) ---
+
+  staff(registerId: number) {
+    return this.request<{ items: StaffMember[] }>("GET", `/registers/${registerId}/staff`);
+  }
+
+  addStaff(registerId: number, body: { name: string; role: StaffRole; pin: string }) {
+    return this.request<StaffMember>("POST", `/registers/${registerId}/staff/new`, body);
+  }
+
+  changeStaff(registerId: number, employeeId: number, body: { name?: string; role?: StaffRole; pin?: string; active?: boolean }) {
+    return this.request<StaffMember>("POST", `/registers/${registerId}/staff/${employeeId}`, body);
   }
 
   // --- phone scanner (vlux_mobile_scanner) ---

@@ -17,6 +17,7 @@ import { setLocale } from "./lib/locale";
 import { CustomersScreen } from "./screens/CustomersScreen";
 import { SalesScreen } from "./screens/SalesScreen";
 import { CashMoveScreen } from "./screens/CashMoveScreen";
+import { EmployeesScreen } from "./screens/EmployeesScreen";
 import { dropImageUrls } from "./sync/images";
 import { forgetPhoneScanner } from "./screens/PhoneScanner";
 import { syncFeed } from "./sync/catalog";
@@ -93,7 +94,7 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   const [catalogReady, setCatalogReady] = useState(false);
   const [taxes, setTaxes] = useState<Map<number, TaxInfo>>(new Map());
   const [credit, setCredit] = useState<Map<number, CreditRow>>(new Map());
-  const [view, setView] = useState<"register" | "queue" | "closing" | "customers" | "sales" | "cash">("register");
+  const [view, setView] = useState<"register" | "queue" | "closing" | "customers" | "sales" | "cash" | "staff">("register");
   const [status, setStatus] = useState({ syncing: false, pending: 0, attention: 0, error: null as string | null });
 
   // Unpairing wipes everything this device knows about the store (token,
@@ -238,6 +239,7 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   else if (view === "customers") body = <CustomersScreen onClose={() => setView("register")} />;
   else if (view === "sales") body = <SalesScreen onClose={() => setView("register")} />;
   else if (view === "cash") body = <CashMoveScreen onClose={() => setView("register")} />;
+  else if (view === "staff") body = <EmployeesScreen onClose={() => setView("register")} onChanged={refreshRegister} />;
   else if (view === "closing") {
     body = (
       <CloseScreen
@@ -266,6 +268,8 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
             && (!registerState.employee_login || employee?.role === "manager"
               || (employee?.role === "cashier" && !!registerState.options?.cashier_cash_out))
             ? () => setView("cash") : null}
+          // The employees module: whoever the register's option allows (the owner by default).
+          onStaff={registerState?.employee_login && employee?.can_manage_staff ? () => setView("staff") : null}
         />
         {status.error && <div role="alert" class="alert alert-error rounded-none">{status.error}</div>}
         <main class="flex-1">{body}</main>
@@ -278,13 +282,14 @@ function Opened({ state, onOpened }: { state: RegisterState; onOpened: (state: R
   return state.session?.state === "opened" ? <SellScreen /> : <RegisterScreen state={state} onOpened={onOpened} />;
 }
 
-function Header({ status, onQueue, onCustomers, onSales, onClosing, onCash }: {
+function Header({ status, onQueue, onCustomers, onSales, onClosing, onCash, onStaff }: {
   status: { syncing: boolean; pending: number; attention: number };
   onQueue: () => void;
   onCustomers: () => void;
   onSales: () => void;
   onClosing: (() => void) | null;
   onCash: (() => void) | null;
+  onStaff: (() => void) | null;
 }) {
   const { setup, employee, online, setEmployee, forget } = usePos();
   return (
@@ -306,6 +311,7 @@ function Header({ status, onQueue, onCustomers, onSales, onClosing, onCash }: {
           <li><button onClick={onQueue}>Ventas por enviar</button></li>
           {onCash && <li><button onClick={onCash}>Entradas y salidas de efectivo</button></li>}
           {onClosing && <li><button onClick={onClosing}>Corte de caja</button></li>}
+          {onStaff && <li><button onClick={onStaff}>Empleados</button></li>}
           {employee && <li><button onClick={() => setEmployee(null)}>Cambiar de empleado</button></li>}
           <li><button onClick={() => { if (confirm("¿Desvincular este equipo? Se borran de este equipo el token, el catálogo, los clientes y los empleados. Las ventas por enviar se conservan.")) void forget(); }}>Desvincular equipo</button></li>
         </ul>

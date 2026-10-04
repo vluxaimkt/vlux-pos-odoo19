@@ -175,6 +175,23 @@ export interface Employee {
   user_id: number | null;
   pin_sha1: string | null;
   barcode_sha1: string | null;
+  /** May manage employees from this register (the register's option decides who). */
+  can_manage_staff?: boolean;
+}
+
+export type StaffRole = "manager" | "cashier" | "minimal" | "none";
+
+/** An employee of the store as the employees module shows it. */
+export interface StaffMember {
+  id: number;
+  name: string;
+  role: StaffRole;
+  active: boolean;
+  has_pin: boolean;
+  /** A POS manager user in Odoo: always a manager, changed only in Odoo. */
+  odoo_manager: boolean;
+  owner: boolean;
+  user: string | null;
 }
 
 export interface SaleLine {

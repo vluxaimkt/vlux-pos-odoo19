@@ -392,6 +392,19 @@ caja con PIN verificado; un cajero sólo puede sacar si la caja lo permite (opci
 idempotente por `uuid` (`duplicate: true`). `GET /registers/<id>/session/cash-moves`
 lista los de la sesión abierta; el corte los incluye con quién los hizo.
 
+**Empleados (módulo del dueño).** `GET /registers/<id>/staff` lista los
+empleados de la tienda con su acceso a esta caja (`manager`, `cashier`,
+`minimal`, `none`), si tienen PIN y si son dueños. `POST /registers/<id>/staff/new`
+`{"name", "role", "pin"}` da de alta; `POST /registers/<id>/staff/<employee_id>`
+con cualquiera de `{"name", "role", "pin", "active"}` cambia nombre, acceso,
+PIN o da de baja (`active: false` archiva; nunca se borra). El acceso son las
+listas de pos_hr de la caja (las mismas del POS de Odoo). Sólo con PIN
+verificado y si la opción de la caja lo permite (`vlux_staff_admins`: el dueño
+por defecto, o encargados y dueño); nadie se quita su propio acceso, un
+gerente del POS en Odoo sigue siendo encargado, y la caja debe conservar al
+menos un cajero (en Odoo una lista vacía deja entrar a todos). La lista de
+`/employees` trae `can_manage_staff` para que la caja muestre el módulo.
+
 **Escáner del celular** (requiere `vlux_mobile_scanner`). La caja sin sesión
 de Odoo (PWA) vincula un celular igual que el POS de Odoo, por QR:
 `POST /registers/<id>/scanner/pair {"device_id"}` devuelve `code`,

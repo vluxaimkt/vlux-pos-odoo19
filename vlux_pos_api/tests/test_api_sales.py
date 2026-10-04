@@ -561,3 +561,67 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         self.assertEqual(response.status_code, 200, body)
         self.assertEqual(body["data"]["amount_total"], 37.5)
         self.assertFalse(body["data"]["price_overridden"])
+
+    # --- employees module ------------------------------------------------------------
+
+    def _owner_employee(self):
+        owner_user = self._make_user("api-staff-owner", "vlux_core.group_vlux_owner")
+        owner = self.env["hr.employee"].create({
+            "name": "Dueña", "user_id": owner_user.id, "company_id": self.config.company_id.id, "pin": "9876",
+        })
+        self.config.advanced_employee_ids = [(4, owner.id)]
+        return owner
+
+    def test_the_owner_manages_employees_from_the_register(self):
+        owner = self._owner_employee()
+        base = "/registers/%d/staff" % self.config.id
+        response, body = self._call("GET", base, employee=self.manager1)
+        self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"), "only the owner by default")
+        response, body = self._call("GET", base)
+        self.assertEqual(body["error"], "PIN_REQUIRED")
+
+        response, body = self._call("GET", base, employee=owner)
+        self.assertEqual(response.status_code, 200, body)
+        rows = {row["id"]: row for row in body["data"]["items"]}
+        self.assertEqual(rows[self.manager1.id]["role"], "manager")
+        self.assertEqual(rows[self.emp2.id]["role"], "cashier")
+        self.assertTrue(rows[owner.id]["owner"])
+
+        response, body = self._call("POST", base + "/new", {"name": "Lupita", "role": "cashier", "pin": "4321"},
+                                    employee=owner)
+        self.assertEqual(response.status_code, 200, body)
+        lupita = self.env["hr.employee"].browse(body["data"]["id"])
+        self.assertEqual((body["data"]["role"], body["data"]["has_pin"]), ("cashier", True))
+        _response, listed = self._call("GET", "/registers/%d/employees" % self.config.id)
+        self.assertIn(lupita.id, [row["id"] for row in listed["data"]["items"]], "she can log in at the register")
+        self.assertEqual(self._login(lupita, pin="4321")[0].status_code, 200)
+
+        for bad in ({"name": "X", "role": "cashier", "pin": "12a4"}, {"name": "", "role": "cashier", "pin": "1234"},
+                    {"name": "X", "role": "boss", "pin": "1234"}):
+            _response, body = self._call("POST", base + "/new", bad, employee=owner)
+            self.assertEqual(body["error"], "VALIDATION_ERROR", bad)
+
+        _response, body = self._call("POST", base + "/%d" % lupita.id, {"role": "minimal", "pin": "5555"}, employee=owner)
+        self.assertEqual(body["data"]["role"], "minimal")
+        self.assertEqual(self._login(lupita, pin="5555")[0].status_code, 200, "the new PIN works")
+
+        _response, body = self._call("POST", base + "/%d" % self.emp2.id, {"role": "none"}, employee=owner)
+        self.assertEqual(body["data"]["role"], "none")
+        _response, listed = self._call("GET", "/registers/%d/employees" % self.config.id)
+        self.assertNotIn(self.emp2.id, [row["id"] for row in listed["data"]["items"]], "no access, no login")
+
+        _response, body = self._call("POST", base + "/%d" % lupita.id, {"active": False}, employee=owner)
+        self.assertFalse(body["data"]["active"])
+        self.assertTrue(lupita.exists(), "archived, never deleted")
+
+        _response, body = self._call("POST", base + "/%d" % owner.id, {"role": "cashier"}, employee=owner)
+        self.assertEqual(body["error"], "VALIDATION_ERROR", "nobody lowers their own access")
+        owner_row = self._call("GET", "/registers/%d/employees" % self.config.id)[1]["data"]["items"]
+        self.assertTrue(next(row for row in owner_row if row["id"] == owner.id)["can_manage_staff"])
+
+    def test_a_store_may_let_managers_manage_employees(self):
+        self.config.vlux_staff_admins = "managers"
+        response, body = self._call("GET", "/registers/%d/staff" % self.config.id, employee=self.manager1)
+        self.assertEqual(response.status_code, 200, body)
+        response, body = self._call("GET", "/registers/%d/staff" % self.config.id, employee=self.emp2)
+        self.assertEqual(body["error"], "FORBIDDEN", "a cashier never does")
