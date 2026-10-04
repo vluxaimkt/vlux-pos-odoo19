@@ -1,7 +1,7 @@
 import type { TaxInfo } from "../sale/pricing";
 import type {
   AbonoTicket, CashMove, CreditRow,
-  ClosingSummary, Customer, Employee, Envelope, FeedPage, Me, OrderRequest, OrderResult, Product, Quote,
+  ClosingSummary, Customer, Employee, Envelope, FeedPage, Me, OrderRequest, OrderResult, Product, ProductChanges, Quote,
   PosCategory, RegisterState, SaleLine, StaffMember, StaffRole, StoreConfig, TokenInfo,
 } from "./types";
 
@@ -153,6 +153,22 @@ export class ApiClient {
     return this.request<{ status: string }>("POST", `/registers/${registerId}/scanner/ack`, body);
   }
 
+  /** Ask the linked phone for a product picture. */
+  scannerPhotoRequest(registerId: number, pairing: { pairingId: number; deviceId: string }, barcode?: string, label?: string) {
+    return this.request<{ request_id: string; expires_at: string }>("POST", `/registers/${registerId}/scanner/photo-request`,
+      { device_id: pairing.deviceId, pairing_id: pairing.pairingId, ...(barcode ? { barcode } : {}), ...(label ? { label } : {}) });
+  }
+
+  scannerPhoto(registerId: number, deviceId: string, requestId: string) {
+    return this.request<{ status: string; image?: string }>(
+      "GET", `/registers/${registerId}/scanner/photo?request_id=${encodeURIComponent(requestId)}&device_id=${encodeURIComponent(deviceId)}`);
+  }
+
+  scannerPhotoCancel(registerId: number, deviceId: string, requestId: string) {
+    return this.request<{ status: string }>("POST", `/registers/${registerId}/scanner/photo-cancel`,
+      { device_id: deviceId, request_id: requestId });
+  }
+
   posCategories() {
     return this.request<{ items: PosCategory[] }>("GET", "/catalog/pos-categories");
   }
@@ -245,8 +261,13 @@ export class ApiClient {
   }
 
   /** Quick create of a product from an unknown barcode (manager with PIN). */
-  quickProduct(registerId: number, body: { name: string; barcode: string; list_price: number; taxes_ids?: number[] }) {
+  quickProduct(registerId: number, body: { name: string; barcode: string; list_price: number; taxes_ids?: number[]; image?: string }) {
     return this.request<Product>("POST", `/registers/${registerId}/products`, body);
+  }
+
+  /** Change a product from the register (whoever the register allows, with PIN). */
+  editProduct(registerId: number, productId: number, body: ProductChanges) {
+    return this.request<Product>("POST", `/registers/${registerId}/products/${productId}`, body);
   }
 
   cashMoves(registerId: number) {

@@ -102,6 +102,22 @@ export function removeLine(cart: Cart, lineUuid: string): Cart {
   return { ...cart, lines: cart.lines.filter((line) => line.uuid !== lineUuid) };
 }
 
+/**
+ * A product was edited (price, name, taxes…): lines of it in the cart take
+ * the new data, except a price read from a scale label, which stays.
+ */
+export function refreshProduct(cart: Cart, product: CartProduct): Cart {
+  if (!cart.lines.some((line) => line.product.id === product.id)) return cart;
+  const { id, name, barcode, list_price, tax_ids, to_weight, uom } = product;
+  return {
+    ...cart,
+    lines: cart.lines.map((line) => line.product.id !== id ? line : {
+      ...line,
+      product: { id, name, barcode, list_price, tax_ids, ...(to_weight ? { to_weight: true, uom: { name: uom?.name ?? "kg" } } : {}) },
+    }),
+  };
+}
+
 export function setCustomer(cart: Cart, customer: CartCustomer | null): Cart {
   return { ...cart, customer };
 }

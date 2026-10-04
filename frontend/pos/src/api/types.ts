@@ -177,6 +177,21 @@ export interface Employee {
   barcode_sha1: string | null;
   /** May manage employees from this register (the register's option decides who). */
   can_manage_staff?: boolean;
+  /** May add and edit products from this register (the register's option decides who). */
+  can_edit_catalog?: boolean;
+}
+
+/** What the register may change on a product (POST /registers/<id>/products/<id>). */
+export interface ProductChanges {
+  name?: string;
+  list_price?: number;
+  description?: string;
+  barcode?: string;
+  pos_categ_id?: number | null;
+  to_weight?: boolean;
+  taxes_ids?: number[];
+  /** A data URI; null removes the picture. */
+  image?: string | null;
 }
 
 export type StaffRole = "manager" | "cashier" | "minimal" | "none";

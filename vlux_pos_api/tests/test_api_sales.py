@@ -625,3 +625,52 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         self.assertEqual(response.status_code, 200, body)
         response, body = self._call("GET", "/registers/%d/staff" % self.config.id, employee=self.emp2)
         self.assertEqual(body["error"], "FORBIDDEN", "a cashier never does")
+
+    # --- products from the register ------------------------------------------------
+
+    @staticmethod
+    def _png():
+        import base64
+        import io
+
+        from PIL import Image
+        stream = io.BytesIO()
+        Image.new("RGB", (4, 4), (200, 30, 30)).save(stream, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(stream.getvalue()).decode()
+
+    def test_managers_and_the_owner_edit_products_from_the_register(self):
+        self._open()
+        path = "/registers/%d/products/%d" % (self.config.id, self.cookies.id)
+        response, body = self._call("POST", path, {"list_price": 17.0}, employee=self.emp2)
+        self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"), "a cashier does not set prices")
+
+        response, body = self._call("POST", path, {
+            "name": "Galletas de avena", "list_price": 17.5, "description": "Paquete de 6 <b>piezas</b>",
+            "to_weight": False, "image": self._png(),
+        }, employee=self.manager1)
+        self.assertEqual(response.status_code, 200, body)
+        data = body["data"]
+        self.assertEqual((data["name"], data["list_price"]), ("Galletas de avena", 17.5))
+        self.assertEqual(data["description"], "Paquete de 6 <b>piezas</b>", "kept as the text typed, never as markup")
+        self.assertTrue(data["image_version"], "the register gets the new picture's version at once")
+        self.cookies.invalidate_recordset()
+        self.assertIn("&lt;b&gt;", self.cookies.public_description, "stored escaped")
+
+        response, body = self._call("POST", path, {"barcode": self.soda.barcode or "x"}, employee=self.manager1)
+        if self.soda.barcode:
+            self.assertEqual(body["error"], "VALIDATION_ERROR", "a barcode another product has is refused")
+        response, body = self._call("POST", path, {"image": "data:image/png;base64,bm90IGFuIGltYWdl"}, employee=self.manager1)
+        self.assertEqual(body["error"], "VALIDATION_ERROR")
+        response, body = self._call("POST", path, {}, employee=self.manager1)
+        self.assertEqual(body["error"], "VALIDATION_ERROR")
+
+        self.config.vlux_catalog_editors = "owner"
+        response, body = self._call("POST", path, {"list_price": 18.0}, employee=self.manager1)
+        self.assertEqual(body["error"], "FORBIDDEN", "the store kept it to the owner")
+        owner = self._owner_employee()
+        response, body = self._call("POST", path, {"list_price": 18.0}, employee=owner)
+        self.assertEqual((response.status_code, body["data"]["list_price"]), (200, 18.0))
+        rows = self._call("GET", "/registers/%d/employees" % self.config.id)[1]["data"]["items"]
+        editors = {row["id"]: row["can_edit_catalog"] for row in rows}
+        self.assertTrue(editors[owner.id])
+        self.assertFalse(editors[self.manager1.id])

@@ -1,4 +1,5 @@
 import base64
+import json
 import io
 import re
 from datetime import timedelta
@@ -7,6 +8,7 @@ from urllib.parse import urlencode, urlsplit
 import qrcode
 
 from odoo import fields, http
+from odoo.exceptions import ValidationError
 from odoo.addons.bus.websocket import WebsocketConnectionHandler
 from odoo.addons.vlux_core.controllers.assets import asset_version
 from odoo.http import request
@@ -23,6 +25,9 @@ RESULTS_BATCH_MAX = 50
 RATE_SCAN = 240
 RATE_RESULTS = 120
 RATE_HEARTBEAT = 12
+RATE_PHOTO = 20
+# A picture is a few hundred KB once the phone downsized it; base64 adds a third.
+PHOTO_BODY_MAX_BYTES = 9 * 1024 * 1024
 
 
 class VluxMobileScannerController(http.Controller):
@@ -302,6 +307,7 @@ class VluxMobileScannerController(http.Controller):
             )
         # The heartbeat is the one place where presence is written unconditionally.
         pairing.touch_last_seen(force=True)
+        photo = request.env["vlux.mobile.scanner.photo"].pending_for(pairing)
         return self._json(
             {
                 "ok": True,
@@ -309,9 +315,49 @@ class VluxMobileScannerController(http.Controller):
                 "pos_name": pairing.pos_config_id.name,
                 "session_name": pairing.pos_session_id.name,
                 "cooldown_ms": pairing.cooldown_ms,
+                # A picture the register is waiting for (fallback when the push was missed).
+                "photo_request": photo._payload() if photo else None,
                 **self._push_descriptor(pairing),
             }
         )
+
+    @http.route(
+        "/vlux/mobile/photo",
+        type="http",
+        auth="public",
+        methods=["POST"],
+        csrf=False,
+        save_session=False,
+    )
+    def mobile_photo(self, **kwargs):
+        """The phone sends the picture the register asked for: ``{"request_id", "image"}``."""
+        pairing = self._authenticate_mobile()
+        if not pairing:
+            return self._error(
+                "La vinculacion movil no es valida o expiro.", status=401, code="INVALID_TOKEN"
+            )
+        if not self._consume_rate_limit("photo", pairing.id, RATE_PHOTO, 60):
+            return self._rate_limit_error()
+        if (request.httprequest.content_length or 0) > PHOTO_BODY_MAX_BYTES:
+            return self._error("La foto es demasiado grande.", status=413, code="PHOTO_TOO_LARGE")
+        if "application/json" not in (request.httprequest.content_type or ""):
+            return self._error("Se esperaba JSON.", status=415, code="UNSUPPORTED_MEDIA_TYPE")
+        try:
+            payload = json.loads(request.httprequest.get_data(as_text=True) or "{}")
+        except ValueError:
+            return self._error("JSON invalido.", code="INVALID_JSON")
+        if not isinstance(payload, dict):
+            return self._error("JSON invalido.", code="INVALID_JSON")
+        photo = request.env["vlux.mobile.scanner.photo"].sudo().search(
+            [("request_id", "=", str(payload.get("request_id") or "")), ("pairing_id", "=", pairing.id)], limit=1
+        )
+        if not photo:
+            return self._error("La caja no pidio esta foto.", status=404, code="REQUEST_NOT_FOUND")
+        try:
+            photo.upload(payload.get("image"))
+        except ValidationError as error:
+            return self._error(str(error.args[0]) if error.args else "Foto invalida.", code="INVALID_PHOTO")
+        return self._json({"ok": True, "message": "Foto enviada a la caja."})
 
     @http.route(
         "/vlux/mobile/disconnect",

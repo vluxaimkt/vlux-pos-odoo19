@@ -228,6 +228,7 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
     credit, saveCredit, refreshCredit,
     canSellOnCredit: canSellOnCredit(!!registerState?.employee_login, employee?.role, registerState?.options?.credit_sellers),
     canAuthorizeCredit: canAuthorizeCredit(!!registerState?.employee_login, employee?.role),
+    canEditCatalog: !!registerState?.employee_login && !!employee?.can_edit_catalog,
   };
 
   const waiting = online ? null : "Conéctate a internet para la primera carga de esta caja.";

@@ -271,6 +271,15 @@ rápida), con PIN verificado y la caja abierta. Responde el producto como lo
 manda el catálogo, para venderlo en ese momento; `CONFLICT` si el código ya
 existe. Requiere `vlux_pos_catalog`.
 
+**Quién y cómo edita productos desde la caja.** Opción de la caja
+`vlux_catalog_editors` (`managers`: encargados y dueño, por defecto; `owner`:
+sólo el dueño); `/employees` trae `can_edit_catalog`. El alta rápida acepta
+`image` (data URI). `POST /registers/<id>/products/<product_id>` cambia
+cualquiera de `name, list_price, description` (texto plano), `barcode` (no
+repetido), `pos_categ_id`, `to_weight`, `taxes_ids` e `image` (`null` la
+quita); se escribe como el usuario de quien lo hizo y responde el producto
+como lo manda el catálogo, con la versión de la foto.
+
 ### 4.3 Operación de venta (fase C)
 
 Módulo `vlux_pos_api`. Todo pasa por los mismos métodos de Odoo que usa su POS
@@ -391,6 +400,15 @@ espera esa cantidad de más o de menos. Como en Odoo, sólo un encargado de la
 caja con PIN verificado; un cajero sólo puede sacar si la caja lo permite (opción `vlux_cashier_cash_out`, apagada por defecto como en Odoo; el estado de la caja la publica como `cashier_cash_out`), a su nombre; motivo obligatorio;
 idempotente por `uuid` (`duplicate: true`). `GET /registers/<id>/session/cash-moves`
 lista los de la sesión abierta; el corte los incluye con quién los hizo.
+
+**Foto desde el celular vinculado.** La caja pide una foto
+(`POST /registers/<id>/scanner/photo-request {"device_id", "pairing_id", "barcode"?, "label"?}`),
+el celular la recibe por su canal (y en el latido, `photo_request`), la toma
+y la sube (`POST /vlux/mobile/photo {"request_id", "image"}`, reducida a
+~1024 px en el celular), y la caja la recoge
+(`GET /registers/<id>/scanner/photo?request_id&device_id`: `requested`,
+`uploaded` con `image`, `cancelled` o `expired`; vence a los 10 minutos).
+`POST .../scanner/photo-cancel` la cancela.
 
 **Empleados (módulo del dueño).** `GET /registers/<id>/staff` lista los
 empleados de la tienda con su acceso a esta caja (`manager`, `cashier`,

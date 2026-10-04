@@ -6,6 +6,7 @@ import { browseProducts } from "../db/search";
 import { formatMoney } from "../lib/money";
 import { usePos } from "../state";
 import { productImageUrl } from "../sync/images";
+import { ProductEditDialog } from "./ProductEditDialog";
 
 const META_CATEGORIES = "pos-categories";
 
@@ -14,8 +15,15 @@ const META_CATEGORIES = "pos-categories";
  * picture, the name and the price. Tapping a tile adds it; "i" shows the
  * description. `searched` replaces the browsing with search results.
  */
-export function ProductGrid({ searched, onPick }: { searched: ProductRow[] | null; onPick: (product: ProductRow) => void }) {
-  const { db, client, setup, online } = usePos();
+export function ProductGrid({ searched, onPick, onChanged }: {
+  searched: ProductRow[] | null;
+  onPick: (product: ProductRow) => void;
+  /** A product was edited here: the caller refreshes what it shows (search results, cart). */
+  onChanged?: (row: ProductRow) => void;
+}) {
+  const { db, client, setup, online, canEditCatalog } = usePos();
+  const [editing, setEditing] = useState<{ product: ProductRow; picture: string | null } | null>(null);
+  const [version, setVersion] = useState(0);
   const [categories, setCategories] = useState<PosCategory[]>([]);
   const [category, setCategory] = useState<number | null>(null);
   const [browsed, setBrowsed] = useState<{ items: ProductRow[]; more: boolean }>({ items: [], more: false });
@@ -38,7 +46,7 @@ export function ProductGrid({ searched, onPick }: { searched: ProductRow[] | nul
     let current = true;
     void browseProducts(db, category, allowed, limit).then((result) => { if (current) setBrowsed(result); });
     return () => { current = false; };
-  }, [db, category, limit, allowed?.join(",")]);
+  }, [db, category, limit, allowed?.join(","), version]);
 
   // Top-level tabs, or the children of the open one (as the Odoo POS breadcrumb).
   const shown = categories.filter((c) => (allowed ? allowed.includes(c.id) : true));
@@ -72,7 +80,11 @@ export function ProductGrid({ searched, onPick }: { searched: ProductRow[] | nul
       )}
       {!searched && !browsed.items.length && <p class="opacity-60">No hay productos en esta categoría.</p>}
       {info && <ProductInfo product={info} currency={setup.store.currency}
-        onAdd={() => { onPick(info); setInfo(null); }} onClose={() => setInfo(null)} />}
+        onAdd={() => { onPick(info); setInfo(null); }} onClose={() => setInfo(null)}
+        onEdit={canEditCatalog && online ? (picture) => { setEditing({ product: info, picture }); setInfo(null); } : undefined} />}
+      {editing && <ProductEditDialog product={editing.product} picture={editing.picture} categories={shown}
+        onCancel={() => setEditing(null)}
+        onSaved={(row) => { setEditing(null); setInfo(row); setVersion((v) => v + 1); onChanged?.(row); }} />}
     </div>
   );
 }
@@ -126,11 +138,13 @@ function ProductTile({ product, onPick, onInfo }: { product: ProductRow; onPick:
   );
 }
 
-function ProductInfo({ product, currency, onAdd, onClose }: {
+function ProductInfo({ product, currency, onAdd, onClose, onEdit }: {
   product: ProductRow;
   currency: Parameters<typeof formatMoney>[1];
   onAdd: () => void;
   onClose: () => void;
+  /** Present when the person at the register may edit products. */
+  onEdit?: (picture: string | null) => void;
 }) {
   const url = useImage(product, true);
   return (
@@ -150,6 +164,7 @@ function ProductInfo({ product, currency, onAdd, onClose }: {
         </div>
         <div class="modal-action">
           <button class="btn" onClick={onClose}>Cerrar</button>
+          {onEdit && <button class="btn" onClick={() => onEdit(url)}>Editar</button>}
           <button class="btn btn-primary" onClick={onAdd}>Agregar</button>
         </div>
       </div>

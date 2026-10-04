@@ -25,6 +25,11 @@ export function forgetPhoneScanner(): void {
   publish(null);
 }
 
+/** The phone linked to this register, if any (for asking it for a picture). */
+export function usePhonePairing(): PhonePairing | null {
+  return usePairing()[0];
+}
+
 function usePairing(): [PhonePairing | null, (pairing: PhonePairing | null) => void] {
   const { db } = usePos();
   const [pairing, setPairing] = useState(current);

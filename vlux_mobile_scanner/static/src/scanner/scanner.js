@@ -26,7 +26,11 @@
         "resultIcon", "resultTitle", "resultCode", "resultProduct", "resultMessage",
         "repeatButton", "queueBadge", "historyList", "transportBadge",
         "manualBarcode", "manualSendButton", "disconnectButton",
+        "photoPanel", "photoLabel", "photoPreview", "photoInput", "photoTakeButton",
+        "photoSendButton", "photoCancelButton", "photoMessage",
     ].map((id) => [id, document.getElementById(id)]));
+    const PHOTO_MAX_SIDE = 1024;
+    const PHOTO_QUALITY = 0.85;
 
     const state = {
         token: sessionStorage.getItem(tokenKey) || "",
@@ -52,6 +56,10 @@
         // decoder scratch
         canvas: null,
         context: null,
+        // the register's request for a product picture
+        photoRequest: null,
+        photoData: "",
+        photoDismissed: "",
     };
     const gate = new ScanGate({ gapMs: 400, minRepeatMs: 700 });
     // Scans survive a page reload: the queue lives next to the token.
@@ -208,6 +216,97 @@
         state.pushChannel = data.push_channel || "";
         showScanner(state.posName);
         if (state.pushChannel) openSocket();
+        if ("photo_request" in data) {
+            if (data.photo_request) showPhotoRequest(data.photo_request);
+            else if (state.photoRequest && !state.photoData) hidePhotoRequest();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // A product picture the register asked for
+    // ------------------------------------------------------------------
+
+    function photoMessage(text, kind = "") {
+        el.photoMessage.textContent = text;
+        el.photoMessage.className = `vlux-message ${kind}`;
+        el.photoMessage.classList.toggle("is-hidden", !text);
+    }
+
+    function showPhotoRequest(request) {
+        if (!request?.request_id || request.request_id === state.photoDismissed) return;
+        if (state.photoRequest?.request_id === request.request_id) return;
+        state.photoRequest = request;
+        state.photoData = "";
+        const parts = [request.label, request.barcode].filter(Boolean);
+        el.photoLabel.textContent = parts.length ? parts.join(" · ") : "Producto nuevo";
+        el.photoPreview.classList.add("is-hidden");
+        el.photoPreview.removeAttribute("src");
+        el.photoSendButton.classList.add("is-hidden");
+        el.photoTakeButton.textContent = "Tomar foto";
+        photoMessage("");
+        el.photoPanel.classList.remove("is-hidden");
+        feedback(true);
+    }
+
+    function hidePhotoRequest() {
+        state.photoRequest = null;
+        state.photoData = "";
+        el.photoInput.value = "";
+        el.photoPanel.classList.add("is-hidden");
+    }
+
+    /** Downsize to ~1024 px JPEG on the phone: Odoo derives every size from it. */
+    function downsize(file) {
+        return new Promise((resolve, reject) => {
+            const url = URL.createObjectURL(file);
+            const image = new Image();
+            image.onload = () => {
+                const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(image.naturalWidth, image.naturalHeight));
+                const canvas = document.createElement("canvas");
+                canvas.width = Math.round(image.naturalWidth * scale);
+                canvas.height = Math.round(image.naturalHeight * scale);
+                canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+                URL.revokeObjectURL(url);
+                resolve(canvas.toDataURL("image/jpeg", PHOTO_QUALITY));
+            };
+            image.onerror = () => { URL.revokeObjectURL(url); reject(new Error("No se pudo leer la foto.")); };
+            image.src = url;
+        });
+    }
+
+    async function photoPicked() {
+        const file = el.photoInput.files?.[0];
+        if (!file) return;
+        try {
+            state.photoData = await downsize(file);
+            el.photoPreview.src = state.photoData;
+            el.photoPreview.classList.remove("is-hidden");
+            el.photoSendButton.classList.remove("is-hidden");
+            el.photoTakeButton.textContent = "Tomar otra";
+            photoMessage("");
+        } catch (error) {
+            photoMessage(error.message, "is-error");
+        }
+    }
+
+    async function sendPhoto() {
+        if (!state.photoRequest || !state.photoData) return;
+        el.photoSendButton.disabled = true;
+        try {
+            await requestJson("/vlux/mobile/photo", {
+                method: "POST",
+                body: JSON.stringify({ request_id: state.photoRequest.request_id, image: state.photoData }),
+            });
+            state.photoDismissed = state.photoRequest.request_id;
+            photoMessage("Foto enviada a la caja ✓", "");
+            feedback(true);
+            window.setTimeout(hidePhotoRequest, 1500);
+        } catch (error) {
+            photoMessage(error.message || "No se pudo enviar la foto.", "is-error");
+            feedback(false);
+        } finally {
+            el.photoSendButton.disabled = false;
+        }
     }
 
     async function pair(code) {
@@ -308,6 +407,10 @@
             if (!Array.isArray(notifications)) return;
             for (const notification of notifications) {
                 const message = notification?.message;
+                if (message?.type === "VLUX_MOBILE_PHOTO_REQUEST") {
+                    showPhotoRequest(message.payload);
+                    continue;
+                }
                 if (message?.type !== "VLUX_MOBILE_RESULT") continue;
                 for (const row of message.payload?.results || []) handleResult(row);
             }
@@ -683,6 +786,13 @@
     el.manualBarcode.addEventListener("keydown", (event) => { if (event.key === "Enter") manualSend(); });
     el.repeatButton?.addEventListener("click", () => { ensureAudioContext(); submitBarcode(state.lastBarcode); });
     el.disconnectButton.addEventListener("click", () => disconnect());
+    el.photoTakeButton.addEventListener("click", () => el.photoInput.click());
+    el.photoInput.addEventListener("change", photoPicked);
+    el.photoSendButton.addEventListener("click", sendPhoto);
+    el.photoCancelButton.addEventListener("click", () => {
+        state.photoDismissed = state.photoRequest?.request_id || "";
+        hidePhotoRequest();
+    });
     window.addEventListener("pagehide", stopCamera);
     window.addEventListener("online", () => {
         if (state.token) { heartbeat(); openSocket(); schedulePoll(true); flushOffline(); }
@@ -690,7 +800,7 @@
     // After a reload, anything restored into the queue is resent right away.
     if (state.token && queue.unsentIds().length) flushOffline();
     document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible" && state.token) { openSocket(); schedulePoll(true); }
+        if (document.visibilityState === "visible" && state.token) { openSocket(); schedulePoll(true); heartbeat(); }
     });
 
     if (!window.isSecureContext) el.httpsWarning.classList.remove("is-hidden");
