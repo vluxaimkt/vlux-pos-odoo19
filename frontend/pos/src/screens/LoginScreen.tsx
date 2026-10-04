@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 
+import { ApiError, isRetryable } from "../api/client";
 import type { Employee } from "../api/types";
 import { getMeta, setMeta } from "../db/db";
 import { type GuardState, lockedFor, OPEN, recordFailure, recordSuccess } from "../lib/guard";
@@ -14,7 +15,7 @@ const META_GUARD = "pin_guard";
  * locally. Repeated wrong PINs lock the keypad for a while (lib/guard).
  */
 export function LoginScreen() {
-  const { db, employees, setEmployee } = usePos();
+  const { db, client, setup, online, employees, setEmployee } = usePos();
   const [chosen, setChosen] = useState<Employee | null>(null);
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -37,14 +38,44 @@ export function LoginScreen() {
     await setMeta(db, META_GUARD, next);
   }
 
+  /**
+   * With internet the server checks the PIN and answers an employee session
+   * (needed to open, close and give credit). Without it, the register checks
+   * the PIN itself: sales still work and are marked unverified on the server.
+   */
   async function submit(value: string) {
     if (!chosen || lockedFor(guard, Date.now())) return;
     setPin("");
+    if (online) {
+      try {
+        const answer = await client.employeeLogin(setup.register.id, chosen.id, value);
+        client.employeeSession = answer.session;
+        await saveGuard(recordSuccess());
+        setEmployee(chosen);
+        return;
+      } catch (err) {
+        if (err instanceof ApiError && err.code === "INVALID_PIN") {
+          await failed();
+          return;
+        }
+        if (!isRetryable(err)) {
+          // Locked out, a manager without a PIN…: the server's own words.
+          setError(err instanceof Error ? err.message : String(err));
+          return;
+        }
+        // The server could not be reached: fall back to the offline check.
+      }
+    }
     if (await pinMatches(chosen, value)) {
+      client.employeeSession = null;
       await saveGuard(recordSuccess());
       setEmployee(chosen);
       return;
     }
+    await failed();
+  }
+
+  async function failed() {
     const next = recordFailure(guard, Date.now());
     await saveGuard(next);
     setNow(Date.now());

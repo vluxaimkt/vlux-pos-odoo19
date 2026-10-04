@@ -176,6 +176,8 @@ export interface OrderRequest {
   payments: { payment_method_id: number; amount: number }[];
   expected_total?: number;
   created_at?: string;
+  /** The employee session the sale was made under (absent: PIN checked offline). */
+  employee_session?: string;
 }
 
 export interface OrderResult {

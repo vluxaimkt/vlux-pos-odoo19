@@ -62,7 +62,28 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   const client = useMemo(() => new ApiClient({ token: paired.token }), [paired.token]);
   const registerId = paired.setup.register.id;
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [employee, setEmployee] = useState<Employee | null>(null);
+  const [employee, setEmployeeState] = useState<Employee | null>(null);
+
+  // Leaving the register (or the idle lock) ends the employee session on the
+  // server too; a new token (renewal) means a new PIN, since sessions are tied to it.
+  const setEmployee = useCallback((next: Employee | null) => {
+    if (!next && client.employeeSession) {
+      if (navigator.onLine) void client.employeeLogout(registerId).catch(() => undefined);
+      client.employeeSession = null;
+    }
+    setEmployeeState(next);
+  }, [client, registerId]);
+
+  useEffect(() => {
+    client.onPinRequired = () => setEmployee(null);
+    return () => {
+      client.onPinRequired = null;
+    };
+  }, [client, setEmployee]);
+
+  useEffect(() => {
+    setEmployeeState(null);
+  }, [client]);
   const [registerState, setRegisterState] = useState<RegisterState | null>(null);
   const [catalogReady, setCatalogReady] = useState(false);
   const [taxes, setTaxes] = useState<Map<number, TaxInfo>>(new Map());
@@ -94,7 +115,7 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
       clearTimeout(timer);
       for (const name of ACTIVITY_EVENTS) window.removeEventListener(name, activity);
     };
-  }, [employee, registerState?.employee_login]);
+  }, [employee, registerState?.employee_login, setEmployee]);
 
   // Cached copies first, so the register works from the first second offline.
   useEffect(() => {

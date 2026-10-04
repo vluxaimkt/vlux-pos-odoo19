@@ -90,6 +90,7 @@ export function PayScreen({ cart, pricing, onBack, onPaid }: {
         registerId: setup.register.id,
         sessionId: registerState?.session?.id ?? null,
         employeeId: employee?.id ?? null,
+        employeeSession: client.employeeSession,
         now: new Date(),
       });
       await enqueueSale(db, order);

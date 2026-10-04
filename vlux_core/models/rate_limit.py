@@ -54,10 +54,35 @@ class VluxRateLimit(models.Model):
     )
 
     @api.model
+    def _key(self, scope, identity):
+        identity = str(identity or "unknown")
+        return hashlib.sha256(f"{scope}:{identity}".encode("utf-8")).hexdigest()
+
+    @api.model
+    def exhausted(self, scope, identity, limit, window_seconds):
+        """Whether ``identity`` already used its ``limit`` in the current window, without counting.
+
+        With ``consume`` called only on failures and ``reset`` on success,
+        this is a lockout after repeated failures (wrong PINs).
+        """
+        cutoff = fields.Datetime.now() - timedelta(seconds=window_seconds)
+        self.env.cr.execute(
+            f"SELECT request_count FROM {self._table} WHERE key = %s AND window_start > %s",
+            [self._key(scope, identity), cutoff],
+        )
+        row = self.env.cr.fetchone()
+        return bool(row) and row[0] >= limit
+
+    @api.model
+    def reset(self, scope, identity):
+        """Forget ``identity``'s count (after a successful attempt)."""
+        with own_transaction(self.env) as cr:
+            cr.execute(f"DELETE FROM {self._table} WHERE key = %s", [self._key(scope, identity)])
+
+    @api.model
     def consume(self, scope, identity, limit, window_seconds):
         """True while ``identity`` stays inside ``limit`` per ``window_seconds``."""
-        identity = str(identity or "unknown")
-        key = hashlib.sha256(f"{scope}:{identity}".encode("utf-8")).hexdigest()
+        key = self._key(scope, identity)
         now = fields.Datetime.now()
         cutoff = now - timedelta(seconds=window_seconds)
         with own_transaction(self.env) as cr:

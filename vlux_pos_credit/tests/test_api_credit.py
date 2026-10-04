@@ -35,8 +35,19 @@ class TestVluxApiCredit(TestPosHrHttpCommon, VluxApiCase):
             pos_config=cls.config,
         )[1]
 
-    def _call(self, method, path, body=None):
+    def _session(self, employee):
+        """An employee session: the server checks the PIN (pos_hr fixture PINs)."""
+        response = self.url_open(API + "/registers/%d/employees/login" % self.config.id,
+                                 data=json.dumps({"employee_id": employee.id, "pin": employee.sudo().pin}),
+                                 headers={"Authorization": "Bearer " + self.raw, "Content-Type": "application/json"},
+                                 method="POST")
+        self.assertEqual(response.status_code, 200, response.text)
+        return json.loads(response.text)["data"]["session"]
+
+    def _call(self, method, path, body=None, employee=None):
         headers = {"Authorization": "Bearer " + self.raw}
+        if employee is not None:
+            headers["X-Vlux-Employee"] = self._session(employee)
         if body is not None:
             headers["Content-Type"] = "application/json"
         response = self.url_open(API + path, data=json.dumps(body) if body is not None else None,
@@ -45,13 +56,13 @@ class TestVluxApiCredit(TestPosHrHttpCommon, VluxApiCase):
 
     def _open(self):
         return self._call("POST", "/registers/%d/session/open" % self.config.id,
-                          {"opening_cash": 100.0, "employee_id": self.manager1.id})
+                          {"opening_cash": 100.0, "employee_id": self.manager1.id}, employee=self.manager1)
 
     def _authorize(self, limit=100.0, employee=None):
         return self._call("POST", "/credit/customers/%d" % self.lupe.id, {
             "register_id": self.config.id, "employee_id": (employee or self.manager1).id,
             "allowed": True, "limit": limit,
-        })
+        }, employee=employee or self.manager1)
 
     def _sell_on_credit(self, qty, employee, partner=None, credit=None):
         amount = 20.0 * qty
@@ -61,6 +72,8 @@ class TestVluxApiCredit(TestPosHrHttpCommon, VluxApiCase):
             "lines": [{"product_id": self.soda.id, "qty": qty}],
             "payments": [{"payment_method_id": self.credit.id, "amount": amount if credit is None else credit}],
             "expected_total": amount,
+            # Made under a PIN the server checked: who sold is known for sure.
+            "employee_session": self._session(employee),
         })
 
     # --- authorising ------------------------------------------------------------------
@@ -106,6 +119,17 @@ class TestVluxApiCredit(TestPosHrHttpCommon, VluxApiCase):
         self.assertIn(ISSUE_OVER_LIMIT, body["data"]["credit"]["issues"])
         self.assertEqual(body["data"]["credit"]["previous_balance"], 20.0)
 
+    def test_a_manager_claim_the_server_did_not_verify_is_flagged(self):
+        self._open()
+        self._authorize(limit=100.0)
+        response, body = self._call("POST", "/orders", {
+            "uuid": str(uuid.uuid4()), "register_id": self.config.id, "employee_id": self.manager1.id,
+            "partner_id": self.lupe.id, "lines": [{"product_id": self.soda.id, "qty": 1}],
+            "payments": [{"payment_method_id": self.credit.id, "amount": 20.0}], "expected_total": 20.0,
+        })
+        self.assertEqual(response.status_code, 200, "kept, never refused")
+        self.assertIn(ISSUE_NOT_MANAGER, body["data"]["credit"]["issues"])
+
     def test_credit_needs_a_customer(self):
         self._open()
         response, body = self._sell_on_credit(1, self.manager1, partner=False)
@@ -121,18 +145,19 @@ class TestVluxApiCredit(TestPosHrHttpCommon, VluxApiCase):
         abono = {"uuid": str(uuid.uuid4()), "register_id": self.config.id, "partner_id": self.lupe.id,
                  "amount": 15.0, "payment_method_id": self.cash.id, "employee_id": self.emp2.id}
 
-        response, body = self._call("POST", "/credit/abonos", abono)
+        response, body = self._call("POST", "/credit/abonos", abono, employee=self.emp2)
         self.assertEqual(response.status_code, 200, body)
         self.assertEqual((body["data"]["previous_balance"], body["data"]["new_balance"]), (40.0, 25.0))
         self.assertEqual(body["data"]["customer"]["balance"], 25.0)
 
-        response, again = self._call("POST", "/credit/abonos", abono)
+        response, again = self._call("POST", "/credit/abonos", abono, employee=self.emp2)
         self.assertEqual(again["data"]["order_id"], body["data"]["order_id"], "a retried abono is the same abono")
         _response, row = self._call("GET", "/credit/customers/%d" % self.lupe.id)
         self.assertEqual(row["data"]["balance"], 25.0)
 
         for bad in ({"amount": 999.0}, {"payment_method_id": self.credit.id}, {"payment_method_id": None}):
-            response, body = self._call("POST", "/credit/abonos", {**abono, "uuid": str(uuid.uuid4()), **bad})
+            response, body = self._call("POST", "/credit/abonos", {**abono, "uuid": str(uuid.uuid4()), **bad},
+                                        employee=self.emp2)
             self.assertEqual((response.status_code, body["error"]), (400, "VALIDATION_ERROR"), bad)
 
         _response, closing = self._call("GET", "/registers/%d/session/closing" % self.config.id)

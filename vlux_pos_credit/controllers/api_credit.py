@@ -10,7 +10,7 @@ from odoo import http
 from odoo.http import request
 
 from odoo.addons.vlux_core.controllers.api import VluxApiError, api_route, json_body
-from odoo.addons.vlux_pos_api.controllers.api_sales import _register, _register_from_body
+from odoo.addons.vlux_pos_api.controllers.api_sales import _acting_employee, _register, _register_from_body
 
 
 def _partner(partner_id):
@@ -53,7 +53,7 @@ class VluxApiCredit(http.Controller):
         """
         body = json_body()
         config = _register_from_body(body, token)
-        employee = config._vlux_api_employee(body.get("employee_id"))
+        employee, _verified = _acting_employee(config, token, body, required=True)
         partner = _partner(partner_id)
         request.env["res.partner"].vlux_pos_set_credit(
             partner.id, bool(body.get("allowed")), body.get("limit") or 0.0, config.id, employee.id or False,
@@ -74,7 +74,7 @@ class VluxApiCredit(http.Controller):
         session = config.current_session_id
         if not session or session.state != "opened":
             raise VluxApiError("NO_OPEN_SESSION", "Abre la caja para recibir abonos.")
-        employee = config._vlux_api_employee(body.get("employee_id"))
+        employee, _verified = _acting_employee(config, token, body, required=True)
         try:
             partner_id = int(body.get("partner_id"))
             method_id = int(body.get("payment_method_id"))

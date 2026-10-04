@@ -46,6 +46,11 @@ class PosOrder(models.Model):
     _inherit = "pos.order"
 
     source = fields.Selection(selection_add=[("vlux_api", "VLUX")], ondelete={"vlux_api": "set default"})
+    vlux_api_employee_verified = fields.Boolean(
+        string="Empleado verificado", readonly=True, copy=False, default=True,
+        help="La caja VLUX demostró con el PIN, en el servidor, quién hizo la venta. Falso: la caja lo "
+             "validó sin internet; las reglas que dependen de quién vende lo tratan como cajero.",
+    )
     vlux_api_price_overridden = fields.Boolean(
         string="Precio distinto al catálogo",
         readonly=True,
@@ -58,10 +63,12 @@ class PosOrder(models.Model):
         return self.search([("uuid", "=", uuid)], limit=1)
 
     @api.model
-    def _vlux_api_register_sale(self, config, data):
+    def _vlux_api_register_sale(self, config, data, employee=None, verified=True):
         """Record ``data`` as a paid sale of ``config``; return ``(order, duplicate)``.
 
         ``data`` is the request body of ``POST /orders`` (see ``docs/API_V1.md``).
+        ``employee``/``verified``: who sold and whether the server checked
+        their PIN (an employee session); resolved from ``data`` when omitted.
         """
         uuid = _valid_uuid(data.get("uuid"))
         existing = self._vlux_api_find(uuid)
@@ -82,7 +89,8 @@ class PosOrder(models.Model):
             # A sale made before a closing arrives after it: like Odoo's
             # _get_valid_session, it lands in the session open now.
 
-        employee = config._vlux_api_employee(data.get("employee_id"))
+        if employee is None:
+            employee = config._vlux_api_employee(data.get("employee_id"))
         partner = self.env["res.partner"]
         if data.get("partner_id"):
             partner = partner.search([("id", "=", data["partner_id"])], limit=1)
@@ -118,6 +126,7 @@ class PosOrder(models.Model):
             "fiscal_position_id": quote["fiscal_position"].id or False,
             "date_order": fields.Datetime.to_string(_client_date(data.get("created_at"), now)),
             "source": "vlux_api",
+            "vlux_api_employee_verified": bool(verified),
             "state": "paid",
             "to_invoice": False,
             "amount_total": total,

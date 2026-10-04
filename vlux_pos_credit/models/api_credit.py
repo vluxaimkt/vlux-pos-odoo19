@@ -32,8 +32,16 @@ class PosOrder(models.Model):
         if not partner and any(payment["method"].type == "pay_later" for payment in payments):
             raise ValidationError(_("Elige al cliente al que se le fía."))
 
+    def _vlux_sold_by_manager(self):
+        # A VLUX register that could not prove who sold (PIN checked offline)
+        # counts as a cashier: its sales on credit are flagged for the owner.
+        self.ensure_one()
+        if self.source == "vlux_api" and not self.vlux_api_employee_verified:
+            return False
+        return super()._vlux_sold_by_manager()
+
     @api.model
-    def _vlux_api_register_sale(self, config, data):
+    def _vlux_api_register_sale(self, config, data, employee=None, verified=True):
         # The balance before this sale is what the ticket prints as "saldo
         # anterior"; the real balance is always recomputed from payments.
         previous = None
@@ -41,7 +49,7 @@ class PosOrder(models.Model):
             partner = self.env["res.partner"].search([("id", "=", data["partner_id"])], limit=1)
             if partner:
                 previous = partner.sudo().vlux_credit_balance
-        order, duplicate = super()._vlux_api_register_sale(config, data)
+        order, duplicate = super()._vlux_api_register_sale(config, data, employee=employee, verified=verified)
         if not duplicate and previous is not None and order.vlux_credit_amount:
             order.sudo().vlux_credit_prev_balance = previous
         return order, duplicate

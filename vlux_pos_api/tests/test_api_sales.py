@@ -58,8 +58,25 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
 
     # --- helpers ----------------------------------------------------------------
 
-    def _call(self, method, path, body=None, token=None):
+    # PINs of the pos_hr fixture employees.
+    PINS = {"emp1": "2580", "emp2": "1234", "manager1": "5651"}
+
+    def _login(self, employee, pin=None, token=None):
+        """POST /employees/login; returns (response, body)."""
+        if pin is None:
+            pin = employee.sudo().pin
+        return self._call("POST", "/registers/%d/employees/login" % self.config.id,
+                          {"employee_id": employee.id, "pin": pin}, token=token)
+
+    def _session(self, employee, token=None):
+        response, body = self._login(employee, token=token)
+        self.assertEqual(response.status_code, 200, body)
+        return body["data"]["session"]
+
+    def _call(self, method, path, body=None, token=None, employee=None):
         headers = {"Authorization": "Bearer " + (token or self.raw)}
+        if employee is not None:
+            headers["X-Vlux-Employee"] = self._session(employee, token=token)
         if body is not None:
             headers["Content-Type"] = "application/json"
         response = self.url_open(
@@ -69,9 +86,10 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         return response, json.loads(response.text)
 
     def _open(self, opening_cash=100.0, employee=None):
+        employee = employee or self.emp2
         return self._call("POST", "/registers/%d/session/open" % self.config.id, {
-            "opening_cash": opening_cash, "employee_id": (employee or self.emp2).id,
-        })
+            "opening_cash": opening_cash, "employee_id": employee.id,
+        }, employee=employee)
 
     def _sale(self, payments, lines=None, **extra):
         body = {
@@ -114,8 +132,7 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
 
     def test_opening_needs_an_allowed_employee_and_is_safe_to_repeat(self):
         response, body = self._call("POST", "/registers/%d/session/open" % self.config.id, {"opening_cash": 50})
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(body["error"], "VALIDATION_ERROR")
+        self.assertEqual((response.status_code, body["error"]), (401, "PIN_REQUIRED"), "nobody proved who opens")
         self.assertFalse(self.config.current_session_id, "a refused opening leaves no session behind")
 
         response, body = self._open(opening_cash=100.0)
@@ -229,18 +246,18 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
             "session_id": session_id, "employee_id": self.emp2.id,
             "counted_cash": 105.5, "counted": [{"payment_method_id": self.card.id, "amount": 55.5}],
         }
-        response, body = self._call("POST", "/registers/%d/session/close" % self.config.id, close)
+        response, body = self._call("POST", "/registers/%d/session/close" % self.config.id, close, employee=self.emp2)
         self.assertEqual(response.status_code, 409, body)
         self.assertEqual(body["error"], "CLOSING_REFUSED", "a cashier cannot close $50 short")
         session = self.env["pos.session"].browse(session_id)
         self.assertEqual(session.state, "opened", "a refused closing leaves the register open")
 
         response, body = self._call("POST", "/registers/%d/session/close" % self.config.id,
-                                    {**close, "session_id": session_id + 1000})
+                                    {**close, "session_id": session_id + 1000}, employee=self.emp2)
         self.assertEqual(body["error"], "CONFLICT", "a stale screen cannot close another session")
 
         response, body = self._call("POST", "/registers/%d/session/close" % self.config.id,
-                                    {**close, "counted_cash": 155.5})
+                                    {**close, "counted_cash": 155.5}, employee=self.emp2)
         self.assertEqual(response.status_code, 200, body)
         self.assertIsNone(body["data"]["session"])
         session.invalidate_recordset()
@@ -251,7 +268,7 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         _response, opened = self._open(opening_cash=100.0)
         response, body = self._call("POST", "/registers/%d/session/close" % self.config.id, {
             "session_id": opened["data"]["session"]["id"], "employee_id": self.manager1.id, "counted_cash": 40.0,
-        })
+        }, employee=self.manager1)
         self.assertEqual(response.status_code, 200, body)
         self.assertEqual(self.env["pos.session"].browse(opened["data"]["session"]["id"]).state, "closed")
 
@@ -297,15 +314,75 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         boss = self.manager1
         boss.pin = False
         _response, opened = self._open(opening_cash=100.0)
+        response, body = self._login(boss, pin="")
+        self.assertEqual((response.status_code, body["error"]), (400, "VALIDATION_ERROR"), "a manager needs a PIN")
+        self.assertIn("PIN", body["message"])
         response, body = self._call("POST", "/registers/%d/session/close" % self.config.id, {
             "session_id": opened["data"]["session"]["id"], "employee_id": boss.id, "counted_cash": 40.0,
         })
-        self.assertEqual((response.status_code, body["error"]), (400, "VALIDATION_ERROR"), body)
-        self.assertIn("PIN", body["message"])
+        self.assertEqual((response.status_code, body["error"]), (401, "PIN_REQUIRED"), body)
         self.assertEqual(self.env["pos.session"].browse(opened["data"]["session"]["id"]).state, "opened")
 
         boss.pin = "7391"
         response, body = self._call("POST", "/registers/%d/session/close" % self.config.id, {
             "session_id": opened["data"]["session"]["id"], "employee_id": boss.id, "counted_cash": 40.0,
-        })
+        }, employee=boss)
         self.assertEqual(response.status_code, 200, body)
+
+    # --- the PIN checked by the server --------------------------------------------------
+
+    def test_the_server_checks_the_pin_and_locks_after_five_wrong_ones(self):
+        response, body = self._login(self.emp2, pin="0000")
+        self.assertEqual((response.status_code, body["error"]), (401, "INVALID_PIN"))
+        response, body = self._login(self.emp2)
+        self.assertEqual(response.status_code, 200, body)
+        self.assertEqual(body["data"]["employee"], {"id": self.emp2.id, "name": self.emp2.name, "role": "cashier"})
+        self.assertTrue(body["data"]["session"])
+        self.assertNotIn(self.emp2.pin, response.text, "the PIN never comes back")
+
+        # In production each wrong PIN is counted in a transaction of its own
+        # and survives the refusal; a test shares one connection and the
+        # refusal's savepoint would undo it, so the failures are counted here.
+        limiter = self.env["vlux.rate.limit"].sudo()
+        identity = "%s:%s" % (self.config.id, self.emp1.id)
+        for _attempt in range(5):
+            limiter.consume("pin", identity, 5, 900)
+        self.assertTrue(limiter.exhausted("pin", identity, 5, 900))
+        response, body = self._login(self.emp1)
+        self.assertEqual((response.status_code, body["error"]), (429, "PIN_LOCKED"), "even the right PIN waits")
+        response, body = self._login(self.emp2)
+        self.assertEqual(response.status_code, 200, "the lock is per employee")
+        limiter.reset("pin", identity)
+        self.assertFalse(limiter.exhausted("pin", identity, 5, 900), "a right PIN clears the count")
+
+    def test_a_session_only_works_on_its_register_device_and_until_logout(self):
+        session = self._session(self.emp2)
+        other_token = self.env["vlux.api.token"].issue(
+            "Otra tablet", "system:read catalog:read orders:write session:manage", user=self.cashier,
+        )[1]
+        headers = {"Authorization": "Bearer " + other_token, "X-Vlux-Employee": session, "Content-Type": "application/json"}
+        response = self.url_open(API + "/registers/%d/session/open" % self.config.id,
+                                 data=json.dumps({"opening_cash": 10}), headers=headers, method="POST")
+        self.assertEqual(json.loads(response.text)["error"], "PIN_REQUIRED", "a session is tied to its device's token")
+
+        headers = {"Authorization": "Bearer " + self.raw, "X-Vlux-Employee": session, "Content-Type": "application/json"}
+        response = self.url_open(API + "/registers/%d/session/open" % self.config.id,
+                                 data=json.dumps({"opening_cash": 10, "employee_id": self.manager1.id}), headers=headers, method="POST")
+        self.assertEqual(json.loads(response.text)["error"], "VALIDATION_ERROR", "cannot claim someone else")
+
+        self.url_open(API + "/registers/%d/employees/logout" % self.config.id, data="{}", headers=headers, method="POST")
+        response = self.url_open(API + "/registers/%d/session/open" % self.config.id,
+                                 data=json.dumps({"opening_cash": 10}), headers=headers, method="POST")
+        self.assertEqual(json.loads(response.text)["error"], "PIN_REQUIRED", "a logged-out session is dead")
+
+    def test_sales_record_whether_the_employee_was_verified(self):
+        self._open()
+        verified = self._sale([(self.cash, 100.0)], employee_session=self._session(self.emp2))
+        response, body = self._call("POST", "/orders", verified)
+        self.assertEqual(response.status_code, 200, body)
+        offline = self._sale([(self.cash, 100.0)])
+        response, body = self._call("POST", "/orders", offline)
+        self.assertEqual(response.status_code, 200, "an offline-checked sale is never refused")
+        orders = self.env["pos.order"].search([("uuid", "in", [verified["uuid"], offline["uuid"]])])
+        flags = {order.uuid: order.vlux_api_employee_verified for order in orders}
+        self.assertEqual(flags, {verified["uuid"]: True, offline["uuid"]: False})

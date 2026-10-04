@@ -51,6 +51,10 @@ export class ApiClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
+  /** Employee session (POST /employees/login), sent as X-Vlux-Employee. */
+  employeeSession: string | null = null;
+  /** Called when the server says the employee must enter the PIN again. */
+  onPinRequired: (() => void) | null = null;
 
   constructor(options: ApiClientOptions) {
     this.token = options.token;
@@ -69,6 +73,7 @@ export class ApiClient {
         headers: {
           Authorization: `Bearer ${this.token}`,
           Accept: "application/json",
+          ...(this.employeeSession ? { "X-Vlux-Employee": this.employeeSession } : {}),
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -93,6 +98,7 @@ export class ApiClient {
       throw new NetworkError(`Respuesta inesperada del servidor (HTTP ${response.status}).`, response.status);
     }
     if (!envelope.ok) {
+      if (envelope.error === "PIN_REQUIRED") this.onPinRequired?.();
       throw new ApiError(
         envelope.error ?? "INTERNAL_ERROR",
         envelope.message ?? "Error del servidor.",
@@ -127,6 +133,16 @@ export class ApiClient {
 
   taxes() {
     return this.request<{ items: TaxInfo[] }>("GET", "/catalog/taxes");
+  }
+
+  employeeLogin(registerId: number, employeeId: number, pin: string) {
+    return this.request<{ session: string; expires_at: string; employee: { id: number; name: string; role: string } }>(
+      "POST", `/registers/${registerId}/employees/login`, { employee_id: employeeId, pin },
+    );
+  }
+
+  employeeLogout(registerId: number) {
+    return this.request<{ ended: boolean }>("POST", `/registers/${registerId}/employees/logout`, {});
   }
 
   registerState(registerId: number) {

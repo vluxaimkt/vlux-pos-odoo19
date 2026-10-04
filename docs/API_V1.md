@@ -276,6 +276,24 @@ Odoo. **Riesgo aceptado:** un PIN de 4 dígitos en SHA-1 sin sal se descifra por
 fuerza bruta; por eso sólo se entrega a un token que ya puede vender en esa
 caja (`orders:write`), el mismo nivel de confianza que el POS de Odoo.
 
+**PIN verificado por el servidor.** `POST /registers/<id>/employees/login`
+`{"employee_id", "pin"}` compara el PIN en el servidor (comparación de tiempo
+constante) y responde una **sesión de empleado** (`session`, válida un turno de
+12 h, sólo en esa caja y con el token de ese equipo) que viaja en la cabecera
+`X-Vlux-Employee`. Cinco PIN incorrectos bloquean a ese empleado en esa caja 15
+minutos (`PIN_LOCKED`); un encargado sin PIN no puede entrar.
+`POST /registers/<id>/employees/logout` la termina.
+
+- **Requieren la sesión** (`PIN_REQUIRED` si falta o venció): abrir y cerrar
+  caja, autorizar crédito y registrar abonos.
+- **Ventas:** una venta lleva `employee_session` (la sesión con la que se hizo;
+  así una venta en cola se valida aunque se envíe después). Si la caja validó
+  el PIN sin internet no hay sesión: la venta **se registra igual** (nunca se
+  pierde) y queda `vlux_api_employee_verified = False`; las reglas que dependen
+  de quién vende (crédito) la tratan como venta de cajera y la marcan.
+- `pin_sha1` de `/registers/<id>/employees` sigue existiendo sólo para validar
+  sin internet.
+
 **Apertura.** `POST /registers/<id>/session/open`
 `{"opening_cash": 500, "employee_id": 7, "notes": "..."}`. Repetirla es
 inofensivo: con la sesión abierta responde `already_open: true` sin cambiar

@@ -13,7 +13,11 @@ from odoo import _, fields, http
 from odoo.http import request
 
 from odoo.addons.vlux_core.controllers.api import VluxApiError, api_route, json_body
+from odoo.addons.vlux_pos_api.models.employee_session import LOCK_MINUTES, PIN_ATTEMPTS
 from odoo.addons.vlux_pos_api.models.pos_order import VluxSaleRefused
+
+# The employee session token (POST /registers/<id>/employees/login) travels here.
+EMPLOYEE_HEADER = "X-Vlux-Employee"
 
 
 def _register(register_id, token):
@@ -26,6 +30,32 @@ def _register(register_id, token):
     if not token.allows_register(config):
         raise VluxApiError("FORBIDDEN", "Este token es de otra caja.")
     return config
+
+
+def _acting_employee(config, token, body, required=False, session_raw=None):
+    """Who is at the register: ``(employee, verified)``.
+
+    ``verified`` means the server checked the PIN (a valid employee session
+    for this register and device). ``required`` refuses anything else: for
+    actions that need to know for real (open, close, credit). Registers
+    without employee login act as the token's user.
+    """
+    Employee = request.env["hr.employee"]
+    if not config.module_pos_hr:
+        return Employee, True
+    raw = session_raw if session_raw is not None else request.httprequest.headers.get(EMPLOYEE_HEADER, "")
+    claimed = body.get("employee_id")
+    if raw:
+        employee = request.env["vlux.pos.employee.session"]._resolve(raw, config, token)
+        if employee:
+            if claimed not in (None, "", employee.id):
+                raise VluxApiError("VALIDATION_ERROR", "El empleado no coincide con su sesión.")
+            return employee, True
+        if required:
+            raise VluxApiError("PIN_REQUIRED", "Tu sesión venció: vuelve a entrar con tu PIN.")
+    elif required:
+        raise VluxApiError("PIN_REQUIRED", "Entra con tu PIN (con internet) para hacer esto.")
+    return config._vlux_api_employee(claimed), False
 
 
 def _amount(value, name, required=True):
@@ -147,6 +177,51 @@ class VluxApiSales(http.Controller):
         """
         return {"items": _register(register_id, token)._vlux_api_employees()}
 
+    @api_route("/registers/<int:register_id>/employees/login", scope="orders:write", methods=("POST",),
+               summary="Entrar a la caja con PIN, verificado por el servidor")
+    def employee_login(self, token, register_id, **kwargs):
+        """Body ``{"employee_id", "pin"}``: answers a session token for header ``X-Vlux-Employee``.
+
+        The PIN is compared on the server. After 5 wrong PINs the employee is
+        locked on this register for 15 minutes (``PIN_LOCKED``). A manager
+        must have a PIN. The session lasts a shift (12 h) and only works on
+        this register and with this device's token.
+        """
+        body = json_body()
+        config = _register(register_id, token)
+        if not config.module_pos_hr:
+            raise VluxApiError("VALIDATION_ERROR", "Esta caja no usa inicio de sesión por empleado.")
+        employee = config._vlux_api_employee(body.get("employee_id"))
+        limiter = request.env["vlux.rate.limit"].sudo()
+        identity = "%s:%s" % (config.id, employee.id)
+        if limiter.exhausted("pin", identity, PIN_ATTEMPTS, LOCK_MINUTES * 60):
+            raise VluxApiError("PIN_LOCKED", "Demasiados PIN incorrectos: espera %d minutos." % LOCK_MINUTES)
+        manager = config._vlux_api_is_manager(employee)
+        if manager and not employee.sudo().pin:
+            raise VluxApiError("VALIDATION_ERROR",
+                               "%s es encargado y no tiene PIN: ponle uno en Odoo." % employee.name)
+        Session = request.env["vlux.pos.employee.session"]
+        if not Session._pin_matches(employee, body.get("pin")):
+            limiter.consume("pin", identity, PIN_ATTEMPTS, LOCK_MINUTES * 60)
+            raise VluxApiError("INVALID_PIN", "PIN incorrecto.")
+        limiter.reset("pin", identity)
+        session, raw = Session._issue(config, employee, token)
+        return {
+            "session": raw,
+            "expires_at": _stamp(session.expires_at),
+            "employee": {"id": employee.id, "name": employee.name, "role": "manager" if manager else "cashier"},
+        }
+
+    @api_route("/registers/<int:register_id>/employees/logout", scope="orders:write", methods=("POST",),
+               summary="Salir: la sesión del empleado deja de servir")
+    def employee_logout(self, token, register_id, **kwargs):
+        """Ends the employee session sent in ``X-Vlux-Employee`` (idempotent)."""
+        _register(register_id, token)
+        raw = request.httprequest.headers.get(EMPLOYEE_HEADER, "")
+        Session = request.env["vlux.pos.employee.session"].sudo()
+        Session.search([("token_hash", "=", Session._hash(raw))]).write({"active": False}) if raw else None
+        return {"ended": True}
+
     @api_route("/registers/<int:register_id>/session/open", scope="session:manage", methods=("POST",),
                summary="Abrir la caja con el efectivo inicial")
     def open_session(self, token, register_id, **kwargs):
@@ -164,7 +239,7 @@ class VluxApiSales(http.Controller):
         if session and session.state != "opening_control":
             raise VluxApiError("CONFLICT", "La caja está en corte; termina el cierre antes de abrirla.",
                                details={"session_id": session.id, "state": session.state})
-        employee = config._vlux_api_employee(body.get("employee_id"))
+        employee, _verified = _acting_employee(config, token, body, required=True)
         opening_cash = _amount(body.get("opening_cash"), "opening_cash", required=config.cash_control) or 0.0
         notes = _text(body.get("notes"), "notes")
         if not session:
@@ -226,7 +301,7 @@ class VluxApiSales(http.Controller):
         if body.get("session_id") != session.id:
             raise VluxApiError("CONFLICT", "La sesión indicada no es la sesión abierta de la caja.",
                                details={"session_id": session.id})
-        employee = config._vlux_api_employee(body.get("employee_id"))
+        employee, _verified = _acting_employee(config, token, body, required=True)
         config._vlux_api_check_closer(employee)
         notes = _text(body.get("notes"), "notes")
         if employee:
@@ -295,8 +370,15 @@ class VluxApiSales(http.Controller):
         """
         body = json_body()
         config = _register_from_body(body, token)
+        # A queued sale carries the session it was made under; a sale whose
+        # PIN was only checked offline is kept and marked unverified.
+        employee, verified = _acting_employee(
+            config, token, body, session_raw=body.get("employee_session") or None,
+        )
         try:
-            order, duplicate = request.env["pos.order"]._vlux_api_register_sale(config, body)
+            order, duplicate = request.env["pos.order"]._vlux_api_register_sale(
+                config, body, employee=employee, verified=verified,
+            )
         except VluxSaleRefused as refusal:
             raise VluxApiError(refusal.code, refusal.message, details=refusal.details)
         return {**order._vlux_api_payload(), "duplicate": duplicate}
