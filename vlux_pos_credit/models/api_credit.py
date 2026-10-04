@@ -68,6 +68,40 @@ class PosOrder(models.Model):
         }
 
 
+class PosSession(models.Model):
+    _inherit = "pos.session"
+
+    def _vlux_api_closing_extra(self):
+        """Who was given credit and who paid back in this session, for the closing slip.
+
+        The net credit of the day hides both: a sale on credit and an abono of
+        the same amount cancel out. Here each one is listed with the customer.
+        """
+        extra = super()._vlux_api_closing_extra()
+        orders = self.env["pos.order"].search(
+            [("session_id", "=", self.id), ("state", "in", CREDIT_ORDER_STATES)], order="date_order, id",
+        )
+        currency = self.currency_id
+        sales, abonos = [], []
+        for order in orders:
+            reference = order.pos_reference or order.name
+            customer = order.partner_id.name or ""
+            if order.vlux_credit_abono:
+                paid = order.payment_ids.filtered(lambda payment: payment.payment_method_id.type != "pay_later")[:1]
+                abonos.append({"customer": customer, "reference": reference, "method": paid.payment_method_id.name or "",
+                               "amount": currency.round(paid.amount)})
+            elif order.vlux_credit_amount:
+                sales.append({"customer": customer, "reference": reference, "amount": currency.round(order.vlux_credit_amount),
+                              "flagged": order.vlux_credit_flagged})
+        extra["credit"] = {
+            "sales": sales,
+            "abonos": abonos,
+            "total_sales": currency.round(sum(row["amount"] for row in sales)),
+            "total_abonos": currency.round(sum(row["amount"] for row in abonos)),
+        }
+        return extra
+
+
 class ResPartner(models.Model):
     _inherit = "res.partner"
 

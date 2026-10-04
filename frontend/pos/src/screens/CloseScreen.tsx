@@ -134,11 +134,7 @@ export function CloseScreen({ onClosed, onCancel, onQueue }: {
         )}
       </div>
 
-      {summary.other_methods.filter((m) => m.type === "pay_later" && m.expected).map((m) => (
-        <div key={m.payment_method_id} class="text-sm opacity-80">
-          {m.name} (fiado) del día: {formatMoney(m.expected, currency)} · no entra al cajón; los abonos en efectivo sí.
-        </div>
-      ))}
+      {summary.credit && <CreditDetail credit={summary.credit} money={(n) => formatMoney(n, currency)} />}
       {count.cash && (
         <fieldset class="fieldset">
           <legend class="fieldset-legend">Efectivo contado en el cajón</legend>
@@ -184,6 +180,40 @@ export function CloseScreen({ onClosed, onCancel, onQueue }: {
   );
 }
 
+type CreditSection = NonNullable<ClosingSummary["credit"]>;
+
+/** Each sale on credit and each abono, by customer: the net of the day hides both. */
+function CreditDetail({ credit, money }: { credit: CreditSection; money: (n: number) => string }) {
+  if (!credit.sales.length && !credit.abonos.length) return null;
+  return (
+    <div class="grid gap-3 sm:grid-cols-2">
+      <div class="card bg-base-100 p-3">
+        <div class="font-semibold">Fiado (no entra al cajón)</div>
+        {credit.sales.map((row) => (
+          <div key={row.reference} class="flex justify-between text-sm gap-2">
+            <span class="truncate">{row.customer} <span class="opacity-60">· {row.reference}</span>{row.flagged && " ⚠"}</span>
+            <span>{money(row.amount)}</span>
+          </div>
+        ))}
+        {!credit.sales.length && <div class="text-sm opacity-60">Nada fiado.</div>}
+        <div class="flex justify-between font-semibold border-t border-base-300 mt-1 pt-1"><span>Total fiado</span><span>{money(credit.total_sales)}</span></div>
+      </div>
+      <div class="card bg-base-100 p-3">
+        <div class="font-semibold">Abonos recibidos</div>
+        {credit.abonos.map((row) => (
+          <div key={row.reference} class="flex justify-between text-sm gap-2">
+            <span class="truncate">{row.customer} <span class="opacity-60">· {row.method}</span></span>
+            <span>{money(row.amount)}</span>
+          </div>
+        ))}
+        {!credit.abonos.length && <div class="text-sm opacity-60">Sin abonos.</div>}
+        <div class="flex justify-between font-semibold border-t border-base-300 mt-1 pt-1"><span>Total abonos</span><span>{money(credit.total_abonos)}</span></div>
+        <div class="text-xs opacity-70">Los abonos en efectivo ya están en el efectivo esperado.</div>
+      </div>
+    </div>
+  );
+}
+
 function Difference({ value, currency }: { value: number; currency: Parameters<typeof formatMoney>[1] }) {
   if (value === 0) return <span class="label text-success">Cuadra</span>;
   return (
@@ -223,6 +253,29 @@ function ClosingReport({ done, onFinish }: { done: Done; onFinish: () => void })
             <div class="flex justify-between"><span>Diferencia</span><span>{formatMoney(line.difference, currency)}</span></div>
           </div>
         ))}
+        {done.summary.credit && (done.summary.credit.sales.length > 0 || done.summary.credit.abonos.length > 0) && (
+          <>
+            <hr class="my-2 border-dashed border-black" />
+            <div class="font-bold">VENTAS A CRÉDITO (FIADO)</div>
+            {done.summary.credit.sales.map((row) => (
+              <div key={row.reference}>
+                <div>{row.customer}</div>
+                <div class="flex justify-between"><span class="text-xs">{row.reference}</span><span>{formatMoney(row.amount, currency)}</span></div>
+              </div>
+            ))}
+            {!done.summary.credit.sales.length && <div>Sin ventas a crédito</div>}
+            <div class="flex justify-between font-bold"><span>Total fiado</span><span>{formatMoney(done.summary.credit.total_sales, currency)}</span></div>
+            <div class="font-bold mt-2">ABONOS RECIBIDOS</div>
+            {done.summary.credit.abonos.map((row) => (
+              <div key={row.reference}>
+                <div>{row.customer}</div>
+                <div class="flex justify-between"><span class="text-xs">{row.method} · {row.reference}</span><span>{formatMoney(row.amount, currency)}</span></div>
+              </div>
+            ))}
+            {!done.summary.credit.abonos.length && <div>Sin abonos</div>}
+            <div class="flex justify-between font-bold"><span>Total abonos</span><span>{formatMoney(done.summary.credit.total_abonos, currency)}</span></div>
+          </>
+        )}
         {done.notes.trim() && <><hr class="my-2 border-dashed border-black" /><div class="whitespace-pre-line">{done.notes.trim()}</div></>}
         <hr class="my-2 border-dashed border-black" />
         <div class="text-center text-xs">Firma: ______________________</div>

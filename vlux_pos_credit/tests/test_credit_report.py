@@ -44,6 +44,10 @@ class TestVluxCreditReport(TestVluxCredit):
         self.assertEqual([move["balance"] for move in statement["moves"]], [36.0, 54.0, 34.0])
         self.assertAlmostEqual(statement["moves"][2]["payment"], 20.0)
         self.assertAlmostEqual(statement["balance"], 34.0)
+        first = statement["moves"][0]
+        self.assertEqual(first["items"], [{"name": "Refresco 600 ml", "qty": 2.0, "price_unit": 18.0, "total": 36.0}])
+        self.assertAlmostEqual(first["ticket_total"], 36.0)
+        self.assertEqual(statement["moves"][2]["items"], [], "an abono has no products")
 
     def test_only_the_owner_sees_credit(self):
         cashier = new_test_user(

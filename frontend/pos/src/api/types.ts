@@ -215,6 +215,13 @@ export interface ClosingSummary {
     expected: number;
   } | null;
   other_methods: { payment_method_id: number; name: string; type: string; expected: number; count: number }[];
+  /** With vlux_pos_credit: each sale on credit and each abono of the session. */
+  credit?: {
+    sales: { customer: string; reference: string; amount: number; flagged: boolean }[];
+    abonos: { customer: string; reference: string; method: string; amount: number }[];
+    total_sales: number;
+    total_abonos: number;
+  };
 }
 
 /** A customer's credit (fiado), as GET /credit/customers returns it. */

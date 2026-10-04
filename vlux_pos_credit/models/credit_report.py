@@ -84,6 +84,16 @@ class VluxCreditReport(models.AbstractModel):
         }
 
     @api.model
+    def _statement_items(self, order):
+        currency = order.currency_id
+        return [{
+            "name": line.full_product_name or line.product_id.display_name,
+            "qty": line.qty,
+            "price_unit": currency.round(line.price_subtotal_incl / line.qty) if line.qty else 0.0,
+            "total": currency.round(line.price_subtotal_incl),
+        } for line in order.lines]
+
+    @api.model
     def get_statement(self, partner_id):
         """A customer's account: every purchase on credit, abono and refund, with the running balance."""
         self._check_owner()
@@ -108,6 +118,10 @@ class VluxCreditReport(models.AbstractModel):
                 "date": fields.Datetime.to_string(payment.payment_date),
                 "reference": order.pos_reference or order.name,
                 "kind": kind,
+                # What was bought (or returned): the customer recognises the
+                # products, not the folio.
+                "items": [] if order.vlux_credit_abono else self._statement_items(order),
+                "ticket_total": currency.round(order.amount_total),
                 "charge": currency.round(payment.amount) if payment.amount > 0 else 0.0,
                 "payment": currency.round(-payment.amount) if payment.amount < 0 else 0.0,
                 "balance": currency.round(balance),

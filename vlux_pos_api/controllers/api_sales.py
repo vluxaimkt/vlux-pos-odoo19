@@ -202,6 +202,8 @@ class VluxApiSales(http.Controller):
                  "expected": method["amount"], "count": method["number"]}
                 for method in data["non_cash_payment_methods"]
             ],
+            # Extra sections from other modules (credit: who was given credit, abonos).
+            **session._vlux_api_closing_extra(),
         }
 
     @api_route("/registers/<int:register_id>/session/close", scope="session:manage", methods=("POST",),

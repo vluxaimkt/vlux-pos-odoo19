@@ -111,12 +111,46 @@
     return new Date(value.replace(" ", "T") + "Z").toLocaleDateString("es-MX", { day: "numeric", month: "short" });
   }
 
+  // Products listed per purchase in a statement; the rest is summarised.
+  const STATEMENT_ITEMS = 8;
+
+  function qtyText(qty) {
+    return Number.isInteger(qty) ? String(qty) : String(Number(qty.toFixed(3)));
+  }
+
+  /** A purchase paid only partly on credit says so. */
+  function partialCredit(move) {
+    return move.charge && move.ticket_total && Math.abs(move.ticket_total - move.charge) >= 0.01;
+  }
+
+  /** What was bought on a purchase, as text lines (WhatsApp). */
+  function itemLines(move) {
+    const items = move.items || [];
+    const lines = items.slice(0, STATEMENT_ITEMS).map((item) => `   ${qtyText(item.qty)} x ${item.name} ${money(item.price_unit)} = ${money(item.total)}`);
+    if (items.length > STATEMENT_ITEMS) lines.push(`   … y ${items.length - STATEMENT_ITEMS} producto(s) más`);
+    if (partialCredit(move)) lines.push(`   Ticket ${money(move.ticket_total)}, a crédito ${money(move.charge)}`);
+    return lines;
+  }
+
+  /** What was bought on a purchase, for the screen and the printout. */
+  function itemsHtml(move) {
+    const items = move.items || [];
+    if (!items.length) return "";
+    const rows = items.map((item) => `<li><span>${escapeHtml(qtyText(item.qty))} × ${escapeHtml(item.name)} <em>${escapeHtml(money(item.price_unit))}</em></span><b>${escapeHtml(money(item.total))}</b></li>`).join("");
+    const partial = partialCredit(move)
+      ? `<li class="statement-note"><span>Ticket ${escapeHtml(money(move.ticket_total))}, a crédito</span><b>${escapeHtml(money(move.charge))}</b></li>` : "";
+    return `<ul class="statement-items">${rows}${partial}</ul>`;
+  }
+
   function statementText(statement) {
     const lines = [
       `*Estado de cuenta* · ${statement.company}`,
       `Cliente: ${statement.customer.name}`,
       "",
-      ...statement.moves.slice(-15).map((move) => `${shortDate(move.date)} · ${move.kind} · ${move.charge ? "+" + money(move.charge) : "-" + money(move.payment)} · saldo ${money(move.balance)}`),
+      ...statement.moves.slice(-15).flatMap((move) => [
+        `${shortDate(move.date)} · ${move.kind} · ${move.charge ? "+" + money(move.charge) : "-" + money(move.payment)} · saldo ${money(move.balance)}`,
+        ...itemLines(move),
+      ]),
       "",
       `*Saldo actual: ${money(statement.balance)}*`,
     ];
@@ -138,7 +172,7 @@
 
   function statementView() {
     const statement = state.statement;
-    const rows = statement.moves.slice().reverse().map((move) => `<div class="detail-row"><div class="grow"><strong>${escapeHtml(move.kind)}</strong><small>${escapeHtml(shortDate(move.date))} · ${escapeHtml(move.reference)} · ${escapeHtml(move.cashier)}</small></div><div class="statement-amount"><strong class="${move.payment ? "positive" : ""}">${move.charge ? "+" + escapeHtml(money(move.charge)) : "−" + escapeHtml(money(move.payment))}</strong><small>saldo ${escapeHtml(money(move.balance))}</small></div></div>`).join("");
+    const rows = statement.moves.slice().reverse().map((move) => `<div class="detail-row"><div class="grow"><strong>${escapeHtml(move.kind)}</strong><small>${escapeHtml(shortDate(move.date))} · ${escapeHtml(move.reference)} · ${escapeHtml(move.cashier)}</small>${itemsHtml(move)}</div><div class="statement-amount"><strong class="${move.payment ? "positive" : ""}">${move.charge ? "+" + escapeHtml(money(move.charge)) : "−" + escapeHtml(money(move.payment))}</strong><small>saldo ${escapeHtml(money(move.balance))}</small></div></div>`).join("");
     const phone = (statement.customer.phone || "").replace(/\D/g, "");
     const share = `https://wa.me/${phone}?text=${encodeURIComponent(statementText(statement))}`;
     return `

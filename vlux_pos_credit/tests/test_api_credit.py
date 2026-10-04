@@ -137,6 +137,11 @@ class TestVluxApiCredit(TestPosHrHttpCommon, VluxApiCase):
 
         _response, closing = self._call("GET", "/registers/%d/session/closing" % self.config.id)
         self.assertEqual(closing["data"]["cash"]["sales"], 15.0, "the abono's cash is in the drawer")
+        credit = closing["data"]["credit"]
+        self.assertEqual([(row["customer"], row["amount"]) for row in credit["sales"]], [("Lupe Fiado", 40.0)])
+        self.assertEqual([(row["customer"], row["amount"], row["method"]) for row in credit["abonos"]],
+                         [("Lupe Fiado", 15.0, self.cash.name)])
+        self.assertEqual((credit["total_sales"], credit["total_abonos"]), (40.0, 15.0))
         self.assertEqual(closing["data"]["session"]["id"], opened["data"]["session"]["id"])
 
     def test_no_abono_without_an_open_register(self):
