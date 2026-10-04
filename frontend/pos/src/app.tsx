@@ -256,8 +256,10 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
           onCustomers={() => setView("customers")}
           onSales={() => setView("sales")}
           onClosing={registerState?.session?.state === "opened" ? () => setView("closing") : null}
-          // Managers put cash in and take it out; cashiers only take it out (C27). The server checks it too.
-          onCash={registerState?.session?.state === "opened" && (!registerState.employee_login || employee?.role !== "minimal")
+          // Managers move cash; cashiers take it out only where the register allows it. The server checks it too.
+          onCash={registerState?.session?.state === "opened"
+            && (!registerState.employee_login || employee?.role === "manager"
+              || (employee?.role === "cashier" && !!registerState.cashier_cash_out))
             ? () => setView("cash") : null}
         />
         {status.error && <div role="alert" class="alert alert-error rounded-none">{status.error}</div>}

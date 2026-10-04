@@ -19,7 +19,7 @@ const REASONS = {
  */
 export function CashMoveScreen({ onClose }: { onClose: () => void }) {
   const { client, setup, online, registerState, employee } = usePos();
-  // C27: a cashier may take cash out (paying a supplier), only a manager puts it in.
+  // A cashier may only take cash out (where the register allows it); a manager also puts it in.
   const canPutIn = !registerState?.employee_login || employee?.role === "manager";
   const [moves, setMoves] = useState<CashMove[]>([]);
   const [kind, setKind] = useState<"in" | "out">("out");

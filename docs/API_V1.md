@@ -378,7 +378,7 @@ encima del límite sólo cierra un encargado (el empleado que cuenta); si no,
 mete (`in`) o saca (`out`) efectivo del cajón con el mismo registro que el POS
 de Odoo (línea de extracto de la sesión con el empleado), así que el corte
 espera esa cantidad de más o de menos. Como en Odoo, sólo un encargado de la
-caja con PIN verificado; un cajero sólo puede sacar (C27: pagar a un proveedor), a su nombre; motivo obligatorio;
+caja con PIN verificado; un cajero sólo puede sacar si la caja lo permite (opción `vlux_cashier_cash_out`, apagada por defecto como en Odoo; el estado de la caja la publica como `cashier_cash_out`), a su nombre; motivo obligatorio;
 idempotente por `uuid` (`duplicate: true`). `GET /registers/<id>/session/cash-moves`
 lista los de la sesión abierta; el corte los incluye con quién los hizo.
 

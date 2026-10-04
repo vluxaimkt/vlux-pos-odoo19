@@ -109,6 +109,8 @@ def _register_state(config):
         "employee_login": bool(config.module_pos_hr),
         "cash_control": bool(config.cash_control),
         "max_difference": config.amount_authorized_diff if config.set_maximum_difference else None,
+        # Register options the screen adapts to (each store decides).
+        "cashier_cash_out": bool(config.vlux_cashier_cash_out),
         "session": _session_payload(session),
     }
 
@@ -358,8 +360,9 @@ class VluxApiSales(http.Controller):
     def cash_move(self, token, register_id, **kwargs):
         """Body ``{"session_id", "uuid", "type": "in"|"out", "amount", "reason"}``.
 
-        A manager of the register puts cash in or takes it out; a cashier
-        (C27) may only take it out, e.g. to pay a supplier, and the move stays
+        A manager of the register puts cash in or takes it out. A cashier may
+        take it out (e.g. to pay a supplier) only where the register allows it
+        (``vlux_cashier_cash_out``, off by default as in Odoo); the move stays
         under their name with its reason. Always with a checked PIN; the
         closing then expects the drawer to hold that much more (or less).
         """
@@ -380,6 +383,8 @@ class VluxApiSales(http.Controller):
                 raise VluxApiError("FORBIDDEN", "Tu acceso a la caja no permite mover efectivo.")
             if kind != "out":
                 raise VluxApiError("FORBIDDEN", "Sólo un encargado puede meter efectivo a la caja.")
+            if not config.vlux_cashier_cash_out:
+                raise VluxApiError("FORBIDDEN", "En esta caja sólo un encargado puede sacar efectivo.")
         amount = config.currency_id.round(_amount(body.get("amount"), "amount"))
         if amount <= 0:
             raise VluxApiError("VALIDATION_ERROR", "El importe debe ser mayor que cero.")

@@ -147,6 +147,8 @@ export interface RegisterState {
   employee_login: boolean;
   cash_control: boolean;
   max_difference: number | null;
+  /** Register option: cashiers may take cash out (each store decides). */
+  cashier_cash_out?: boolean;
   session: Session | null;
   already_open?: boolean;
 }

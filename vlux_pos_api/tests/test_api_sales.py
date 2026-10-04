@@ -295,9 +295,14 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
             response, body = self._call("POST", path, {**move, "uuid": str(uuid.uuid4()), **bad}, employee=self.manager1)
             self.assertEqual(body["error"], "VALIDATION_ERROR", bad)
 
-        # C27: a cashier pays a supplier from the drawer; it stays under their name.
-        response, body = self._call("POST", path, {**move, "uuid": str(uuid.uuid4()), "amount": 15,
-                                                   "reason": "Pago al repartidor de pan"}, employee=self.emp2)
+        # A cashier pays a supplier from the drawer only where the register allows it.
+        cashier_out = {**move, "uuid": str(uuid.uuid4()), "amount": 15, "reason": "Pago al repartidor de pan"}
+        response, body = self._call("POST", path, cashier_out, employee=self.emp2)
+        self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"), "off by default, as in Odoo")
+        self.config.vlux_cashier_cash_out = True
+        _response, state = self._call("GET", "/registers/%d/session" % self.config.id)
+        self.assertTrue(state["data"]["cashier_cash_out"], "the screen learns the register's option")
+        response, body = self._call("POST", path, cashier_out, employee=self.emp2)
         self.assertEqual(response.status_code, 200, body)
         self.assertEqual(body["data"]["employee"], self.emp2.name)
 

@@ -6,7 +6,7 @@ total Odoo books. A client may send the unit price it charged (an offline
 register prices from its local copy of the catalog); a price that differs
 from the catalog is accepted and reported, never silently replaced.
 """
-from odoo import _, models
+from odoo import _, fields, models
 from odoo.exceptions import ValidationError
 from odoo.fields import Domain
 from odoo.tools import float_compare
@@ -17,6 +17,13 @@ MAX_LINES = 500
 
 class PosConfig(models.Model):
     _inherit = "pos.config"
+
+    # Store options of the VLUX register: each business decides; defaults are Odoo's behaviour.
+    vlux_cashier_cash_out = fields.Boolean(
+        string="Cajeros pueden sacar efectivo",
+        help="Permite a los cajeros registrar salidas de efectivo (p. ej. pagar a un proveedor) con motivo y a su "
+             "nombre. Las entradas siguen siendo del encargado.",
+    )
 
     # --- employees (pos_hr) -------------------------------------------------
 
