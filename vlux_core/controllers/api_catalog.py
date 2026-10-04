@@ -170,6 +170,8 @@ def _product_payload(product, image_version=None):
         "uom": {"id": template.uom_id.id, "name": template.uom_id.name},
         "type": template.type,
         "is_storable": template.is_storable,
+        # Sold by weight: the register asks for the weight (or reads it from a scale label).
+        "to_weight": template.to_weight,
         "attributes": [
             {"attribute": value.attribute_id.name, "value": value.name} for value in values
         ],
@@ -270,6 +272,20 @@ def _register_payload(config):
         ],
         "receipt_header": config.receipt_header or None,
         "receipt_footer": config.receipt_footer or None,
+    }
+
+
+def _nomenclature_payload(nomenclature):
+    """The store's barcode rules (scale labels with weight or price), as the Odoo POS uses them."""
+    if not nomenclature:
+        return None
+    return {
+        "upc_ean_conv": nomenclature.upc_ean_conv,
+        "rules": [
+            {"type": rule.type, "encoding": rule.encoding, "pattern": rule.pattern,
+             "sequence": rule.sequence, "alias": rule.alias or None}
+            for rule in nomenclature.rule_ids.sorted(lambda rule: (rule.sequence, rule.id))
+        ],
     }
 
 
@@ -413,5 +429,8 @@ class VluxApiCatalog(http.Controller):
             },
             "default_sale_tax_ids": company.account_sale_tax_id.ids,
             "price_include_default": company.account_price_include,
+            # How the company rounds taxes: a register pricing offline must add up the same way.
+            "tax_rounding": company.tax_calculation_rounding_method,
+            "barcode_nomenclature": _nomenclature_payload(company.nomenclature_id),
             "registers": [_register_payload(config) for config in registers],
         }

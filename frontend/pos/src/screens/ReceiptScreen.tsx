@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 
 import type { OrderRequest, OrderResult } from "../api/types";
 import { formatMoney } from "../lib/money";
+import { qtyLabel } from "../sale/cart";
 import { paymentState } from "../sale/payment";
 import type { Pricing } from "../sale/pricing";
 import { usePos } from "../state";
@@ -65,7 +66,7 @@ export function ReceiptScreen({ order, pricing, credit, onNext }: {
           <div key={line.lineUuid}>
             <div>{line.name}</div>
             <div class="flex justify-between">
-              <span>{line.qty} x {formatMoney(line.displayUnit, currency)}</span>
+              <span>{qtyLabel(line.qty, line.unit)} x {formatMoney(line.displayUnit, currency)}</span>
               <span>{formatMoney(line.total, currency)}</span>
             </div>
           </div>

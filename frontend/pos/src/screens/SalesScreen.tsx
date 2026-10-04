@@ -193,6 +193,13 @@ function ReturnForm({ order, onBack, onReturned }: { order: OrderResult; onBack:
   );
 }
 
+/** The unit price as the customer saw it: the shelf price when taxes are included (weights: $17.40/kg, not total / kilos). */
+function shelfPrice(line: OrderResult["lines"][number]): number {
+  if (!line.qty) return 0;
+  return Math.abs(round(line.price_unit * line.qty) - line.price_subtotal_incl) < 0.005
+    ? Math.abs(line.price_unit) : line.price_subtotal_incl / line.qty;
+}
+
 /** A ticket rebuilt from what the server recorded: reprints and return slips. */
 export function OrderTicket({ order, onDone }: { order: OrderResult; onDone: () => void }) {
   const { setup } = usePos();
@@ -216,7 +223,7 @@ export function OrderTicket({ order, onDone }: { order: OrderResult; onDone: () 
           <div key={line.id}>
             <div>{line.name}</div>
             <div class="flex justify-between">
-              <span>{line.qty} x {money(line.qty ? line.price_subtotal_incl / line.qty : 0)}</span>
+              <span>{line.qty} x {money(shelfPrice(line))}</span>
               <span>{money(line.price_subtotal_incl)}</span>
             </div>
           </div>

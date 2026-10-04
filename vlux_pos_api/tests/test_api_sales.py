@@ -450,3 +450,38 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
             **base, "uuid": str(uuid.uuid4()), "lines": [{"line_id": soda_line["id"], "qty": 1}],
             "payments": [{"payment_method_id": self.cash.id, "amount": 20.0}]}, employee=self.emp2)
         self.assertEqual((response.status_code, body["error"]), (400, "VALIDATION_ERROR"), "nothing left to return")
+
+    # --- sold by weight ---------------------------------------------------------------
+
+    def test_weights_add_up_like_the_company_rounds(self):
+        """The PWA prices weighed products offline with this same rule (sale/pricing.ts)."""
+        iva = self.soda.taxes_id
+        ham = self.env["product.template"].create({
+            "name": "Jamón", "list_price": 17.40, "available_in_pos": True, "to_weight": True,
+            "taxes_id": [(6, 0, iva.ids)],
+        }).product_variant_id
+        lines = [{"product_id": ham.id, "qty": 0.375}, {"product_id": ham.id, "qty": 0.125}]
+        company = self.config.company_id
+        totals = {}
+        for mode in ("round_per_line", "round_globally"):
+            company.tax_calculation_rounding_method = mode
+            _response, body = self._call("POST", "/orders/quote", {"register_id": self.config.id, "lines": lines})
+            totals[mode] = body["data"]["amount_total"]
+        # 6.525 + 2.175: rounded per line 6.53 + 2.18; rounded once 8.70.
+        self.assertEqual(totals, {"round_per_line": 8.71, "round_globally": 8.70})
+
+        _response, config = self._call("GET", "/store/config")
+        self.assertEqual(config["data"]["tax_rounding"], "round_globally")
+        self.assertIn("rules", config["data"]["barcode_nomenclature"])
+        # The feed holds back the last 30 s of changes; the payload is what it will send.
+        from odoo.addons.vlux_core.controllers.api_catalog import _product_payload
+        self.assertTrue(_product_payload(ham)["to_weight"])
+
+    def test_a_price_read_from_a_scale_label_is_not_an_override(self):
+        self._open()
+        sale = self._sale([(self.cash, 50.0)], lines=[{"product_id": self.soda.id, "qty": 1, "price_unit": 37.5,
+                                                       "price_from_barcode": True}])
+        response, body = self._call("POST", "/orders", sale)
+        self.assertEqual(response.status_code, 200, body)
+        self.assertEqual(body["data"]["amount_total"], 37.5)
+        self.assertFalse(body["data"]["price_overridden"])

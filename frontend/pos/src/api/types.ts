@@ -1,3 +1,5 @@
+import type { Nomenclature } from "../lib/barcode";
+
 // The parts of the VLUX API v1 contract the register uses (docs/API_V1.md).
 // v1 only grows: fields may be added, never removed or changed.
 
@@ -70,6 +72,10 @@ export interface StoreConfig {
   };
   currency: Currency;
   registers: RegisterConfig[];
+  /** How the company rounds taxes ("round_per_line" | "round_globally"); older servers omit it. */
+  tax_rounding?: string;
+  /** Scale labels (weight or price inside the barcode); null when the store has none. */
+  barcode_nomenclature?: Nomenclature | null;
 }
 
 export interface Product {
@@ -85,6 +91,8 @@ export interface Product {
   active: boolean;
   available_in_pos: boolean;
   sale_ok: boolean;
+  /** Sold by weight: the register asks for the kilos (or reads them from a scale label). */
+  to_weight?: boolean;
   image_version: string | null;
   sync_date: string;
 }
@@ -143,6 +151,8 @@ export interface SaleLine {
   product_id: number;
   qty: number;
   price_unit?: number;
+  /** The price came from a scale label: the store's price, not a manual change. */
+  price_from_barcode?: boolean;
 }
 
 export interface QuoteLine {

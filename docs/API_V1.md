@@ -308,6 +308,15 @@ devuelve cada línea con precio, impuestos y subtotales, y `amount_untaxed`,
 la ofrece); con `price_unit`, la línea se cobra a ese precio y
 `price_overridden` dice si difiere del catálogo.
 
+**Productos por peso.** El catálogo marca `to_weight` en los productos que se
+venden por peso; `qty` acepta kilos con decimales (la caja usa gramos, tres
+decimales). `/store/config` publica `tax_rounding` (`round_per_line` o
+`round_globally`: con pesos los totales difieren por un centavo según el
+método) y `barcode_nomenclature` (reglas de etiquetas de báscula: peso
+`21.....{NNDDD}`, precio `23.....{NNNDD}`). Una línea con
+`"price_from_barcode": true` lleva el precio leído de una etiqueta de báscula:
+se cobra a `price_unit` y no se marca como precio cambiado a mano.
+
 **Venta.** `POST /orders`:
 
 ```json

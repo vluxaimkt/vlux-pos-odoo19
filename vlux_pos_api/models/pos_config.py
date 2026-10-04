@@ -134,7 +134,8 @@ class PosConfig(models.Model):
             uuid = line.get("uuid")
             if uuid is not None and (not isinstance(uuid, str) or len(uuid) > 64):
                 raise ValidationError(_("La línea %s tiene un uuid inválido.", index))
-            parsed.append({"product_id": product_id, "qty": qty, "price_unit": price_unit, "uuid": uuid})
+            parsed.append({"product_id": product_id, "qty": qty, "price_unit": price_unit, "uuid": uuid,
+                           "price_from_barcode": bool(line.get("price_from_barcode"))})
         return parsed
 
     def _vlux_api_quote(self, lines, partner=None):
@@ -181,7 +182,7 @@ class PosConfig(models.Model):
                 catalog_price = product.lst_price
             catalog_price = AccountTax._fix_tax_included_price_company(catalog_price, taxes, line_taxes, company)
             price_unit = catalog_price if line["price_unit"] is None else line["price_unit"]
-            overridden = (
+            overridden = not line["price_from_barcode"] and (
                 line["price_unit"] is not None
                 and float_compare(price_unit, catalog_price, precision_digits=price_digits) != 0
             )

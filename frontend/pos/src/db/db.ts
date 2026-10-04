@@ -41,6 +41,11 @@ export class PosDb extends Dexie {
       meta: "key",
       outbox: "uuid, status, createdAt, nextAttemptAt",
     });
+    // v2: products carry `to_weight`; fetch the catalog again so every row has it.
+    this.version(2).stores({}).upgrade(async (tx) => {
+      await tx.table("products").clear();
+      await tx.table("meta").delete("cursor:products");
+    });
   }
 }
 

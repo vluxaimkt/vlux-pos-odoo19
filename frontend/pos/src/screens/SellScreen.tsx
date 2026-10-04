@@ -4,14 +4,18 @@ import { isRetryable } from "../api/client";
 import type { OrderRequest } from "../api/types";
 import { getMeta, type ProductRow, setMeta } from "../db/db";
 import { productByBarcode, searchProducts } from "../db/search";
+import { parseBarcode } from "../lib/barcode";
 import { formatMoney } from "../lib/money";
-import { addProduct, type Cart, emptyCart, itemCount, removeLine, setCustomer, setQty } from "../sale/cart";
+import {
+  addProduct, type AddOptions, type Cart, emptyCart, isWeighed, itemCount, qtyLabel, removeLine, setCustomer, setQty, unitPrice,
+} from "../sale/cart";
 import { fromQuote, localPricing, type Pricing } from "../sale/pricing";
 import { META_CART, usePos } from "../state";
 import { CreditLine, CustomersScreen } from "./CustomersScreen";
 import { type CreditTicket, PayScreen } from "./PayScreen";
 import { ReceiptScreen } from "./ReceiptScreen";
 import { explain } from "./SetupScreen";
+import { WeighDialog } from "./WeighDialog";
 
 const newId = () => crypto.randomUUID();
 
@@ -30,7 +34,10 @@ export function SellScreen() {
   const [stage, setStage] = useState<Stage>({ name: "cart" });
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** A product sold by weight waiting for its kilos (new line, or re-weighing a line). */
+  const [weighing, setWeighing] = useState<{ product: ProductRow | Cart["lines"][number]["product"]; lineUuid?: string; qty?: number } | null>(null);
   const search = useRef<HTMLInputElement>(null);
+  const rounding = setup.store.tax_rounding;
 
   // The cart survives a reload of the app (power cut, accidental refresh).
   useEffect(() => {
@@ -60,11 +67,23 @@ export function SellScreen() {
     };
   }, [db, query]);
 
-  function add(product: ProductRow) {
+  function add(product: ProductRow, qty?: number, options: AddOptions = {}) {
     if (!cart) return;
-    update(addProduct(cart, product, newId));
     setQuery("");
     setNotice(null);
+    // Sold by weight with no weight yet: ask for the kilos.
+    if (product.to_weight && qty === undefined && options.priceUnit === undefined) {
+      setWeighing({ product });
+      return;
+    }
+    update(addProduct(cart, product, newId, qty ?? 1, options));
+    search.current?.focus();
+  }
+
+  function weighed(kilos: number) {
+    if (!cart || !weighing) return;
+    update(weighing.lineUuid ? setQty(cart, weighing.lineUuid, kilos) : addProduct(cart, weighing.product, newId, kilos));
+    setWeighing(null);
     search.current?.focus();
   }
 
@@ -74,6 +93,14 @@ export function SellScreen() {
     event.preventDefault();
     const code = query.trim();
     if (!code) return;
+    // A scale label carries the weight or the price; the product has the code with that part zeroed.
+    const parsed = parseBarcode(code, setup.store.barcode_nomenclature);
+    if ((parsed.type === "weight" || parsed.type === "price") && parsed.value > 0) {
+      const labelled = (await productByBarcode(db, parsed.baseCode)) ?? (await productByBarcode(db, code));
+      if (labelled) {
+        return parsed.type === "weight" ? add(labelled, parsed.value) : add(labelled, 1, { priceUnit: parsed.value });
+      }
+    }
     const product = await productByBarcode(db, code);
     if (product) return add(product);
     if (results.length === 1 && results[0]) return add(results[0]);
@@ -91,7 +118,10 @@ export function SellScreen() {
         try {
           const quote = await client.quote({
             register_id: setup.register.id,
-            lines: cart.lines.map((line) => ({ uuid: line.uuid, product_id: line.product.id, qty: line.qty })),
+            lines: cart.lines.map((line) => ({
+              uuid: line.uuid, product_id: line.product.id, qty: line.qty,
+              ...(line.priceFromBarcode ? { price_unit: unitPrice(line), price_from_barcode: true } : {}),
+            })),
             ...(cart.customer ? { partner_id: cart.customer.id } : {}),
           });
           pricing = fromQuote(cart, quote);
@@ -99,7 +129,7 @@ export function SellScreen() {
           if (!isRetryable(error)) throw error;
         }
       }
-      pricing ??= localPricing(cart, taxes, setup.register.use_pricelist);
+      pricing ??= localPricing(cart, taxes, setup.register.use_pricelist, rounding);
       if (!pricing.exact) {
         setNotice("Sin internet no se puede calcular el total exacto de esta venta (impuestos o precios especiales). Conéctate para cobrarla.");
         return;
@@ -136,7 +166,7 @@ export function SellScreen() {
     return <ReceiptScreen order={stage.order} pricing={stage.pricing} credit={stage.credit} onNext={() => setStage({ name: "cart" })} />;
   }
 
-  const estimate = localPricing(cart, taxes, setup.register.use_pricelist);
+  const estimate = localPricing(cart, taxes, setup.register.use_pricelist, rounding);
   return (
     <section class="p-3 grid gap-3 lg:grid-cols-[1fr_24rem]">
       <div class="flex flex-col gap-3">
@@ -163,7 +193,9 @@ export function SellScreen() {
                   <div>{product.name}</div>
                   <div class="text-xs opacity-60 font-mono">{product.barcode ?? product.default_code ?? ""}</div>
                 </div>
-                <div class="font-semibold">{formatMoney(product.list_price, setup.store.currency)}</div>
+                <div class="font-semibold">
+                  {formatMoney(product.list_price, setup.store.currency)}{product.to_weight && <span class="text-xs opacity-70">/{product.uom.name}</span>}
+                </div>
               </button>
             </li>
           ))}
@@ -192,13 +224,22 @@ export function SellScreen() {
               <li key={line.uuid} class="flex items-center gap-2">
                 <div class="flex-1 min-w-0">
                   <div class="truncate">{line.product.name}</div>
-                  <div class="text-xs opacity-60">{formatMoney(line.product.list_price, setup.store.currency)} c/u</div>
+                  <div class="text-xs opacity-60">
+                    {isWeighed(line)
+                      ? `${qtyLabel(line.qty, line.product.uom?.name ?? "kg")} x ${formatMoney(unitPrice(line), setup.store.currency)} = ${formatMoney(unitPrice(line) * line.qty, setup.store.currency)}`
+                      : `${formatMoney(unitPrice(line), setup.store.currency)} c/u`}
+                    {line.priceFromBarcode && " · precio de etiqueta"}
+                  </div>
                 </div>
-                <div class="join">
-                  <button class="btn btn-sm join-item" aria-label="Menos" onClick={() => update(setQty(cart, line.uuid, line.qty - 1))}>−</button>
-                  <span class="btn btn-sm join-item pointer-events-none">{line.qty}</span>
-                  <button class="btn btn-sm join-item" aria-label="Más" onClick={() => update(setQty(cart, line.uuid, line.qty + 1))}>+</button>
-                </div>
+                {isWeighed(line) ? (
+                  <button class="btn btn-sm" onClick={() => setWeighing({ product: line.product, lineUuid: line.uuid, qty: line.qty })}>Pesar</button>
+                ) : (
+                  <div class="join">
+                    <button class="btn btn-sm join-item" aria-label="Menos" onClick={() => update(setQty(cart, line.uuid, line.qty - 1))}>−</button>
+                    <span class="btn btn-sm join-item pointer-events-none">{line.qty}</span>
+                    <button class="btn btn-sm join-item" aria-label="Más" onClick={() => update(setQty(cart, line.uuid, line.qty + 1))}>+</button>
+                  </div>
+                )}
                 <button class="btn btn-ghost btn-sm" aria-label="Quitar" onClick={() => update(removeLine(cart, line.uuid))}>✕</button>
               </li>
             ))}
@@ -219,6 +260,10 @@ export function SellScreen() {
           )}
         </div>
       </aside>
+      {weighing && (
+        <WeighDialog product={weighing.product} initial={weighing.qty} currency={setup.store.currency}
+          onDone={weighed} onCancel={() => { setWeighing(null); search.current?.focus(); }} />
+      )}
     </section>
   );
 }
