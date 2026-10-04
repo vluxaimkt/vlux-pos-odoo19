@@ -259,6 +259,14 @@ el grupo de alta rápida y ser operador de POS, la caja debe ser de su compañí
 y tener una sesión abierta (el stock inicial entra a la ubicación de esa
 caja). Un código ya usado responde `CONFLICT` con `details.existing`.
 
+Desde la caja VLUX (PWA) la persona no es un usuario de Odoo sino un empleado
+con PIN: `POST /registers/<id>/products` (alcance `orders:write`)
+`{"name", "barcode", "list_price", "taxes_ids"?}` hace la misma alta rápida
+si quien está en la caja es encargado (o su usuario tiene el grupo de alta
+rápida), con PIN verificado y la caja abierta. Responde el producto como lo
+manda el catálogo, para venderlo en ese momento; `CONFLICT` si el código ya
+existe. Requiere `vlux_pos_catalog`.
+
 ### 4.3 Operación de venta (fase C)
 
 Módulo `vlux_pos_api`. Todo pasa por los mismos métodos de Odoo que usa su POS

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 
 import { isRetryable } from "../api/client";
 import type { OrderRequest } from "../api/types";
-import { getMeta, type ProductRow, setMeta } from "../db/db";
+import { getMeta, productRow, type ProductRow, setMeta } from "../db/db";
 import { productByBarcode, searchProducts } from "../db/search";
 import { parseBarcode } from "../lib/barcode";
 import { formatMoney } from "../lib/money";
@@ -15,6 +15,7 @@ import { CreditLine, CustomersScreen } from "./CustomersScreen";
 import { type CreditTicket, PayScreen } from "./PayScreen";
 import { ReceiptScreen } from "./ReceiptScreen";
 import { explain } from "./SetupScreen";
+import { QuickProductDialog } from "./QuickProductDialog";
 import { WeighDialog } from "./WeighDialog";
 
 const newId = () => crypto.randomUUID();
@@ -27,7 +28,7 @@ type Stage =
 
 /** Ring up a sale: scan or search, adjust the cart, charge, print the ticket. */
 export function SellScreen() {
-  const { db, client, setup, online, taxes, credit } = usePos();
+  const { db, client, setup, online, taxes, credit, employee, registerState } = usePos();
   const [cart, setCart] = useState<Cart | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ProductRow[]>([]);
@@ -36,6 +37,10 @@ export function SellScreen() {
   const [busy, setBusy] = useState(false);
   /** A product sold by weight waiting for its kilos (new line, or re-weighing a line). */
   const [weighing, setWeighing] = useState<{ product: ProductRow | Cart["lines"][number]["product"]; lineUuid?: string; qty?: number } | null>(null);
+  /** A scanned code the store does not know: a manager may add it on the spot. */
+  const [unknown, setUnknown] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const canCreate = online && (!registerState?.employee_login || employee?.role === "manager");
   const search = useRef<HTMLInputElement>(null);
   const rounding = setup.store.tax_rounding;
 
@@ -52,7 +57,8 @@ export function SellScreen() {
   // A notice clears itself; typing or scanning again also clears it.
   useEffect(() => {
     if (!notice) return;
-    const id = setTimeout(() => setNotice(null), 4000);
+    // Longer when it offers to add the unknown product.
+    const id = setTimeout(() => { setNotice(null); setUnknown(null); }, unknown && canCreate ? 15000 : 4000);
     return () => clearTimeout(id);
   }, [notice]);
 
@@ -105,6 +111,8 @@ export function SellScreen() {
     if (product) return add(product);
     if (results.length === 1 && results[0]) return add(results[0]);
     setNotice(`No se encontró "${code}" en esta caja.`);
+    // A scale label of an unknown product is not a product code: set that product up in Odoo.
+    setUnknown(parsed.type === "weight" || parsed.type === "price" ? null : code);
     setQuery("");
   }
 
@@ -184,7 +192,12 @@ export function SellScreen() {
           }}
           onKeyDown={(event) => void onEnter(event)}
         />
-        {notice && <div role="alert" class="alert alert-warning">{notice}</div>}
+        {notice && (
+          <div role="alert" class="alert alert-warning">
+            <span class="flex-1">{notice}</span>
+            {unknown && canCreate && <button class="btn btn-sm" onClick={() => setCreating(true)}>Dar de alta</button>}
+          </div>
+        )}
         <ul class="list bg-base-100 rounded-box">
           {results.map((product) => (
             <li key={product.id}>
@@ -260,6 +273,18 @@ export function SellScreen() {
           )}
         </div>
       </aside>
+      {creating && unknown && (
+        <QuickProductDialog barcode={unknown}
+          onCancel={() => { setCreating(false); search.current?.focus(); }}
+          onCreated={async (product) => {
+            // Into the local catalog now; the next sync brings the same row.
+            const row = productRow(product);
+            await db.products.put(row);
+            setCreating(false);
+            setUnknown(null);
+            add(row);
+          }} />
+      )}
       {weighing && (
         <WeighDialog product={weighing.product} initial={weighing.qty} currency={setup.store.currency}
           onDone={weighed} onCancel={() => { setWeighing(null); search.current?.focus(); }} />

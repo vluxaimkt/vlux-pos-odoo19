@@ -298,6 +298,32 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         self.assertEqual(summary["data"]["cash"]["expected"], 115.0, "100 opening - 35 out + 50 in")
         self.assertEqual(len(summary["data"]["cash"]["moves"]), 2)
 
+    def test_a_manager_adds_an_unknown_product_from_the_register(self):
+        if not hasattr(self.env["product.template"], "_vlux_quick_create_for"):
+            self.skipTest("vlux_pos_catalog is not installed")
+        path = "/registers/%d/products" % self.config.id
+        new = {"name": "Chicles menta", "barcode": "7501234567895", "list_price": 12.0}
+        response, body = self._call("POST", path, new, employee=self.manager1)
+        self.assertEqual(body["error"], "NO_OPEN_SESSION")
+        self._open()
+
+        response, body = self._call("POST", path, new)
+        self.assertEqual((response.status_code, body["error"]), (401, "PIN_REQUIRED"))
+        response, body = self._call("POST", path, new, employee=self.emp2)
+        self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"), "a cashier does not set prices")
+
+        response, body = self._call("POST", path, new, employee=self.manager1)
+        self.assertEqual(response.status_code, 200, body)
+        product = self.env["product.product"].browse(body["data"]["id"])
+        self.assertEqual((product.name, product.barcode, product.list_price), ("Chicles menta", "7501234567895", 12.0))
+        self.assertTrue(product.available_in_pos)
+        self.assertEqual(body["data"]["barcode"], "7501234567895", "the register gets it as the catalog feed sends it")
+
+        response, body = self._call("POST", path, {**new, "name": "Otro"}, employee=self.manager1)
+        self.assertEqual((response.status_code, body["error"]), (409, "CONFLICT"), "a taken barcode is not reused")
+        response, body = self._call("POST", path, {**new, "barcode": "7501234567888", "name": ""}, employee=self.manager1)
+        self.assertEqual(body["error"], "VALIDATION_ERROR")
+
     def test_a_manager_may_close_above_the_limit(self):
         _response, opened = self._open(opening_cash=100.0)
         response, body = self._call("POST", "/registers/%d/session/close" % self.config.id, {

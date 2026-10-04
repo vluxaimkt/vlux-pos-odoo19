@@ -174,6 +174,11 @@ export class ApiClient {
     return this.request<RegisterState>("POST", `/registers/${registerId}/session/close`, body);
   }
 
+  /** Quick create of a product from an unknown barcode (manager with PIN). */
+  quickProduct(registerId: number, body: { name: string; barcode: string; list_price: number; taxes_ids?: number[] }) {
+    return this.request<Product>("POST", `/registers/${registerId}/products`, body);
+  }
+
   cashMoves(registerId: number) {
     return this.request<{ session_id: number; items: CashMove[] }>("GET", `/registers/${registerId}/session/cash-moves`);
   }

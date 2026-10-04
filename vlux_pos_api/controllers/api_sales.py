@@ -10,9 +10,11 @@ Every write runs inside the savepoint ``api_route`` opens: a refused closing
 or sale leaves nothing behind.
 """
 from odoo import _, fields, http
+from odoo.exceptions import ValidationError
 from odoo.http import request
 
 from odoo.addons.vlux_core.controllers.api import VluxApiError, api_route, json_body
+from odoo.addons.vlux_core.controllers.api_catalog import _product_payload
 from odoo.addons.vlux_pos_api.models.employee_session import LOCK_MINUTES, PIN_ATTEMPTS
 from odoo.addons.vlux_pos_api.models.pos_order import VluxSaleRefused
 
@@ -386,6 +388,44 @@ class VluxApiSales(http.Controller):
         line, duplicate = session._vlux_api_cash_move(employee, kind, amount, reason, move_uuid)
         move = next(row for row in session._vlux_api_cash_moves() if row["id"] == line.id)
         return {**move, "session_id": session.id, "duplicate": duplicate}
+
+    # --- quick product creation ------------------------------------------------
+
+    @api_route("/registers/<int:register_id>/products", scope="orders:write", methods=("POST",),
+               summary="Alta rápida de un producto desde la caja (encargado con PIN)")
+    def quick_product(self, token, register_id, **kwargs):
+        """Body ``{"name", "barcode", "list_price", "taxes_ids"?}`` (needs vlux_pos_catalog).
+
+        A scanned code the store does not know becomes a sellable product.
+        As the POS's own quick create, a person must be allowed to: here a
+        manager of the register (or an employee whose user has the
+        quick-create group), proven by PIN. A taken barcode answers
+        ``CONFLICT``. Returns the product as the catalog feed sends it.
+        """
+        Template = request.env["product.template"]
+        if not hasattr(Template, "_vlux_quick_create_for"):
+            raise VluxApiError("NOT_FOUND", "El alta rápida no está instalada en esta tienda.")
+        config = _register(register_id, token)
+        body = json_body()
+        session = config.current_session_id
+        if not session or session.state != "opened":
+            raise VluxApiError("NO_OPEN_SESSION", "La caja no tiene una sesión abierta.")
+        employee, _verified = _acting_employee(config, token, body, required=True)
+        user = employee.sudo().user_id if employee else request.env.user
+        allowed = (config._vlux_api_is_manager(employee) if employee else False) or (
+            user and user.has_group("vlux_pos_catalog.group_vlux_catalog_quick_create"))
+        if not allowed:
+            raise VluxApiError("FORBIDDEN", "Sólo un encargado puede dar de alta productos.")
+        values = {key: body[key] for key in ("name", "barcode", "list_price", "taxes_ids") if key in body}
+        try:
+            result = Template._vlux_quick_create_for(values, config)
+        except ValidationError as error:
+            raise VluxApiError("VALIDATION_ERROR", str(error.args[0]) if error.args else "Datos inválidos.")
+        if not result.get("ok"):
+            raise VluxApiError("CONFLICT", "El código de barras ya está asignado a otro producto.",
+                               details={"existing": result.get("existing")})
+        product = request.env["product.product"].browse(result["product_id"])
+        return _product_payload(product)
 
     # --- selling ------------------------------------------------------------
 
