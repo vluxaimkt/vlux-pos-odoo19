@@ -49,6 +49,15 @@ class VluxCreditReport(models.AbstractModel):
             row["balance"] += payment.amount
             key = "last_purchase" if payment.amount > 0 else "last_payment"
             row[key] = payment.payment_date
+        for opening in self.env["vlux.credit.opening"].sudo().search(
+                [("state", "=", "posted"), ("company_id", "in", self.env.companies.ids)]):
+            row = per_partner.setdefault(opening.partner_id.id, {
+                "partner": opening.partner_id, "balance": 0.0, "last_purchase": None, "last_payment": None,
+            })
+            row["balance"] += opening.amount
+            opened = fields.Datetime.to_datetime(opening.date)
+            if not row["last_purchase"] or opened > row["last_purchase"]:
+                row["last_purchase"] = opened
         currency = self.env.company.currency_id
         customers = []
         for row in per_partner.values():
@@ -104,7 +113,29 @@ class VluxCreditReport(models.AbstractModel):
         currency = self.env.company.currency_id
         balance = 0.0
         moves = []
-        for payment in payments:
+        # The notebook's balance goes first, on its date, among the register's moves.
+        openings = self.env["vlux.credit.opening"]._vlux_posted([partner.id])
+        events = sorted(
+            [(fields.Datetime.to_datetime(opening.date), 0, opening) for opening in openings]
+            + [(payment.payment_date, 1, payment) for payment in payments],
+            key=lambda event: (event[0], event[1], event[2].id),
+        )
+        for when, kind_order, record in events:
+            if kind_order == 0:
+                balance += record.amount
+                moves.append({
+                    "date": fields.Datetime.to_string(when),
+                    "reference": record.note or "",
+                    "kind": _("Saldo inicial (libreta)"),
+                    "items": [],
+                    "ticket_total": currency.round(record.amount),
+                    "charge": currency.round(record.amount),
+                    "payment": 0.0,
+                    "balance": currency.round(balance),
+                    "cashier": "",
+                })
+                continue
+            payment = record
             order = payment.pos_order_id
             balance += payment.amount
             if order.vlux_credit_abono:

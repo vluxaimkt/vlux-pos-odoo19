@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_vlux_credit_opening_owner,vlux.credit.opening owner,model_vlux_credit_opening,vlux_core.group_vlux_owner,1,1,1,1
+access_vlux_credit_opening_admin,vlux.credit.opening administrator,model_vlux_credit_opening,vlux_core.group_vlux_administrator,1,1,1,1

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_vlux_credit_opening_list" model="ir.ui.view">
+        <field name="name">vlux.credit.opening.list</field>
+        <field name="model">vlux.credit.opening</field>
+        <field name="arch" type="xml">
+            <list string="Saldos iniciales de crédito" editable="top" multi_edit="0"
+                  decoration-muted="state == 'cancel'" decoration-info="state == 'draft'">
+                <header>
+                    <button name="action_post" type="object" string="Registrar seleccionados" class="btn-primary"/>
+                </header>
+                <field name="currency_id" column_invisible="1"/>
+                <field name="company_id" column_invisible="1"/>
+                <field name="partner_id" readonly="state != 'draft'"/>
+                <field name="amount" sum="Total" readonly="state != 'draft'"/>
+                <field name="date" readonly="state != 'draft'"/>
+                <field name="note"/>
+                <field name="allow_credit" readonly="state != 'draft'"/>
+                <field name="credit_limit" readonly="state != 'draft'" invisible="not allow_credit"/>
+                <field name="state" widget="badge" decoration-success="state == 'posted'"/>
+                <field name="move_id" optional="hide" groups="account.group_account_readonly"/>
+                <button name="action_post" type="object" string="Registrar" icon="fa-check" invisible="state != 'draft'"/>
+                <button name="action_cancel" type="object" string="Cancelar" icon="fa-undo" invisible="state != 'posted'"
+                        confirm="Se revierte el asiento y el cliente deja de deber este saldo. ¿Continuar?"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_vlux_credit_opening_search" model="ir.ui.view">
+        <field name="name">vlux.credit.opening.search</field>
+        <field name="model">vlux.credit.opening</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="partner_id"/>
+                <filter name="draft" string="Por registrar" domain="[('state', '=', 'draft')]"/>
+                <filter name="posted" string="Registrados" domain="[('state', '=', 'posted')]"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_vlux_credit_opening" model="ir.actions.act_window">
+        <field name="name">Saldos iniciales de crédito</field>
+        <field name="res_model">vlux.credit.opening</field>
+        <field name="view_mode">list</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Captura lo que cada cliente ya debía (la libreta)</p>
+            <p>Una línea por cliente: cuánto debe y desde cuándo. Al registrar, el saldo aparece en la caja,
+               en VLUX Owner y en el estado de cuenta; no cuenta como venta del día.</p>
+        </field>
+    </record>
+
+    <menuitem id="menu_vlux_credit_opening"
+              name="Saldos iniciales de crédito"
+              parent="point_of_sale.menu_point_of_sale"
+              action="action_vlux_credit_opening"
+              groups="vlux_core.group_vlux_owner,vlux_core.group_vlux_administrator"
+              sequence="110"/>
+</odoo>

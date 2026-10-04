@@ -1,3 +1,4 @@
+from . import credit_opening
 from . import credit_report
 from . import pos_config
 from . import pos_order

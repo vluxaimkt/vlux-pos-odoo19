@@ -24,7 +24,7 @@ class ResPartner(models.Model):
         string="Saldo a crédito",
         currency_field="vlux_credit_currency_id",
         compute="_compute_vlux_credit_balance",
-        help="Lo que el cliente debe por ventas a crédito del POS, menos sus abonos.",
+        help="Lo que el cliente debe por ventas a crédito del POS y saldos iniciales, menos sus abonos.",
     )
     vlux_credit_currency_id = fields.Many2one(
         "res.currency", compute="_compute_vlux_credit_currency_id",
@@ -63,6 +63,10 @@ class ResPartner(models.Model):
         for order, amount in groups:
             partner_id = order.partner_id.id
             balances[partner_id] = balances.get(partner_id, 0.0) + amount
+        # What they already owed before (the store's notebook).
+        for opening in self.env["vlux.credit.opening"]._vlux_posted(partners.ids):
+            partner_id = opening.partner_id.id
+            balances[partner_id] = balances.get(partner_id, 0.0) + opening.amount
         return balances
 
     def vlux_credit_available(self):
