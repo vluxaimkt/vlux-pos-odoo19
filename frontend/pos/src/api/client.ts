@@ -1,6 +1,6 @@
 import type { TaxInfo } from "../sale/pricing";
 import type {
-  AbonoTicket, CreditRow,
+  AbonoTicket, CashMove, CreditRow,
   ClosingSummary, Customer, Employee, Envelope, FeedPage, Me, OrderRequest, OrderResult, Product, Quote,
   RegisterState, SaleLine, StoreConfig, TokenInfo,
 } from "./types";
@@ -172,6 +172,14 @@ export class ApiClient {
     },
   ) {
     return this.request<RegisterState>("POST", `/registers/${registerId}/session/close`, body);
+  }
+
+  cashMoves(registerId: number) {
+    return this.request<{ session_id: number; items: CashMove[] }>("GET", `/registers/${registerId}/session/cash-moves`);
+  }
+
+  cashMove(registerId: number, body: { session_id: number; uuid: string; type: "in" | "out"; amount: number; reason: string }) {
+    return this.request<CashMove>("POST", `/registers/${registerId}/session/cash-move`, body);
   }
 
   creditCustomers() {

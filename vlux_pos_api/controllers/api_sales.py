@@ -269,7 +269,8 @@ class VluxApiSales(http.Controller):
                 "name": cash["name"],
                 "opening": cash["opening"],
                 "sales": cash["payment_amount"],
-                "moves": [{"name": move["name"], "amount": move["amount"]} for move in cash["moves"]],
+                "moves": [{"name": move["name"], "amount": move["amount"], "employee": move.get("cashier_name") or None}
+                          for move in cash["moves"]],
                 "expected": cash["amount"],
             } if cash else None,
             "other_methods": [
@@ -338,6 +339,53 @@ class VluxApiSales(http.Controller):
             raise VluxApiError("CLOSING_REFUSED", result.get("message") or "No se pudo cerrar la caja.",
                                details={"redirect": bool(result.get("redirect"))})
         return {**_register_state(config), "closed_session": _session_payload(session)}
+
+    # --- cash in and out ------------------------------------------------------
+
+    @api_route("/registers/<int:register_id>/session/cash-moves", scope="session:manage",
+               summary="Entradas y salidas de efectivo de la sesión abierta")
+    def cash_moves(self, token, register_id, **kwargs):
+        config = _register(register_id, token)
+        session = config.current_session_id
+        if not session:
+            raise VluxApiError("NO_OPEN_SESSION", "La caja no tiene una sesión abierta.")
+        return {"session_id": session.id, "items": session._vlux_api_cash_moves()}
+
+    @api_route("/registers/<int:register_id>/session/cash-move", scope="session:manage", methods=("POST",),
+               summary="Meter o sacar efectivo de la caja (encargado; idempotente por uuid)")
+    def cash_move(self, token, register_id, **kwargs):
+        """Body ``{"session_id", "uuid", "type": "in"|"out", "amount", "reason"}``.
+
+        As in the Odoo POS, only a manager of the register moves cash, with a
+        checked PIN; the closing then expects the drawer to hold that much
+        more (or less).
+        """
+        config = _register(register_id, token)
+        body = json_body()
+        session = config.current_session_id
+        if not session or session.state != "opened":
+            raise VluxApiError("NO_OPEN_SESSION", "La caja no tiene una sesión abierta.")
+        if body.get("session_id") != session.id:
+            raise VluxApiError("CONFLICT", "La sesión indicada no es la sesión abierta de la caja.",
+                               details={"session_id": session.id})
+        employee, _verified = _acting_employee(config, token, body, required=True)
+        if config.module_pos_hr and not config._vlux_api_is_manager(employee):
+            raise VluxApiError("FORBIDDEN", "Sólo un encargado puede meter o sacar efectivo.")
+        kind = body.get("type")
+        if kind not in ("in", "out"):
+            raise VluxApiError("VALIDATION_ERROR", "type debe ser \"in\" o \"out\".")
+        amount = config.currency_id.round(_amount(body.get("amount"), "amount"))
+        if amount <= 0:
+            raise VluxApiError("VALIDATION_ERROR", "El importe debe ser mayor que cero.")
+        reason = _text(body.get("reason"), "reason", limit=200).strip()
+        if not reason:
+            raise VluxApiError("VALIDATION_ERROR", "Escribe el motivo.")
+        move_uuid = _text(body.get("uuid"), "uuid", limit=64)
+        if not move_uuid:
+            raise VluxApiError("VALIDATION_ERROR", "Falta uuid.")
+        line, duplicate = session._vlux_api_cash_move(employee, kind, amount, reason, move_uuid)
+        move = next(row for row in session._vlux_api_cash_moves() if row["id"] == line.id)
+        return {**move, "session_id": session.id, "duplicate": duplicate}
 
     # --- selling ------------------------------------------------------------
 

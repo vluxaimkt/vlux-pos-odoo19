@@ -15,6 +15,7 @@ import { META_CREDIT, META_EMPLOYEES, META_SETUP, META_TAXES, META_TOKEN, PosCon
 import { canSellOnCredit } from "./sale/credit";
 import { CustomersScreen } from "./screens/CustomersScreen";
 import { SalesScreen } from "./screens/SalesScreen";
+import { CashMoveScreen } from "./screens/CashMoveScreen";
 import { syncFeed } from "./sync/catalog";
 import { flushOutbox } from "./sync/outbox";
 import { renewIfDue } from "./sync/token";
@@ -89,7 +90,7 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   const [catalogReady, setCatalogReady] = useState(false);
   const [taxes, setTaxes] = useState<Map<number, TaxInfo>>(new Map());
   const [credit, setCredit] = useState<Map<number, CreditRow>>(new Map());
-  const [view, setView] = useState<"register" | "queue" | "closing" | "customers" | "sales">("register");
+  const [view, setView] = useState<"register" | "queue" | "closing" | "customers" | "sales" | "cash">("register");
   const [status, setStatus] = useState({ syncing: false, pending: 0, attention: 0, error: null as string | null });
 
   // Unpairing wipes everything this device knows about the store (token,
@@ -226,6 +227,7 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   else if (view === "queue") body = <QueueScreen onClose={() => setView("register")} />;
   else if (view === "customers") body = <CustomersScreen onClose={() => setView("register")} />;
   else if (view === "sales") body = <SalesScreen onClose={() => setView("register")} />;
+  else if (view === "cash") body = <CashMoveScreen onClose={() => setView("register")} />;
   else if (view === "closing") {
     body = (
       <CloseScreen
@@ -249,6 +251,9 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
           onCustomers={() => setView("customers")}
           onSales={() => setView("sales")}
           onClosing={registerState?.session?.state === "opened" ? () => setView("closing") : null}
+          // As in the Odoo POS: only a manager moves cash (the server checks it too).
+          onCash={registerState?.session?.state === "opened" && (!registerState.employee_login || employee?.role === "manager")
+            ? () => setView("cash") : null}
         />
         {status.error && <div role="alert" class="alert alert-error rounded-none">{status.error}</div>}
         <main class="flex-1">{body}</main>
@@ -261,12 +266,13 @@ function Opened({ state, onOpened }: { state: RegisterState; onOpened: (state: R
   return state.session?.state === "opened" ? <SellScreen /> : <RegisterScreen state={state} onOpened={onOpened} />;
 }
 
-function Header({ status, onQueue, onCustomers, onSales, onClosing }: {
+function Header({ status, onQueue, onCustomers, onSales, onClosing, onCash }: {
   status: { syncing: boolean; pending: number; attention: number };
   onQueue: () => void;
   onCustomers: () => void;
   onSales: () => void;
   onClosing: (() => void) | null;
+  onCash: (() => void) | null;
 }) {
   const { setup, employee, online, setEmployee, forget } = usePos();
   return (
@@ -286,6 +292,7 @@ function Header({ status, onQueue, onCustomers, onSales, onClosing }: {
           <li><button onClick={onSales}>Ventas y devoluciones</button></li>
           <li><button onClick={onCustomers}>Clientes y crédito</button></li>
           <li><button onClick={onQueue}>Ventas por enviar</button></li>
+          {onCash && <li><button onClick={onCash}>Entradas y salidas de efectivo</button></li>}
           {onClosing && <li><button onClick={onClosing}>Corte de caja</button></li>}
           {employee && <li><button onClick={() => setEmployee(null)}>Cambiar de empleado</button></li>}
           <li><button onClick={() => { if (confirm("¿Desvincular este equipo? Se borran de este equipo el token, el catálogo, los clientes y los empleados. Las ventas por enviar se conservan.")) void forget(); }}>Desvincular equipo</button></li>

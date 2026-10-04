@@ -264,6 +264,40 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         self.assertEqual(session.state, "closed")
         self.assertEqual(session.cash_register_balance_end_real, 155.5)
 
+    def test_cash_in_and_out_change_what_the_closing_expects(self):
+        _response, opened = self._open(opening_cash=100.0)
+        session_id = opened["data"]["session"]["id"]
+        path = "/registers/%d/session/cash-move" % self.config.id
+        move = {"session_id": session_id, "uuid": str(uuid.uuid4()), "type": "out", "amount": 35.0,
+                "reason": "Pago al proveedor de refrescos"}
+
+        response, body = self._call("POST", path, move)
+        self.assertEqual((response.status_code, body["error"]), (401, "PIN_REQUIRED"))
+        response, body = self._call("POST", path, move, employee=self.emp2)
+        self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"), "a cashier does not move cash")
+
+        response, body = self._call("POST", path, move, employee=self.manager1)
+        self.assertEqual(response.status_code, 200, body)
+        self.assertEqual(body["data"]["type"], "out")
+        self.assertEqual(body["data"]["amount"], 35.0)
+        self.assertEqual(body["data"]["employee"], self.manager1.name)
+        self.assertFalse(body["data"]["duplicate"])
+        _response, again = self._call("POST", path, move, employee=self.manager1)
+        self.assertTrue(again["data"]["duplicate"], "the same move sent twice is recorded once")
+
+        response, body = self._call("POST", path, {**move, "uuid": str(uuid.uuid4()), "type": "in", "amount": 50,
+                                                   "reason": "Cambio del banco"}, employee=self.manager1)
+        self.assertEqual(response.status_code, 200, body)
+        for bad in ({"amount": 0}, {"amount": -5}, {"reason": "  "}, {"type": "sideways"}):
+            response, body = self._call("POST", path, {**move, "uuid": str(uuid.uuid4()), **bad}, employee=self.manager1)
+            self.assertEqual(body["error"], "VALIDATION_ERROR", bad)
+
+        _response, listed = self._call("GET", "/registers/%d/session/cash-moves" % self.config.id)
+        self.assertEqual([(m["type"], m["amount"]) for m in listed["data"]["items"]], [("out", 35.0), ("in", 50.0)])
+        _response, summary = self._call("GET", "/registers/%d/session/closing" % self.config.id)
+        self.assertEqual(summary["data"]["cash"]["expected"], 115.0, "100 opening - 35 out + 50 in")
+        self.assertEqual(len(summary["data"]["cash"]["moves"]), 2)
+
     def test_a_manager_may_close_above_the_limit(self):
         _response, opened = self._open(opening_cash=100.0)
         response, body = self._call("POST", "/registers/%d/session/close" % self.config.id, {

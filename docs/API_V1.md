@@ -361,6 +361,15 @@ otra sesión). La regla de diferencia máxima (D6, $30) la aplica el servidor: p
 encima del límite sólo cierra un encargado (el empleado que cuenta); si no,
 `CLOSING_REFUSED` y la caja **sigue abierta**.
 
+**Entradas y salidas de efectivo.** `POST /registers/<id>/session/cash-move`
+`{"session_id": 31, "uuid": "…", "type": "out", "amount": 350.0, "reason": "Pago a proveedor"}`
+mete (`in`) o saca (`out`) efectivo del cajón con el mismo registro que el POS
+de Odoo (línea de extracto de la sesión con el empleado), así que el corte
+espera esa cantidad de más o de menos. Como en Odoo, sólo un encargado de la
+caja y con PIN verificado (`FORBIDDEN` para un cajero); motivo obligatorio;
+idempotente por `uuid` (`duplicate: true`). `GET /registers/<id>/session/cash-moves`
+lista los de la sesión abierta; el corte los incluye con quién los hizo.
+
 ### 4.4 Crédito (fiado)
 
 Módulo `vlux_pos_credit`, con las mismas reglas que en el POS de Odoo (D7) y

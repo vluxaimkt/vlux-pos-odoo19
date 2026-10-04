@@ -219,6 +219,19 @@ export interface OrderResult {
   payments: { payment_method_id: number; name: string; amount: number; is_change: boolean }[];
 }
 
+/** Cash put in or taken out of the drawer (POST /registers/<id>/session/cash-move). */
+export interface CashMove {
+  id: number;
+  type: "in" | "out";
+  /** Always positive; `type` says which way. */
+  amount: number;
+  name: string;
+  employee: string | null;
+  date: string | null;
+  session_id?: number;
+  duplicate?: boolean;
+}
+
 export interface ClosingSummary {
   session: Session;
   max_difference: number | null;
@@ -228,7 +241,8 @@ export interface ClosingSummary {
     name: string;
     opening: number;
     sales: number;
-    moves: { name: string; amount: number }[];
+    /** Cash in (+) and out (−); `employee` who did it. */
+    moves: { name: string; amount: number; employee?: string | null }[];
     expected: number;
   } | null;
   other_methods: { payment_method_id: number; name: string; type: string; expected: number; count: number }[];

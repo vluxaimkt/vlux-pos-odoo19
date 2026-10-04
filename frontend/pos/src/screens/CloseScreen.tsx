@@ -128,7 +128,7 @@ export function CloseScreen({ onClosed, onCancel, onQueue }: {
             <div class="stat-value text-2xl">{formatMoney(summary.cash.expected, currency)}</div>
             <div class="stat-desc">
               Inicial {formatMoney(summary.cash.opening, currency)} + ventas {formatMoney(summary.cash.sales, currency)}
-              {summary.cash.moves.length > 0 && ` + movimientos ${formatMoney(summary.cash.moves.reduce((t, m) => t + m.amount, 0), currency)}`}
+              {summary.cash.moves.length > 0 && ` ${movesTotal(summary.cash.moves) < 0 ? "−" : "+"} entradas/salidas ${formatMoney(Math.abs(movesTotal(summary.cash.moves)), currency)}`}
             </div>
           </div>
         )}
@@ -223,6 +223,10 @@ function Difference({ value, currency }: { value: number; currency: Parameters<t
   );
 }
 
+function movesTotal(moves: { amount: number }[]): number {
+  return Math.round(moves.reduce((total, move) => total + move.amount, 0) * 100) / 100;
+}
+
 /** The printable closing slip (80 mm), from the counts the server accepted. */
 function ClosingReport({ done, onFinish }: { done: Done; onFinish: () => void }) {
   const { setup, employee } = usePos();
@@ -244,6 +248,17 @@ function ClosingReport({ done, onFinish }: { done: Done; onFinish: () => void })
         <div class="flex justify-between"><span>Ventas ({done.summary.orders.count})</span><span>{formatMoney(done.summary.orders.amount, currency)}</span></div>
         {done.summary.cash && (
           <div class="flex justify-between"><span>Fondo inicial</span><span>{formatMoney(done.summary.cash.opening, currency)}</span></div>
+        )}
+        {done.summary.cash && done.summary.cash.moves.length > 0 && (
+          <>
+            <div class="font-bold mt-1">ENTRADAS Y SALIDAS</div>
+            {done.summary.cash.moves.map((move, index) => (
+              <div key={index}>
+                <div>{move.name}{move.employee ? ` (${move.employee})` : ""}</div>
+                <div class="flex justify-end"><span>{formatMoney(move.amount, currency)}</span></div>
+              </div>
+            ))}
+          </>
         )}
         {lines.map((line) => (
           <div key={line.paymentMethodId} class="mt-1">
