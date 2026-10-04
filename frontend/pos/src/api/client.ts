@@ -204,6 +204,29 @@ export class ApiClient {
     return this.request<OrderResult>("POST", "/orders", body);
   }
 
+  recentOrders(registerId: number, limit = 40) {
+    return this.request<{ items: OrderResult[] }>("GET", `/orders/recent?register_id=${registerId}&limit=${limit}`);
+  }
+
+  lookupOrder(reference: string) {
+    return this.request<{ items: OrderResult[] }>("GET", `/orders/lookup?reference=${encodeURIComponent(reference)}`);
+  }
+
+  refundQuote(body: { register_id: number; order_id: number; lines: { line_id: number; qty: number }[] }) {
+    return this.request<{
+      order_id: number; amount_refund: number; amount_tax: number;
+      lines: { line_id: number; qty: number; amount: number }[];
+      paid_with: { payment_method_id: number; name: string; type: string; amount: number }[];
+    }>("POST", "/orders/refund/quote", body);
+  }
+
+  createRefund(body: {
+    uuid: string; register_id: number; order_id: number;
+    lines: { line_id: number; qty: number }[]; payments: { payment_method_id: number; amount: number }[];
+  }) {
+    return this.request<OrderResult>("POST", "/orders/refund", body);
+  }
+
   getOrder(uuid: string) {
     return this.request<OrderResult>("GET", `/orders/${encodeURIComponent(uuid)}`);
   }

@@ -386,3 +386,67 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         orders = self.env["pos.order"].search([("uuid", "in", [verified["uuid"], offline["uuid"]])])
         flags = {order.uuid: order.vlux_api_employee_verified for order in orders}
         self.assertEqual(flags, {verified["uuid"]: True, offline["uuid"]: False})
+
+    # --- returns ------------------------------------------------------------------------
+
+    def _sold(self):
+        self._open()
+        sale = self._sale([(self.cash, 100.0)])
+        _response, body = self._call("POST", "/orders", sale)
+        return body["data"]
+
+    def test_a_return_of_part_of_a_sale(self):
+        sold = self._sold()
+        soda_line = next(line for line in sold["lines"] if line["product_id"] == self.soda.id)
+        self.assertEqual(soda_line["refundable_qty"], 2.0)
+
+        _response, found = self._call("GET", "/orders/lookup?reference=%s" % sold["pos_reference"])
+        self.assertEqual([row["id"] for row in found["data"]["items"]], [sold["id"]])
+        _response, recent = self._call("GET", "/orders/recent?register_id=%d" % self.config.id)
+        self.assertEqual(recent["data"]["items"][0]["id"], sold["id"])
+
+        lines = [{"line_id": soda_line["id"], "qty": 1}]
+        _response, quote = self._call("POST", "/orders/refund/quote",
+                                      {"register_id": self.config.id, "order_id": sold["id"], "lines": lines})
+        self.assertEqual(quote["data"]["amount_refund"], 20.0)
+
+        refund = {"uuid": str(uuid.uuid4()), "register_id": self.config.id, "order_id": sold["id"], "lines": lines,
+                  "payments": [{"payment_method_id": self.cash.id, "amount": 20.0}]}
+        response, body = self._call("POST", "/orders/refund", refund)
+        self.assertEqual((response.status_code, body["error"]), (401, "PIN_REQUIRED"), "cash leaves the drawer")
+
+        response, body = self._call("POST", "/orders/refund", refund, employee=self.emp2)
+        self.assertEqual(response.status_code, 200, body)
+        self.assertTrue(body["data"]["is_refund"])
+        self.assertEqual(body["data"]["amount_total"], -20.0)
+        self.assertEqual(body["data"]["refunded_order_id"], sold["id"])
+        order = self.env["pos.order"].browse(body["data"]["id"])
+        self.assertEqual(order.lines.qty, -1.0)
+        self.assertEqual(order.lines.refunded_orderline_id.id, soda_line["id"])
+        self.assertEqual(order.state, "paid")
+
+        _response, again = self._call("POST", "/orders/refund", refund, employee=self.emp2)
+        self.assertEqual(again["data"]["id"], order.id, "a retried return is the same return")
+
+        _response, closing = self._call("GET", "/registers/%d/session/closing" % self.config.id, employee=self.emp2)
+        self.assertEqual(closing["data"]["cash"]["sales"], 55.5 - 20.0, "the refund left the drawer")
+
+    def test_a_return_never_exceeds_what_was_sold_or_mismatches_the_money(self):
+        sold = self._sold()
+        soda_line = next(line for line in sold["lines"] if line["product_id"] == self.soda.id)
+        base = {"register_id": self.config.id, "order_id": sold["id"]}
+        response, body = self._call("POST", "/orders/refund", {
+            **base, "uuid": str(uuid.uuid4()), "lines": [{"line_id": soda_line["id"], "qty": 3}],
+            "payments": [{"payment_method_id": self.cash.id, "amount": 60.0}]}, employee=self.emp2)
+        self.assertEqual((response.status_code, body["error"]), (400, "VALIDATION_ERROR"))
+        response, body = self._call("POST", "/orders/refund", {
+            **base, "uuid": str(uuid.uuid4()), "lines": [{"line_id": soda_line["id"], "qty": 1}],
+            "payments": [{"payment_method_id": self.cash.id, "amount": 25.0}]}, employee=self.emp2)
+        self.assertEqual((response.status_code, body["error"]), (409, "PAYMENT_MISMATCH"))
+        self._call("POST", "/orders/refund", {
+            **base, "uuid": str(uuid.uuid4()), "lines": [{"line_id": soda_line["id"], "qty": 2}],
+            "payments": [{"payment_method_id": self.cash.id, "amount": 40.0}]}, employee=self.emp2)
+        response, body = self._call("POST", "/orders/refund", {
+            **base, "uuid": str(uuid.uuid4()), "lines": [{"line_id": soda_line["id"], "qty": 1}],
+            "payments": [{"payment_method_id": self.cash.id, "amount": 20.0}]}, employee=self.emp2)
+        self.assertEqual((response.status_code, body["error"]), (400, "VALIDATION_ERROR"), "nothing left to return")

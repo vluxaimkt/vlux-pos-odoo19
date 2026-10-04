@@ -187,6 +187,8 @@ export interface OrderResult {
   pos_reference: string | null;
   tracking_number: string | null;
   state: string;
+  is_refund?: boolean;
+  refunded_order_id?: number | null;
   register_id: number;
   session_id: number;
   employee_id: number | null;
@@ -200,7 +202,10 @@ export interface OrderResult {
   duplicate?: boolean;
   /** Present with vlux_pos_credit: null when nothing was on credit. */
   credit?: CreditFigures | null;
-  lines: { uuid: string; product_id: number; name: string; qty: number; price_unit: number; price_subtotal_incl: number }[];
+  lines: {
+    id: number; uuid: string; product_id: number; name: string; qty: number; price_unit: number;
+    price_subtotal: number; price_subtotal_incl: number; refundable_qty: number;
+  }[];
   payments: { payment_method_id: number; name: string; amount: number; is_change: boolean }[];
 }
 

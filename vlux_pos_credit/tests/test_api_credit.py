@@ -189,3 +189,17 @@ class TestVluxApiCredit(TestPosHrHttpCommon, VluxApiCase):
 
         response, body = self._call("POST", "/customers", {"name": "  "})
         self.assertEqual((response.status_code, body["error"]), (400, "VALIDATION_ERROR"))
+
+    def test_returning_a_credit_sale_to_the_account_lowers_the_balance(self):
+        self._open()
+        self._authorize(limit=100.0)
+        _response, sold = self._sell_on_credit(2, self.manager1)
+        line = sold["data"]["lines"][0]
+        response, body = self._call("POST", "/orders/refund", {
+            "uuid": str(uuid.uuid4()), "register_id": self.config.id, "order_id": sold["data"]["id"],
+            "lines": [{"line_id": line["id"], "qty": 1}],
+            "payments": [{"payment_method_id": self.credit.id, "amount": 20.0}],
+        }, employee=self.manager1)
+        self.assertEqual(response.status_code, 200, body)
+        _response, row = self._call("GET", "/credit/customers/%d" % self.lupe.id)
+        self.assertEqual(row["data"]["balance"], 20.0)

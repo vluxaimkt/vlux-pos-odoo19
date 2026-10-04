@@ -383,6 +383,96 @@ class VluxApiSales(http.Controller):
             raise VluxApiError(refusal.code, refusal.message, details=refusal.details)
         return {**order._vlux_api_payload(), "duplicate": duplicate}
 
+    # --- returns ----------------------------------------------------------------------
+
+    @api_route("/orders/recent", scope="orders:write", summary="Ventas recientes de la caja (devolver, reimprimir)",
+               params=[{"name": "register_id", "in": "query", "schema": {"type": "integer"}},
+                       {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 30, "maximum": 100}}])
+    def recent_orders(self, token, register_id=None, limit=None, **kwargs):
+        """The register's latest sales and returns, newest first (default 30)."""
+        try:
+            config = _register(int(register_id), token)
+        except (TypeError, ValueError):
+            raise VluxApiError("VALIDATION_ERROR", "register_id debe ser un entero.")
+        try:
+            limit = max(1, min(100, int(limit or 30)))
+        except (TypeError, ValueError):
+            limit = 30
+        orders = request.env["pos.order"].search(
+            [("config_id", "=", config.id), ("state", "in", ("paid", "done", "invoiced"))],
+            order="date_order desc, id desc", limit=limit,
+        )
+        return {"items": [order._vlux_api_payload() for order in orders]}
+
+    @api_route("/orders/lookup", scope="orders:write", summary="Buscar una venta por su folio",
+               params=[{"name": "reference", "in": "query", "schema": {"type": "string"}}])
+    def lookup_order(self, token, reference=None, **kwargs):
+        """Sales of the token's company whose folio (or name) matches ``reference``."""
+        reference = (reference or "").strip()
+        if len(reference) < 3 or len(reference) > 64:
+            raise VluxApiError("VALIDATION_ERROR", "Escribe el folio del ticket.")
+        orders = request.env["pos.order"].search(
+            [("company_id", "=", request.env.company.id), ("is_refund", "=", False),
+             ("state", "in", ("paid", "done", "invoiced")),
+             "|", ("pos_reference", "ilike", reference), ("name", "ilike", reference)],
+            order="date_order desc", limit=10,
+        )
+        if token.pos_config_id:
+            orders = orders.filtered(lambda order: token.allows_register(order.config_id))
+        return {"items": [order._vlux_api_payload() for order in orders]}
+
+    def _refund_original(self, body):
+        try:
+            order_id = int(body.get("order_id"))
+        except (TypeError, ValueError):
+            raise VluxApiError("VALIDATION_ERROR", "order_id debe ser un entero.")
+        original = request.env["pos.order"].search(
+            [("id", "=", order_id), ("company_id", "=", request.env.company.id), ("is_refund", "=", False)], limit=1,
+        )
+        if not original:
+            raise VluxApiError("NOT_FOUND", "La venta no existe.")
+        return original
+
+    @api_route("/orders/refund/quote", scope="orders:write", methods=("POST",),
+               summary="Cuánto se devuelve de una venta (precios e impuestos de la venta)")
+    def refund_quote(self, token, **kwargs):
+        """Body ``{"register_id", "order_id", "lines": [{"line_id", "qty"}]}``; nothing is recorded."""
+        body = json_body()
+        _register_from_body(body, token)
+        original = self._refund_original(body)
+        Order = request.env["pos.order"]
+        quote = Order._vlux_api_refund_quote(original, Order._vlux_api_refund_lines(original, body.get("lines")))
+        return {
+            "order_id": original.id,
+            "amount_refund": -quote["amount_total"],
+            "amount_tax": -quote["amount_tax"],
+            "lines": [{"line_id": row["line"].id, "qty": -row["qty"], "amount": -row["price_subtotal_incl"]}
+                      for row in quote["lines"]],
+            "paid_with": [{"payment_method_id": payment.payment_method_id.id, "name": payment.payment_method_id.name,
+                           "type": payment.payment_method_id.type, "amount": payment.amount}
+                          for payment in original.payment_ids if not payment.is_change],
+        }
+
+    @api_route("/orders/refund", scope="orders:write", methods=("POST",),
+               summary="Registrar una devolución (idempotente por uuid; requiere PIN)")
+    def create_refund(self, token, **kwargs):
+        """Body ``{"uuid", "register_id", "order_id", "lines", "payments"}``.
+
+        Money goes back with ``payments`` (positive amounts, summing exactly
+        the return). Needs an employee session: cash leaves the drawer.
+        """
+        body = json_body()
+        config = _register_from_body(body, token)
+        employee, verified = _acting_employee(config, token, body, required=True)
+        original = self._refund_original(body)
+        try:
+            order, duplicate = request.env["pos.order"]._vlux_api_register_refund(
+                config, original, body, employee, verified,
+            )
+        except VluxSaleRefused as refusal:
+            raise VluxApiError(refusal.code, refusal.message, details=refusal.details)
+        return {**order._vlux_api_payload(), "duplicate": duplicate}
+
     @api_route("/orders/<string:uuid>", scope="orders:write", summary="Una venta por su uuid")
     def get_order(self, token, uuid, **kwargs):
         """The sale recorded with ``uuid``: how a register confirms what reached the server."""
