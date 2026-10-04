@@ -47,6 +47,18 @@ export interface RegisterConfig {
   payment_methods: PaymentMethod[];
   receipt_header: string | null;
   receipt_footer: string | null;
+  /** The register shows only these POS categories (Odoo "limitar categorías"). */
+  limit_categories?: boolean;
+  available_pos_category_ids?: number[];
+}
+
+/** A POS category: the tabs above the product grid. */
+export interface PosCategory {
+  id: number;
+  name: string;
+  parent_id: number | null;
+  sequence: number;
+  has_image: boolean;
 }
 
 export interface Currency {
@@ -93,6 +105,8 @@ export interface Product {
   sale_ok: boolean;
   /** Sold by weight: the register asks for the kilos (or reads them from a scale label). */
   to_weight?: boolean;
+  /** Plain text the register shows on the product's card (never HTML). */
+  description?: string | null;
   image_version: string | null;
   sync_date: string;
 }

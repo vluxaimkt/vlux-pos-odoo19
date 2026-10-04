@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 
 from odoo import fields, http
 from odoo.http import Response, request
+from odoo.tools import html2plaintext, is_html_empty
 from odoo.tools.mimetypes import guess_mimetype
 
 from odoo.addons.vlux_core.controllers.api import (
@@ -147,6 +148,18 @@ def _customer_page(partners):
     return [_customer_payload(partner) for partner in partners]
 
 
+DESCRIPTION_MAX = 2000
+
+
+def _description(template):
+    """The POS description (or the sales description) as plain text, or None."""
+    text = ""
+    if not is_html_empty(template.public_description):
+        text = html2plaintext(template.public_description)
+    text = (text or template.description_sale or "").strip()
+    return text[:DESCRIPTION_MAX] or None
+
+
 def _product_payload(product, image_version=None):
     # Template fields are read on the template on purpose: the variant's
     # related fields recompute through cache writes with access checks and
@@ -172,6 +185,8 @@ def _product_payload(product, image_version=None):
         "is_storable": template.is_storable,
         # Sold by weight: the register asks for the weight (or reads it from a scale label).
         "to_weight": template.to_weight,
+        # What the register shows under "información": plain text, never HTML.
+        "description": _description(template),
         "attributes": [
             {"attribute": value.attribute_id.name, "value": value.name} for value in values
         ],

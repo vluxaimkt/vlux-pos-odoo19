@@ -16,6 +16,7 @@ import { canSellOnCredit } from "./sale/credit";
 import { CustomersScreen } from "./screens/CustomersScreen";
 import { SalesScreen } from "./screens/SalesScreen";
 import { CashMoveScreen } from "./screens/CashMoveScreen";
+import { dropImageUrls } from "./sync/images";
 import { syncFeed } from "./sync/catalog";
 import { flushOutbox } from "./sync/outbox";
 import { renewIfDue } from "./sync/token";
@@ -97,11 +98,13 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   // catalog, customers, employees and their PIN hashes). Sales not yet sent
   // stay: they are the store's money and go out when a register is paired again.
   const forget = useCallback(async () => {
-    await db.transaction("rw", db.meta, db.products, db.customers, async () => {
+    await db.transaction("rw", [db.meta, db.products, db.customers, db.images], async () => {
       await db.meta.clear();
       await db.products.clear();
       await db.customers.clear();
+      await db.images.clear();
     });
+    dropImageUrls();
     onForget();
   }, [db, onForget]);
 

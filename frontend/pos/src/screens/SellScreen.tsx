@@ -15,6 +15,7 @@ import { CreditLine, CustomersScreen } from "./CustomersScreen";
 import { type CreditTicket, PayScreen } from "./PayScreen";
 import { ReceiptScreen } from "./ReceiptScreen";
 import { explain } from "./SetupScreen";
+import { ProductGrid } from "./ProductGrid";
 import { QuickProductDialog } from "./QuickProductDialog";
 import { WeighDialog } from "./WeighDialog";
 
@@ -176,8 +177,8 @@ export function SellScreen() {
 
   const estimate = localPricing(cart, taxes, setup.register.use_pricelist, rounding);
   return (
-    <section class="p-3 grid gap-3 lg:grid-cols-[1fr_24rem]">
-      <div class="flex flex-col gap-3">
+    <section class="p-3 grid gap-3 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_24rem]">
+      <div class="flex flex-col gap-3 min-w-0">
         <input
           ref={search}
           class="input input-lg w-full"
@@ -198,25 +199,11 @@ export function SellScreen() {
             {unknown && canCreate && <button class="btn btn-sm" onClick={() => setCreating(true)}>Dar de alta</button>}
           </div>
         )}
-        <ul class="list bg-base-100 rounded-box">
-          {results.map((product) => (
-            <li key={product.id}>
-              <button class="list-row w-full text-left items-center hover:bg-base-200" onClick={() => add(product)}>
-                <div class="list-col-grow">
-                  <div>{product.name}</div>
-                  <div class="text-xs opacity-60 font-mono">{product.barcode ?? product.default_code ?? ""}</div>
-                </div>
-                <div class="font-semibold">
-                  {formatMoney(product.list_price, setup.store.currency)}{product.to_weight && <span class="text-xs opacity-70">/{product.uom.name}</span>}
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <ProductGrid searched={query.trim() ? results : null} onPick={(product) => add(product)} />
         {query && !results.length && <p class="opacity-60">Sin resultados en esta caja.</p>}
       </div>
 
-      <aside class="card bg-base-100 shadow">
+      <aside class="card bg-base-100 shadow min-w-0">
         <div class="card-body gap-2 p-4">
           <h2 class="card-title">Venta <span class="badge">{itemCount(cart)}</span></h2>
           <div class="flex items-start gap-2 text-sm">

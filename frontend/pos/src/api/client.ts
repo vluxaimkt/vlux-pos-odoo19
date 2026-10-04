@@ -2,7 +2,7 @@ import type { TaxInfo } from "../sale/pricing";
 import type {
   AbonoTicket, CashMove, CreditRow,
   ClosingSummary, Customer, Employee, Envelope, FeedPage, Me, OrderRequest, OrderResult, Product, Quote,
-  RegisterState, SaleLine, StoreConfig, TokenInfo,
+  PosCategory, RegisterState, SaleLine, StoreConfig, TokenInfo,
 } from "./types";
 
 export const API_ROOT = "/vlux/api/v1";
@@ -108,6 +108,33 @@ export class ApiClient {
       );
     }
     return envelope.data as T;
+  }
+
+  posCategories() {
+    return this.request<{ items: PosCategory[] }>("GET", "/catalog/pos-categories");
+  }
+
+  /** A product picture (binary, not the JSON envelope); null when it has none. */
+  async productImage(productId: number, size: 128 | 256 | 512 = 256): Promise<Blob | null> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}/catalog/products/${productId}/image?size=${size}`, {
+        headers: { Authorization: `Bearer ${this.token}` },
+        cache: "no-store",
+        credentials: "omit",
+        signal: controller.signal,
+      });
+      if (response.status === 404) return null;
+      const type = response.headers.get("Content-Type") ?? "";
+      if (!response.ok || !type.startsWith("image/")) throw new NetworkError(`Imagen no disponible (HTTP ${response.status}).`, response.status);
+      return await response.blob();
+    } catch (error) {
+      if (error instanceof NetworkError) throw error;
+      throw new NetworkError("Sin conexión con el servidor.");
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   me() {

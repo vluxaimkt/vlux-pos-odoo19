@@ -249,6 +249,10 @@ de 500, p95 = 121 ms por página en proceso (283 ms extremo a extremo por HTTP
 en el host de desarrollo), 10 consultas por página constantes, y la
 sincronización incremental entrega exactamente los cambios y las bajas.
 
+Cada producto del catálogo lleva `description`: la descripción del POS (o la
+de venta) en **texto plano**, nunca HTML, para mostrarla en la ficha del
+producto sin riesgo de inyección.
+
 ### 4.2 Alta rápida
 
 `POST /catalog/products` con cuerpo JSON: `config_id` (caja) y `name`,

@@ -27,8 +27,18 @@ export interface OutboxRow {
   result?: OrderResult;
 }
 
+/** A product picture kept on the device, so the grid shows it offline. */
+export interface ImageRow {
+  /** Product id. */
+  id: number;
+  /** The feed's image_version it belongs to: a new picture replaces it. */
+  version: string;
+  blob: Blob;
+}
+
 export class PosDb extends Dexie {
   products!: Table<ProductRow, number>;
+  images!: Table<ImageRow, number>;
   customers!: Table<Customer & { search: string }, number>;
   meta!: Table<MetaRow, string>;
   outbox!: Table<OutboxRow, string>;
@@ -41,8 +51,12 @@ export class PosDb extends Dexie {
       meta: "key",
       outbox: "uuid, status, createdAt, nextAttemptAt",
     });
-    // v2: products carry `to_weight`; fetch the catalog again so every row has it.
-    this.version(2).stores({}).upgrade(async (tx) => {
+    // v2: products carry `to_weight` and `description` and are browsed by POS
+    // category; pictures are kept. Fetch the catalog again so every row has them.
+    this.version(2).stores({
+      products: "id, barcode, default_code, *words, *pos_category_ids",
+      images: "id",
+    }).upgrade(async (tx) => {
       await tx.table("products").clear();
       await tx.table("meta").delete("cursor:products");
     });
