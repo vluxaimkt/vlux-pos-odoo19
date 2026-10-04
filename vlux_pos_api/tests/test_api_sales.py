@@ -273,8 +273,11 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
 
         response, body = self._call("POST", path, move)
         self.assertEqual((response.status_code, body["error"]), (401, "PIN_REQUIRED"))
-        response, body = self._call("POST", path, move, employee=self.emp2)
-        self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"), "a cashier does not move cash")
+        response, body = self._call("POST", path, {**move, "type": "in"}, employee=self.emp2)
+        self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"), "a cashier does not put cash in")
+        self.emp4.sudo().pin = "4321"
+        response, body = self._call("POST", path, {**move, "uuid": str(uuid.uuid4())}, employee=self.emp4)
+        self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"), "minimal access moves no cash")
 
         response, body = self._call("POST", path, move, employee=self.manager1)
         self.assertEqual(response.status_code, 200, body)
@@ -292,11 +295,18 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
             response, body = self._call("POST", path, {**move, "uuid": str(uuid.uuid4()), **bad}, employee=self.manager1)
             self.assertEqual(body["error"], "VALIDATION_ERROR", bad)
 
+        # C27: a cashier pays a supplier from the drawer; it stays under their name.
+        response, body = self._call("POST", path, {**move, "uuid": str(uuid.uuid4()), "amount": 15,
+                                                   "reason": "Pago al repartidor de pan"}, employee=self.emp2)
+        self.assertEqual(response.status_code, 200, body)
+        self.assertEqual(body["data"]["employee"], self.emp2.name)
+
         _response, listed = self._call("GET", "/registers/%d/session/cash-moves" % self.config.id)
-        self.assertEqual([(m["type"], m["amount"]) for m in listed["data"]["items"]], [("out", 35.0), ("in", 50.0)])
+        self.assertEqual([(m["type"], m["amount"]) for m in listed["data"]["items"]],
+                         [("out", 35.0), ("in", 50.0), ("out", 15.0)])
         _response, summary = self._call("GET", "/registers/%d/session/closing" % self.config.id)
-        self.assertEqual(summary["data"]["cash"]["expected"], 115.0, "100 opening - 35 out + 50 in")
-        self.assertEqual(len(summary["data"]["cash"]["moves"]), 2)
+        self.assertEqual(summary["data"]["cash"]["expected"], 100.0, "100 opening - 35 out + 50 in - 15 out")
+        self.assertEqual(len(summary["data"]["cash"]["moves"]), 3)
 
     def test_a_manager_adds_an_unknown_product_from_the_register(self):
         if not hasattr(self.env["product.template"], "_vlux_quick_create_for"):

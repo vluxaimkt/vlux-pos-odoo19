@@ -12,12 +12,15 @@ const REASONS = {
 
 /**
  * Cash put in or taken out of the drawer (as the Odoo POS "Entrada/Salida de
- * efectivo"). Only a manager, with a checked PIN and the network; the closing
+ * efectivo"). A manager puts cash in and takes it out, a cashier only takes
+ * it out; always with a checked PIN and the network. The closing
  * then expects the drawer to hold that much more or less, and each move
  * prints a voucher to sign.
  */
 export function CashMoveScreen({ onClose }: { onClose: () => void }) {
   const { client, setup, online, registerState, employee } = usePos();
+  // C27: a cashier may take cash out (paying a supplier), only a manager puts it in.
+  const canPutIn = !registerState?.employee_login || employee?.role === "manager";
   const [moves, setMoves] = useState<CashMove[]>([]);
   const [kind, setKind] = useState<"in" | "out">("out");
   const [amount, setAmount] = useState("");
@@ -81,8 +84,10 @@ export function CashMoveScreen({ onClose }: { onClose: () => void }) {
           <div class="join">
             <button type="button" class={`btn join-item ${kind === "out" ? "btn-warning" : "btn-outline"}`}
               onClick={() => { setKind("out"); setReason(""); }}>Salida (sacar)</button>
-            <button type="button" class={`btn join-item ${kind === "in" ? "btn-success" : "btn-outline"}`}
-              onClick={() => { setKind("in"); setReason(""); }}>Entrada (meter)</button>
+            {canPutIn && (
+              <button type="button" class={`btn join-item ${kind === "in" ? "btn-success" : "btn-outline"}`}
+                onClick={() => { setKind("in"); setReason(""); }}>Entrada (meter)</button>
+            )}
           </div>
           <label class="input input-lg w-full">
             <span class="opacity-70">$</span>
@@ -100,7 +105,7 @@ export function CashMoveScreen({ onClose }: { onClose: () => void }) {
           <button class="btn btn-primary btn-lg" disabled={busy || !online}>
             {busy ? <span class="loading loading-spinner" /> : kind === "out" ? "Registrar salida" : "Registrar entrada"}
           </button>
-          {employee && <p class="text-xs opacity-60">Queda registrado a nombre de {employee.name}.</p>}
+          {employee && <p class="text-xs opacity-60">Queda registrado a nombre de {employee.name} y aparece en el corte.</p>}
         </div>
       </form>
 

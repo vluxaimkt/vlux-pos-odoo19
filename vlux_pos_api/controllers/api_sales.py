@@ -358,9 +358,10 @@ class VluxApiSales(http.Controller):
     def cash_move(self, token, register_id, **kwargs):
         """Body ``{"session_id", "uuid", "type": "in"|"out", "amount", "reason"}``.
 
-        As in the Odoo POS, only a manager of the register moves cash, with a
-        checked PIN; the closing then expects the drawer to hold that much
-        more (or less).
+        A manager of the register puts cash in or takes it out; a cashier
+        (C27) may only take it out, e.g. to pay a supplier, and the move stays
+        under their name with its reason. Always with a checked PIN; the
+        closing then expects the drawer to hold that much more (or less).
         """
         config = _register(register_id, token)
         body = json_body()
@@ -371,11 +372,14 @@ class VluxApiSales(http.Controller):
             raise VluxApiError("CONFLICT", "La sesión indicada no es la sesión abierta de la caja.",
                                details={"session_id": session.id})
         employee, _verified = _acting_employee(config, token, body, required=True)
-        if config.module_pos_hr and not config._vlux_api_is_manager(employee):
-            raise VluxApiError("FORBIDDEN", "Sólo un encargado puede meter o sacar efectivo.")
         kind = body.get("type")
         if kind not in ("in", "out"):
             raise VluxApiError("VALIDATION_ERROR", "type debe ser \"in\" o \"out\".")
+        if config.module_pos_hr and not config._vlux_api_is_manager(employee):
+            if employee in config.minimal_employee_ids:
+                raise VluxApiError("FORBIDDEN", "Tu acceso a la caja no permite mover efectivo.")
+            if kind != "out":
+                raise VluxApiError("FORBIDDEN", "Sólo un encargado puede meter efectivo a la caja.")
         amount = config.currency_id.round(_amount(body.get("amount"), "amount"))
         if amount <= 0:
             raise VluxApiError("VALIDATION_ERROR", "El importe debe ser mayor que cero.")

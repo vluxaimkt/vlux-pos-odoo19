@@ -251,8 +251,8 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
           onCustomers={() => setView("customers")}
           onSales={() => setView("sales")}
           onClosing={registerState?.session?.state === "opened" ? () => setView("closing") : null}
-          // As in the Odoo POS: only a manager moves cash (the server checks it too).
-          onCash={registerState?.session?.state === "opened" && (!registerState.employee_login || employee?.role === "manager")
+          // Managers put cash in and take it out; cashiers only take it out (C27). The server checks it too.
+          onCash={registerState?.session?.state === "opened" && (!registerState.employee_login || employee?.role !== "minimal")
             ? () => setView("cash") : null}
         />
         {status.error && <div role="alert" class="alert alert-error rounded-none">{status.error}</div>}
