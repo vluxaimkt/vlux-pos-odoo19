@@ -382,6 +382,19 @@ caja con PIN verificado; un cajero sólo puede sacar (C27: pagar a un proveedor)
 idempotente por `uuid` (`duplicate: true`). `GET /registers/<id>/session/cash-moves`
 lista los de la sesión abierta; el corte los incluye con quién los hizo.
 
+**Escáner del celular** (requiere `vlux_mobile_scanner`). La caja sin sesión
+de Odoo (PWA) vincula un celular igual que el POS de Odoo, por QR:
+`POST /registers/<id>/scanner/pair {"device_id"}` devuelve `code`,
+`qr_data_uri` y `scanner_url` (la página del celular no cambia). Mientras hay
+un celular vinculado, la caja pide las lecturas pendientes
+`GET /registers/<id>/scanner/events?pairing_id&device_id` (cada segundo) y
+contesta cada una con `POST /registers/<id>/scanner/ack`
+`{"device_id", "request_id", "status": "delivered"|"not_found"|"failed", "result_code", "message", "product_id"?, "product_name"?, "unit_price"?}`;
+el celular ve el resultado. Una lectura que la caja no recogió en 2 minutos se
+contesta como `EXPIRED` (no se agrega tarde). `GET .../scanner/status` y
+`POST .../scanner/revoke` consultan y terminan la vinculación. Cada
+vinculación es de una caja y de un equipo (`device_id`).
+
 ### 4.4 Crédito (fiado)
 
 Módulo `vlux_pos_credit`, con las mismas reglas que en el POS de Odoo (D7) y

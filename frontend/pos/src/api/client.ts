@@ -110,6 +110,35 @@ export class ApiClient {
     return envelope.data as T;
   }
 
+  // --- phone scanner (vlux_mobile_scanner) ---
+
+  scannerPair(registerId: number, deviceId: string) {
+    return this.request<{ pairing_id: number; code: string; status: string; expires_at: string; scanner_url: string; qr_data_uri: string }>(
+      "POST", `/registers/${registerId}/scanner/pair`, { device_id: deviceId });
+  }
+
+  scannerStatus(registerId: number, pairing: { pairingId: number; deviceId: string }) {
+    return this.request<{ pairing_id: number; status: string; last_seen_at: string | null }>(
+      "GET", `/registers/${registerId}/scanner/status?pairing_id=${pairing.pairingId}&device_id=${encodeURIComponent(pairing.deviceId)}`);
+  }
+
+  scannerRevoke(registerId: number, pairing: { pairingId: number; deviceId: string }) {
+    return this.request<{ status: string }>("POST", `/registers/${registerId}/scanner/revoke`,
+      { pairing_id: pairing.pairingId, device_id: pairing.deviceId });
+  }
+
+  scannerEvents(registerId: number, pairing: { pairingId: number; deviceId: string }) {
+    return this.request<{ status: string; items: { request_id: string; barcode: string }[] }>(
+      "GET", `/registers/${registerId}/scanner/events?pairing_id=${pairing.pairingId}&device_id=${encodeURIComponent(pairing.deviceId)}`);
+  }
+
+  scannerAck(registerId: number, body: {
+    device_id: string; request_id: string; status: string; result_code: string; message: string;
+    product_id?: number; product_name?: string; unit_price?: number;
+  }) {
+    return this.request<{ status: string }>("POST", `/registers/${registerId}/scanner/ack`, body);
+  }
+
   posCategories() {
     return this.request<{ items: PosCategory[] }>("GET", "/catalog/pos-categories");
   }

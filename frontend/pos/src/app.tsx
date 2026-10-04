@@ -17,6 +17,7 @@ import { CustomersScreen } from "./screens/CustomersScreen";
 import { SalesScreen } from "./screens/SalesScreen";
 import { CashMoveScreen } from "./screens/CashMoveScreen";
 import { dropImageUrls } from "./sync/images";
+import { forgetPhoneScanner } from "./screens/PhoneScanner";
 import { syncFeed } from "./sync/catalog";
 import { flushOutbox } from "./sync/outbox";
 import { renewIfDue } from "./sync/token";
@@ -105,6 +106,7 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
       await db.images.clear();
     });
     dropImageUrls();
+    forgetPhoneScanner();
     onForget();
   }, [db, onForget]);
 

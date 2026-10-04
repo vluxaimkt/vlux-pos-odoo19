@@ -18,6 +18,8 @@ import { explain } from "./SetupScreen";
 import { ProductGrid } from "./ProductGrid";
 import { QuickProductDialog } from "./QuickProductDialog";
 import { WeighDialog } from "./WeighDialog";
+import { type ScanOutcome } from "../input/sources";
+import { PhoneScannerButton, usePhoneScanner } from "./PhoneScanner";
 
 const newId = () => crypto.randomUUID();
 
@@ -45,12 +47,19 @@ export function SellScreen() {
   const search = useRef<HTMLInputElement>(null);
   const rounding = setup.store.tax_rounding;
 
+  // The latest cart, for scans that arrive one after another (phone, scanner).
+  const cartRef = useRef<Cart | null>(null);
+
   // The cart survives a reload of the app (power cut, accidental refresh).
   useEffect(() => {
-    void getMeta<Cart>(db, META_CART).then((saved) => setCart(saved ?? emptyCart(newId)));
+    void getMeta<Cart>(db, META_CART).then((saved) => {
+      cartRef.current = saved ?? emptyCart(newId);
+      setCart(cartRef.current);
+    });
   }, [db]);
 
   function update(next: Cart) {
+    cartRef.current = next;
     setCart(next);
     void setMeta(db, META_CART, next);
   }
@@ -74,47 +83,69 @@ export function SellScreen() {
     };
   }, [db, query]);
 
-  function add(product: ProductRow, qty?: number, options: AddOptions = {}) {
-    if (!cart) return;
+  /** Add to the cart; false when it waits for the weight. */
+  function add(product: ProductRow, qty?: number, options: AddOptions = {}): boolean {
+    const current = cartRef.current;
+    if (!current) return false;
     setQuery("");
     setNotice(null);
     // Sold by weight with no weight yet: ask for the kilos.
     if (product.to_weight && qty === undefined && options.priceUnit === undefined) {
       setWeighing({ product });
-      return;
+      return false;
     }
-    update(addProduct(cart, product, newId, qty ?? 1, options));
+    update(addProduct(current, product, newId, qty ?? 1, options));
     search.current?.focus();
+    return true;
   }
 
   function weighed(kilos: number) {
-    if (!cart || !weighing) return;
-    update(weighing.lineUuid ? setQty(cart, weighing.lineUuid, kilos) : addProduct(cart, weighing.product, newId, kilos));
+    const current = cartRef.current;
+    if (!current || !weighing) return;
+    update(weighing.lineUuid ? setQty(current, weighing.lineUuid, kilos) : addProduct(current, weighing.product, newId, kilos));
     setWeighing(null);
     search.current?.focus();
   }
 
-  /** A barcode scanner types the code and presses Enter. */
-  async function onEnter(event: KeyboardEvent) {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    const code = query.trim();
-    if (!code) return;
+  /**
+   * One read from any barcode source (keyboard-wedge scanner, linked phone…):
+   * the same rules whatever the device, and an outcome the device can show.
+   */
+  async function handleScan(code: string): Promise<ScanOutcome> {
+    const added = (product: ProductRow, ok: boolean): ScanOutcome => ok
+      ? { status: "delivered", code: "ADDED_TO_CART", message: "Agregado", product: { id: product.id, name: product.name, price: product.list_price } }
+      : { status: "delivered", code: "WEIGHT_REQUIRED", message: "Captura el peso en la caja", product: { id: product.id, name: product.name, price: product.list_price } };
     // A scale label carries the weight or the price; the product has the code with that part zeroed.
     const parsed = parseBarcode(code, setup.store.barcode_nomenclature);
     if ((parsed.type === "weight" || parsed.type === "price") && parsed.value > 0) {
       const labelled = (await productByBarcode(db, parsed.baseCode)) ?? (await productByBarcode(db, code));
       if (labelled) {
-        return parsed.type === "weight" ? add(labelled, parsed.value) : add(labelled, 1, { priceUnit: parsed.value });
+        return added(labelled, parsed.type === "weight" ? add(labelled, parsed.value) : add(labelled, 1, { priceUnit: parsed.value }));
       }
     }
     const product = await productByBarcode(db, code);
-    if (product) return add(product);
-    if (results.length === 1 && results[0]) return add(results[0]);
+    if (product) return added(product, add(product));
     setNotice(`No se encontró "${code}" en esta caja.`);
     // A scale label of an unknown product is not a product code: set that product up in Odoo.
     setUnknown(parsed.type === "weight" || parsed.type === "price" ? null : code);
     setQuery("");
+    return { status: "not_found", code: "PRODUCT_NOT_FOUND", message: "No está en esta caja" };
+  }
+  const scanRef = useRef(handleScan);
+  scanRef.current = handleScan;
+  usePhoneScanner((code) => scanRef.current(code));
+
+  /** A keyboard-wedge scanner types the code and presses Enter; typing a name and Enter picks the only match. */
+  async function onEnter(event: KeyboardEvent) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const code = query.trim();
+    if (!code) return;
+    if (!(await productByBarcode(db, code)) && results.length === 1 && results[0] && !/^\d{8,}$/.test(code)) {
+      add(results[0]);
+      return;
+    }
+    await handleScan(code);
   }
 
   async function charge() {
@@ -193,6 +224,7 @@ export function SellScreen() {
           }}
           onKeyDown={(event) => void onEnter(event)}
         />
+        <div class="flex justify-end"><PhoneScannerButton /></div>
         {notice && (
           <div role="alert" class="alert alert-warning">
             <span class="flex-1">{notice}</span>
