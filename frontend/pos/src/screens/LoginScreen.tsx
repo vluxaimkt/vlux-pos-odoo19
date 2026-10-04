@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 
 import { ApiError, isRetryable } from "../api/client";
 import type { Employee } from "../api/types";
@@ -9,6 +9,15 @@ import { usePos } from "../state";
 
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
 const META_GUARD = "pin_guard";
+
+/** The digit a key stands for: top-row numbers and the numeric keypad (with or without Num Lock). */
+export function pinKey(event: Pick<KeyboardEvent, "key" | "code">): string | null {
+  if (/^[0-9]$/.test(event.key)) return event.key;
+  const pad = /^Numpad([0-9])$/.exec(event.code);
+  if (pad) return pad[1] ?? null;
+  if (event.key === "Backspace" || event.key === "Delete") return "⌫";
+  return null;
+}
 
 /**
  * Who is at the register. Works without the network: PINs are checked
@@ -82,6 +91,27 @@ export function LoginScreen() {
     setError(lockedFor(next, Date.now()) ? null : "PIN incorrecto.");
   }
 
+  // Typing the PIN on the keyboard (number row or numeric keypad) works like tapping it.
+  const pressRef = useRef<(key: string) => void>(() => undefined);
+  pressRef.current = press;
+  useEffect(() => {
+    if (!chosen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
+      if (event.key === "Escape") {
+        setChosen(null);
+        setPin("");
+        return;
+      }
+      const key = pinKey(event);
+      if (!key) return;
+      event.preventDefault();
+      pressRef.current(key);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [chosen]);
+
   function press(key: string) {
     if (waitMs) return;
     setError(null);
@@ -145,6 +175,7 @@ export function LoginScreen() {
         </div>
       )}
       {error && <div role="alert" class="alert alert-error">{error}</div>}
+      <p class="text-sm opacity-60">Puedes escribirlo con el teclado o el teclado numérico.</p>
       <div class="grid grid-cols-3 gap-2 w-64">
         {KEYS.map((key, index) =>
           key ? (
