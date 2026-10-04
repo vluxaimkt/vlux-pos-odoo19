@@ -36,7 +36,8 @@ class PosOrder(models.Model):
         # A VLUX register that could not prove who sold (PIN checked offline)
         # counts as a cashier: its sales on credit are flagged for the owner.
         self.ensure_one()
-        if self.source == "vlux_api" and not self.vlux_api_employee_verified:
+        if (self.source == "vlux_api" and not self.vlux_api_employee_verified
+                and self.session_id.config_id.vlux_credit_sellers != "all"):
             return False
         return super()._vlux_sold_by_manager()
 

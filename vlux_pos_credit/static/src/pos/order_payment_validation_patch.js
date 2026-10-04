@@ -20,7 +20,7 @@ patch(OrderPaymentValidation.prototype, {
             return false;
         };
         if (!this.pos.vluxCanSellOnCredit) {
-            return refuse(_t("Sólo el encargado o el dueño pueden vender a crédito."));
+            return refuse(_t("En esta caja sólo el encargado o el dueño pueden vender a crédito."));
         }
         const partner = order.getPartner();
         if (!partner) {

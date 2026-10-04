@@ -170,7 +170,7 @@ export function PayScreen({ cart, pricing, onBack, onPaid }: {
           </fieldset>
           {creditMethod && !offerCredit && (
             <p class="text-xs opacity-70">
-              {canSellOnCredit ? "Para fiar, elige al cliente en la venta." : "Sólo el encargado o el dueño pueden fiar."}
+              {canSellOnCredit ? "Para fiar, elige al cliente en la venta." : "En esta caja sólo el encargado o el dueño pueden fiar."}
             </p>
           )}
           <div class="grid grid-cols-2 gap-2">

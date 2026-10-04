@@ -1,14 +1,10 @@
 import { useEffect, useState } from "preact/hooks";
 
 import type { CashMove } from "../api/types";
+import { formatDateTime, formatTime } from "../lib/locale";
 import { formatMoney } from "../lib/money";
 import { usePos } from "../state";
 import { explain } from "./SetupScreen";
-
-const REASONS = {
-  in: ["Cambio (morralla)", "Fondo adicional"],
-  out: ["Pago a proveedor", "Retiro del dueño", "Gasto de la tienda"],
-};
 
 /**
  * Cash put in or taken out of the drawer (as the Odoo POS "Entrada/Salida de
@@ -21,6 +17,8 @@ export function CashMoveScreen({ onClose }: { onClose: () => void }) {
   const { client, setup, online, registerState, employee } = usePos();
   // A cashier may only take cash out (where the register allows it); a manager also puts it in.
   const canPutIn = !registerState?.employee_login || employee?.role === "manager";
+  // Quick reasons are the store's own (Point of Sale settings), not the app's.
+  const reasons = registerState?.options?.cash_reasons ?? { in: [], out: [] };
   const [moves, setMoves] = useState<CashMove[]>([]);
   const [kind, setKind] = useState<"in" | "out">("out");
   const [amount, setAmount] = useState("");
@@ -95,7 +93,7 @@ export function CashMoveScreen({ onClose }: { onClose: () => void }) {
               onInput={(e) => setAmount(e.currentTarget.value)} />
           </label>
           <div class="flex flex-wrap gap-1">
-            {REASONS[kind].map((text) => (
+            {reasons[kind].map((text) => (
               <button key={text} type="button" class="btn btn-xs" onClick={() => setReason(text)}>{text}</button>
             ))}
           </div>
@@ -116,7 +114,7 @@ export function CashMoveScreen({ onClose }: { onClose: () => void }) {
             <div class="list-col-grow">
               <div>{move.name}</div>
               <div class="text-xs opacity-70">
-                {move.employee ?? ""}{move.date && ` · ${new Date(move.date).toLocaleTimeString("es-MX")}`}
+                {move.employee ?? ""}{move.date && ` · ${formatTime(move.date)}`}
               </div>
             </div>
             <div class={`font-semibold ${move.type === "out" ? "text-warning" : "text-success"}`}>
@@ -144,7 +142,7 @@ function CashMoveVoucher({ move, onDone }: { move: CashMove; onDone: () => void 
         <div class="text-center">{setup.store.company.name}</div>
         <hr class="my-2 border-dashed border-black" />
         <div>{setup.register.name}</div>
-        {move.date && <div>{new Date(move.date).toLocaleString("es-MX")}</div>}
+        {move.date && <div>{formatDateTime(move.date)}</div>}
         {move.employee && <div>Registró: {move.employee}</div>}
         <div class="mt-1">{move.name}</div>
         <hr class="my-2 border-dashed border-black" />

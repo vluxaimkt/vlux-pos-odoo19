@@ -373,6 +373,16 @@ otra sesión). La regla de diferencia máxima (D6, $30) la aplica el servidor: p
 encima del límite sólo cierra un encargado (el empleado que cuenta); si no,
 `CLOSING_REFUSED` y la caja **sigue abierta**.
 
+**Opciones de la caja.** El estado de la caja (`GET /registers/<id>/session`
+y las respuestas de abrir/cerrar) trae `options`: lo que cada negocio decide en
+Punto de venta → Ajustes y la pantalla respeta. Base (`vlux_pos_api`):
+`cashier_cash_out` (cajeros pueden sacar efectivo, apagado por defecto) y
+`cash_reasons` (`{"in": [...], "out": [...]}`, motivos rápidos). Con
+`vlux_pos_credit`: `credit_sellers` (`"managers"` por defecto, o `"all"`). Cada
+módulo agrega sus llaves extendiendo `pos.config._vlux_api_register_options()`;
+la pantalla ignora las que no conoce. `/store/config` trae además
+`company.locale` (p. ej. `es-MX`) para escribir dinero y fechas.
+
 **Entradas y salidas de efectivo.** `POST /registers/<id>/session/cash-move`
 `{"session_id": 31, "uuid": "…", "type": "out", "amount": 350.0, "reason": "Pago a proveedor"}`
 mete (`in`) o saca (`out`) efectivo del cajón con el mismo registro que el POS

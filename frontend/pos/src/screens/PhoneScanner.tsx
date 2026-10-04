@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 
+import { formatTime } from "../lib/locale";
 import { getMeta, setMeta } from "../db/db";
 import { type PhonePairing, PhoneScannerSource } from "../input/phoneScanner";
 import type { ScanHandler } from "../input/sources";
@@ -148,14 +149,14 @@ export function PhoneScannerButton() {
                 <img src={step.qr} alt="Código QR para vincular el celular" class="w-56 h-56 bg-white p-2 rounded" />
                 <div>o abre en el celular <span class="font-mono text-xs break-all">{step.url}</span></div>
                 <div>Código: <span class="font-mono text-xl tracking-widest">{step.code}</span></div>
-                <div class="text-xs opacity-60">Vence a las {new Date(step.expiresAt).toLocaleTimeString("es-MX")}</div>
+                <div class="text-xs opacity-60">Vence a las {formatTime(step.expiresAt)}</div>
                 <span class="loading loading-dots" aria-label="Esperando al celular" />
               </>
             ) : (
               <>
                 <h3 class="text-lg font-bold">Celular vinculado ✓</h3>
                 <p>Lo que escanees con el celular entra a esta venta.</p>
-                {lastSeen && <p class="text-xs opacity-60">Última señal: {new Date(lastSeen).toLocaleTimeString("es-MX")}</p>}
+                {lastSeen && <p class="text-xs opacity-60">Última señal: {formatTime(lastSeen)}</p>}
                 <button class="btn btn-warning btn-sm" onClick={() => void unlink()}>Desvincular celular</button>
               </>
             )}

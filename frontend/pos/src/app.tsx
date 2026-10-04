@@ -12,7 +12,8 @@ import type { TaxInfo } from "./sale/pricing";
 import { CloseScreen } from "./screens/CloseScreen";
 import { QueueScreen } from "./screens/QueueScreen";
 import { META_CREDIT, META_EMPLOYEES, META_SETUP, META_TAXES, META_TOKEN, PosContext, type PosContextValue, type Setup, usePos } from "./state";
-import { canSellOnCredit } from "./sale/credit";
+import { canAuthorizeCredit, canSellOnCredit } from "./sale/credit";
+import { setLocale } from "./lib/locale";
 import { CustomersScreen } from "./screens/CustomersScreen";
 import { SalesScreen } from "./screens/SalesScreen";
 import { CashMoveScreen } from "./screens/CashMoveScreen";
@@ -217,11 +218,15 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   useInterval(syncCatalog, CATALOG_EVERY_MS, online);
   useInterval(flush, OUTBOX_EVERY_MS);
 
+  // Money and dates the way the store's language writes them.
+  setLocale(paired.setup.store.company.locale);
+
   const context: PosContextValue = {
     db, client, setup: paired.setup, employees, employee, online, registerState, taxes, setEmployee, forget,
     flushNow: flush,
     credit, saveCredit, refreshCredit,
-    canSellOnCredit: canSellOnCredit(!!registerState?.employee_login, employee?.role),
+    canSellOnCredit: canSellOnCredit(!!registerState?.employee_login, employee?.role, registerState?.options?.credit_sellers),
+    canAuthorizeCredit: canAuthorizeCredit(!!registerState?.employee_login, employee?.role),
   };
 
   const waiting = online ? null : "Conéctate a internet para la primera carga de esta caja.";
@@ -259,7 +264,7 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
           // Managers move cash; cashiers take it out only where the register allows it. The server checks it too.
           onCash={registerState?.session?.state === "opened"
             && (!registerState.employee_login || employee?.role === "manager"
-              || (employee?.role === "cashier" && !!registerState.cashier_cash_out))
+              || (employee?.role === "cashier" && !!registerState.options?.cashier_cash_out))
             ? () => setView("cash") : null}
         />
         {status.error && <div role="alert" class="alert alert-error rounded-none">{status.error}</div>}

@@ -10,6 +10,15 @@
                          help="En la caja VLUX, los cajeros pueden registrar salidas de efectivo (con motivo, a su nombre). Las entradas siguen siendo del encargado.">
                     <field name="pos_vlux_cashier_cash_out"/>
                 </setting>
+                <setting id="vlux_cash_reasons" string="Motivos de entradas y salidas"
+                         help="Botones de motivo en la caja VLUX, uno por renglón.">
+                    <div class="content-group">
+                        <label for="pos_vlux_cash_in_reasons" string="Entradas" class="fw-normal"/>
+                        <field name="pos_vlux_cash_in_reasons" placeholder="Cambio (morralla)"/>
+                        <label for="pos_vlux_cash_out_reasons" string="Salidas" class="fw-normal"/>
+                        <field name="pos_vlux_cash_out_reasons" placeholder="Pago a proveedor"/>
+                    </div>
+                </setting>
             </setting>
         </field>
     </record>

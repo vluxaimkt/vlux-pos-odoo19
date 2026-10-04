@@ -301,7 +301,8 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"), "off by default, as in Odoo")
         self.config.vlux_cashier_cash_out = True
         _response, state = self._call("GET", "/registers/%d/session" % self.config.id)
-        self.assertTrue(state["data"]["cashier_cash_out"], "the screen learns the register's option")
+        self.assertTrue(state["data"]["options"]["cashier_cash_out"], "the screen learns the register's option")
+        self.assertIn("Pago a proveedor", state["data"]["options"]["cash_reasons"]["out"])
         response, body = self._call("POST", path, cashier_out, employee=self.emp2)
         self.assertEqual(response.status_code, 200, body)
         self.assertEqual(body["data"]["employee"], self.emp2.name)

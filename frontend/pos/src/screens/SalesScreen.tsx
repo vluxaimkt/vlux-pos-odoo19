@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 
 import type { OrderResult } from "../api/types";
+import { formatDateTime } from "../lib/locale";
 import { formatMoney } from "../lib/money";
 import { round } from "../sale/money";
 import { usePos } from "../state";
@@ -74,7 +75,7 @@ export function SalesScreen({ onClose }: { onClose: () => void }) {
                 {order.is_refund && <span class="badge badge-warning badge-sm ml-2">Devolución</span>}
               </div>
               <div class="text-xs opacity-70">
-                {new Date(order.date_order.replace(" ", "T")).toLocaleString("es-MX")}
+                {formatDateTime(order.date_order.replace(" ", "T"))}
                 {order.lines.length > 0 && ` · ${order.lines.length} producto(s)`}
               </div>
             </div>
@@ -215,7 +216,7 @@ export function OrderTicket({ order, onDone }: { order: OrderResult; onDone: () 
         </header>
         <hr class="my-2 border-dashed border-black" />
         <div class="text-center font-bold">{order.is_refund ? "DEVOLUCIÓN" : "REIMPRESIÓN DE TICKET"}</div>
-        <div>{new Date(order.date_order.replace(" ", "T")).toLocaleString("es-MX")}</div>
+        <div>{formatDateTime(order.date_order.replace(" ", "T"))}</div>
         <div>{setup.register.name}</div>
         <div>Folio: {order.pos_reference ?? order.name}</div>
         <hr class="my-2 border-dashed border-black" />

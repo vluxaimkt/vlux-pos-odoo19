@@ -45,9 +45,9 @@ class PosOrder(models.Model):
             )
 
     def _vlux_sold_by_manager(self):
-        """Whether the encargado or the owner was at the register."""
+        """Whether the person at the register could sell on credit (the register's option decides)."""
         self.ensure_one()
-        return self.session_id.config_id._vlux_is_manager(self.employee_id, self.user_id)
+        return self.session_id.config_id._vlux_may_sell_on_credit(self.employee_id, self.user_id)
 
     def _vlux_credit_issues(self):
         """Rules a sale on credit broke (empty list when none)."""

@@ -19,6 +19,16 @@ class PosConfig(models.Model):
     _inherit = "pos.config"
 
     # Store options of the VLUX register: each business decides; defaults are Odoo's behaviour.
+    vlux_cash_in_reasons = fields.Text(
+        string="Motivos rápidos de entrada de efectivo",
+        default="Cambio (morralla)\nFondo adicional",
+        help="Uno por renglón: botones de motivo al meter efectivo en la caja VLUX.",
+    )
+    vlux_cash_out_reasons = fields.Text(
+        string="Motivos rápidos de salida de efectivo",
+        default="Pago a proveedor\nRetiro del dueño\nGasto de la tienda",
+        help="Uno por renglón: botones de motivo al sacar efectivo en la caja VLUX.",
+    )
     vlux_cashier_cash_out = fields.Boolean(
         string="Cajeros pueden sacar efectivo",
         help="Permite a los cajeros registrar salidas de efectivo (p. ej. pagar a un proveedor) con motivo y a su "
@@ -33,6 +43,22 @@ class PosConfig(models.Model):
         # same list for them. The domain keeps it to this register's company
         # and allowed employees.
         return self.env["hr.employee"].sudo().search(self._employee_domain(self.env.uid), order="name, id")
+
+    def _vlux_api_register_options(self):
+        """Store options the register screen adapts to (extension point).
+
+        Each module adds its own keys (``super()`` then update), so a new
+        option never needs a change here or in the screens that ignore it.
+        """
+        self.ensure_one()
+
+        def lines(text):
+            return [line.strip()[:60] for line in (text or "").splitlines() if line.strip()][:12]
+
+        return {
+            "cashier_cash_out": bool(self.vlux_cashier_cash_out),
+            "cash_reasons": {"in": lines(self.vlux_cash_in_reasons), "out": lines(self.vlux_cash_out_reasons)},
+        }
 
     def _vlux_api_employees(self):
         """Employees who may work this register, as pos_hr hands them to the Odoo POS.

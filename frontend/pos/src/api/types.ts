@@ -81,7 +81,13 @@ export interface StoreConfig {
     zip: string | null;
     phone: string | null;
     timezone: string;
+    /** BCP 47 locale for money and dates ("es-MX"); older servers omit it. */
+    locale?: string;
   };
+  /** The company's default sale taxes (what a new product gets). */
+  default_sale_tax_ids?: number[];
+  /** Whether prices include taxes unless a tax says otherwise. */
+  price_include_default?: string | boolean;
   currency: Currency;
   registers: RegisterConfig[];
   /** How the company rounds taxes ("round_per_line" | "round_globally"); older servers omit it. */
@@ -147,10 +153,19 @@ export interface RegisterState {
   employee_login: boolean;
   cash_control: boolean;
   max_difference: number | null;
-  /** Register option: cashiers may take cash out (each store decides). */
-  cashier_cash_out?: boolean;
   session: Session | null;
+  /** Store options the screen adapts to; each server module adds its own. */
+  options?: RegisterOptions;
   already_open?: boolean;
+}
+
+export interface RegisterOptions {
+  /** Cashiers may take cash out of the drawer. */
+  cashier_cash_out?: boolean;
+  /** Quick reasons for cash in and out, as the store wrote them. */
+  cash_reasons?: { in: string[]; out: string[] };
+  /** With vlux_pos_credit: who may sell on credit ("managers" | "all"). */
+  credit_sellers?: string;
 }
 
 export interface Employee {

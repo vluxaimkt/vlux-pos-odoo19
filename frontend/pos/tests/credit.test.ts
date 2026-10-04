@@ -13,6 +13,8 @@ describe("credit rules", () => {
     expect(canSellOnCredit(true, "manager")).toBe(true);
     expect(canSellOnCredit(true, "cashier")).toBe(false);
     expect(canSellOnCredit(false, null)).toBe(true);
+    expect(canSellOnCredit(true, "cashier", "all")).toBe(true);
+    expect(canSellOnCredit(true, "minimal", "all")).toBe(false);
   });
 
   it("refuses unauthorised customers and sales above the limit, like the Odoo POS", () => {

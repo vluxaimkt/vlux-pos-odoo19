@@ -109,9 +109,9 @@ def _register_state(config):
         "employee_login": bool(config.module_pos_hr),
         "cash_control": bool(config.cash_control),
         "max_difference": config.amount_authorized_diff if config.set_maximum_difference else None,
-        # Register options the screen adapts to (each store decides).
-        "cashier_cash_out": bool(config.vlux_cashier_cash_out),
         "session": _session_payload(session),
+        # Store options the screen adapts to (each module adds its own).
+        "options": config._vlux_api_register_options(),
     }
 
 

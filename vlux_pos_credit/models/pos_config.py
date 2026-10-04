@@ -1,10 +1,28 @@
-from odoo import models
+from odoo import fields, models
 
 MANAGER_GROUP = "point_of_sale.group_pos_manager"
 
 
 class PosConfig(models.Model):
     _inherit = "pos.config"
+
+    # Who may sell on credit is each store's decision (D7 was one store's rule).
+    vlux_credit_sellers = fields.Selection(
+        [("managers", "Sólo el encargado y el dueño"), ("all", "Cualquier cajero")],
+        string="Quién puede vender a crédito",
+        default="managers", required=True,
+        help="Autorizar crédito y fijar límites sigue siendo del encargado o el dueño.",
+    )
+
+    def _vlux_may_sell_on_credit(self, employee=None, user=None):
+        """Whether the person at this register may sell on credit under the register's option."""
+        self.ensure_one()
+        return self.vlux_credit_sellers == "all" or self._vlux_is_manager(employee, user)
+
+    def _vlux_api_register_options(self):
+        options = super()._vlux_api_register_options()
+        options["credit_sellers"] = self.vlux_credit_sellers
+        return options
 
     def _vlux_is_manager(self, employee=None, user=None):
         """Whether the person at this register is the encargado or the owner.

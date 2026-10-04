@@ -33,6 +33,8 @@ export interface PosContextValue {
   credit: Map<number, CreditRow>;
   /** Whether the person at the register may sell on credit (D7). */
   canSellOnCredit: boolean;
+  /** Whether the person at the register may authorise credit and set limits. */
+  canAuthorizeCredit: boolean;
   saveCredit(row: CreditRow): void;
   refreshCredit(): Promise<void>;
   setEmployee(employee: Employee | null): void;

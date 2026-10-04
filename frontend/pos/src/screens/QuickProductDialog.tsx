@@ -21,6 +21,15 @@ export function QuickProductDialog({ barcode, onCreated, onCancel }: {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const saleTaxes = [...taxes.values()].filter((tax) => tax.active);
+  // Whether the price typed includes taxes follows the store's tax setup, not a fixed assumption.
+  const applied = taxId ? [taxes.get(Number(taxId))] : (setup.store.default_sale_tax_ids ?? []).map((id) => taxes.get(id));
+  const known = applied.filter((tax) => !!tax);
+  const included = known.length
+    ? known.every((tax) => tax!.price_include)
+    : setup.store.price_include_default === "tax_included" || setup.store.price_include_default === true;
+  const priceHint = !known.length && !setup.store.price_include_default
+    ? "Precio de venta"
+    : included ? "Precio de venta (impuestos incluidos)" : "Precio de venta (antes de impuestos)";
 
   async function submit(event: Event) {
     event.preventDefault();
@@ -51,7 +60,7 @@ export function QuickProductDialog({ barcode, onCreated, onCancel }: {
           value={name} onInput={(e) => setName(e.currentTarget.value)} />
         <label class="input w-full">
           <span class="opacity-70">$</span>
-          <input type="text" inputMode="decimal" autocomplete="off" placeholder="Precio de venta (con IVA)" value={price}
+          <input type="text" inputMode="decimal" autocomplete="off" placeholder={priceHint} aria-label={priceHint} value={price}
             onInput={(e) => setPrice(e.currentTarget.value)} />
         </label>
         <select class="select w-full" value={taxId} onChange={(e) => setTaxId(e.currentTarget.value)}>

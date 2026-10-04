@@ -434,6 +434,8 @@ class VluxApiCatalog(http.Controller):
                 "phone": company.phone or None,
                 "email": company.email or None,
                 "timezone": request.env.user.tz or "UTC",
+                # How the register writes money and dates (BCP 47, e.g. "es-MX"): the company's language.
+                "locale": (company.partner_id.lang or request.env.lang or "es_MX").replace("_", "-"),
             },
             "currency": {
                 "id": currency.id,

@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 
 import { ApiError } from "../api/client";
 import type { ClosingSummary, RegisterState } from "../api/types";
+import { formatDateTime } from "../lib/locale";
 import { formatMoney } from "../lib/money";
 import { type ClosingCount, closingRequest, countClosing } from "../sale/closing";
 import { usePos } from "../state";
@@ -240,9 +241,9 @@ function ClosingReport({ done, onFinish }: { done: Done; onFinish: () => void })
         <hr class="my-2 border-dashed border-black" />
         <div>{setup.register.name} · {done.summary.session.name}</div>
         {done.summary.session.opened_at && (
-          <div>Apertura: {new Date(done.summary.session.opened_at).toLocaleString("es-MX")}</div>
+          <div>Apertura: {formatDateTime(done.summary.session.opened_at)}</div>
         )}
-        <div>Cierre: {done.closedAt.toLocaleString("es-MX")}</div>
+        <div>Cierre: {formatDateTime(done.closedAt)}</div>
         {employee && <div>Cerró: {employee.name}</div>}
         <hr class="my-2 border-dashed border-black" />
         <div class="flex justify-between"><span>Ventas ({done.summary.orders.count})</span><span>{formatMoney(done.summary.orders.amount, currency)}</span></div>
