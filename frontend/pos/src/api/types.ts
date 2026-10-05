@@ -179,6 +179,42 @@ export interface Employee {
   can_manage_staff?: boolean;
   /** May add and edit products from this register (the register's option decides who). */
   can_edit_catalog?: boolean;
+  /** The store's owner (the owner module opens only with their PIN). */
+  is_owner?: boolean;
+}
+
+/** VLUX Owner's day summary (the same service computes it). */
+export interface OwnerDashboard {
+  date_label: string;
+  summary: { sales_today: number; tickets: number; units_sold: number; average_ticket: number; comparison_vs_yesterday_pct: number | null };
+  sales_trend: { label: string; amount: number }[];
+  sales_by_register: { id: number; name: string; amount: number; share_pct: number; state: string }[];
+  top_products: { id: number; name: string; qty: number; amount: number }[];
+  latest_sales: { id: number; reference: string; time: string; amount: number; register: string; cashier: string }[];
+  low_stock: { id: number; name: string; qty_available: number; threshold: number }[];
+}
+
+export interface OwnerCreditBalances {
+  total_owed: number;
+  customers: { id: number; name: string; phone: string; balance: number; limit: number; allowed: boolean; over_limit: boolean }[];
+  flagged: { reference: string; date: string; customer: string; amount: number; cashier: string; issues: string[] }[];
+}
+
+export interface OwnerStatement {
+  customer: { id: number; name: string; phone: string; limit: number; allowed: boolean };
+  balance: number;
+  moves: { date: string; reference: string; kind: string; charge: number; payment: number; balance: number;
+    items: { name: string; qty: number; price_unit: number; total: number }[] }[];
+}
+
+/** A register option as a form field (the owner changes it from the register). */
+export interface OptionField {
+  name: string;
+  label: string;
+  help: string;
+  type: string;
+  choices: { value: string; label: string }[] | null;
+  value: string | boolean;
 }
 
 /** What the register may change on a product (POST /registers/<id>/products/<id>). */

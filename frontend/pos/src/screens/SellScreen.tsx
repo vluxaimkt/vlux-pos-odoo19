@@ -32,7 +32,7 @@ type Stage =
 
 /** Ring up a sale: scan or search, adjust the cart, charge, print the ticket. */
 export function SellScreen() {
-  const { db, client, setup, online, taxes, credit, canEditCatalog } = usePos();
+  const { db, client, setup, online, taxes, credit, canEditCatalog, registerState, requestAuthorization, releaseAuthorization, authorizedBy } = usePos();
   const [cart, setCart] = useState<Cart | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ProductRow[]>([]);
@@ -48,6 +48,20 @@ export function SellScreen() {
   // The code being added: the dialog keeps it, so the notice clearing itself never closes the form.
   const [creating, setCreating] = useState<string | null>(null);
   const canCreate = online && canEditCatalog;
+  // Without the right, someone allowed authorizes it with their PIN (padlock).
+  const canAskCreate = online && !canEditCatalog && !!registerState?.employee_login;
+  async function startCreate(code: string) {
+    setNotice(null);
+    if (!canEditCatalog) {
+      const ok = await requestAuthorization("Dar de alta productos", "catalog", (e) => !!e.can_edit_catalog);
+      if (!ok) return;
+    }
+    setCreating(code);
+  }
+  function stopCreate() {
+    setCreating(null);
+    if (authorizedBy) releaseAuthorization();
+  }
   const search = useRef<HTMLInputElement>(null);
   const rounding = setup.store.tax_rounding;
 
@@ -72,7 +86,7 @@ export function SellScreen() {
   useEffect(() => {
     if (!notice) return;
     // Longer when it offers to add the unknown product.
-    const id = setTimeout(() => { setNotice(null); setUnknown(null); }, unknown && canCreate ? 15000 : 4000);
+    const id = setTimeout(() => { setNotice(null); setUnknown(null); }, unknown && (canCreate || canAskCreate) ? 15000 : 4000);
     return () => clearTimeout(id);
   }, [notice]);
 
@@ -232,7 +246,9 @@ export function SellScreen() {
         {notice && (
           <div role="alert" class="alert alert-warning">
             <span class="flex-1">{notice}</span>
-            {unknown && canCreate && <button class="btn btn-sm" onClick={() => { setCreating(unknown); setNotice(null); }}>Dar de alta</button>}
+            {unknown && (canCreate || canAskCreate) && (
+              <button class="btn btn-sm" onClick={() => void startCreate(unknown)}>{canCreate ? "Dar de alta" : "🔒 Dar de alta"}</button>
+            )}
           </div>
         )}
         <ProductGrid searched={query.trim() ? results : null} onPick={(product) => add(product)}
@@ -302,12 +318,12 @@ export function SellScreen() {
       </aside>
       {creating && (
         <QuickProductDialog barcode={creating}
-          onCancel={() => { setCreating(null); search.current?.focus(); }}
+          onCancel={() => { stopCreate(); search.current?.focus(); }}
           onCreated={async (product) => {
             // Into the local catalog now; the next sync brings the same row.
             const row = productRow(product);
             await db.products.put(row);
-            setCreating(null);
+            stopCreate();
             setUnknown(null);
             add(row);
           }} />

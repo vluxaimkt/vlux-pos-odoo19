@@ -40,6 +40,12 @@ export interface PosContextValue {
   saveCredit(row: CreditRow): void;
   refreshCredit(): Promise<void>;
   setEmployee(employee: Employee | null): void;
+  /** Who authorized the module open now with their PIN (null when the person at the register may). */
+  authorizedBy: Employee | null;
+  /** Ask someone allowed (by `allowed`) for their PIN; true once the server granted a brief session. */
+  requestAuthorization(title: string, purpose: string, allowed: (employee: Employee) => boolean): Promise<boolean>;
+  /** End the current authorization: the person at the register acts again as themselves. */
+  releaseAuthorization(): void;
   /** Try to send the queued sales now (after a sale, or from the queue screen). */
   flushNow(): Promise<void>;
   forget(): Promise<void>;

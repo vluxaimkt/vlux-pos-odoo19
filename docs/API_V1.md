@@ -410,6 +410,25 @@ y la sube (`POST /vlux/mobile/photo {"request_id", "image"}`, reducida a
 `uploaded` con `image`, `cancelled` o `expired`; vence a los 10 minutos).
 `POST .../scanner/photo-cancel` la cancela.
 
+**Autorizar con el PIN de alguien con permiso.** Cuando un módulo está
+cerrado para quien está en caja (candado), alguien con permiso pone su PIN:
+`POST /registers/<id>/employees/authorize {"employee_id", "pin", "purpose"}`
+(mismo bloqueo por PIN que el inicio de sesión). Responde una sesión **breve
+(15 min) de quien autoriza** para ese módulo; la caja la usa mientras está en
+él y la termina al salir. Queda registro (`vlux.pos.authorization`) de quién
+autorizó, a quién (la sesión de `X-Vlux-Employee`) y para qué; lo que se haga
+queda a nombre de quien autorizó.
+
+**Módulo del dueño (sólo el dueño, con su PIN).** `GET /registers/<id>/owner/sections`
+lista las secciones según lo instalado (`pos.config._vlux_api_owner_sections`,
+cada módulo agrega la suya): `dashboard` (`GET .../owner/dashboard?date`, el
+mismo servicio de VLUX Owner ejecutado como el usuario del dueño), `credit`
+(`GET .../owner/credit` y `.../owner/credit/<partner_id>`, con vlux_pos_credit),
+`options` (`GET .../owner/options` las describe como formulario y
+`POST .../owner/options/save {"values"}` las cambia; cada módulo publica las
+suyas en `pos.config._vlux_api_option_fields`) y `authorizations`
+(`GET .../owner/authorizations`). `/employees` trae `is_owner`.
+
 **Empleados (módulo del dueño).** `GET /registers/<id>/staff` lista los
 empleados de la tienda con su acceso a esta caja (`manager`, `cashier`,
 `minimal`, `none`), si tienen PIN y si son dueños. `POST /registers/<id>/staff/new`

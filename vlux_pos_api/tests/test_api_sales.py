@@ -674,3 +674,79 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         editors = {row["id"]: row["can_edit_catalog"] for row in rows}
         self.assertTrue(editors[owner.id])
         self.assertFalse(editors[self.manager1.id])
+
+    # --- authorization with someone else's PIN ------------------------------------
+
+    def test_a_manager_authorizes_one_module_for_a_cashier(self):
+        _response, opened = self._open()
+        session_id = opened["data"]["session"]["id"]
+        cashier_session = self._session(self.emp2)
+        path = "/registers/%d/employees/authorize" % self.config.id
+        headers_call = lambda body: self.url_open(  # noqa: E731
+            "/vlux/api/v1" + path, data=json.dumps(body), method="POST",
+            headers={"Authorization": "Bearer " + self.raw, "Content-Type": "application/json",
+                     "X-Vlux-Employee": cashier_session},
+        )
+        response = headers_call({"employee_id": self.manager1.id, "pin": "0000", "purpose": "cash"})
+        self.assertEqual(response.json()["error"], "INVALID_PIN")
+        response = headers_call({"employee_id": self.manager1.id, "pin": self.PINS["manager1"], "purpose": "cash"})
+        body = response.json()
+        self.assertEqual(response.status_code, 200, body)
+        elevated = body["data"]["session"]
+        stored = self.env["vlux.pos.employee.session"].sudo().search(
+            [("token_hash", "=", self.env["vlux.pos.employee.session"]._hash(elevated))])
+        self.assertEqual((stored.employee_id, stored.requested_by_id, stored.purpose), (self.manager1, self.emp2, "cash"))
+        self.assertLessEqual((stored.expires_at - stored.create_date).total_seconds(), 15 * 60 + 5, "brief")
+        log = self.env["vlux.pos.authorization"].sudo().search([("pos_config_id", "=", self.config.id)], limit=1)
+        self.assertEqual((log.employee_id, log.requested_by_id, log.purpose), (self.manager1, self.emp2, "cash"))
+
+        # With the authorizer's session the cashier's screen can put cash in (a manager's action).
+        response = self.url_open(
+            "/vlux/api/v1/registers/%d/session/cash-move" % self.config.id, method="POST",
+            data=json.dumps({"session_id": session_id, "uuid": str(uuid.uuid4()), "type": "in", "amount": 20,
+                             "reason": "Cambio"}),
+            headers={"Authorization": "Bearer " + self.raw, "Content-Type": "application/json", "X-Vlux-Employee": elevated},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["data"]["employee"], self.manager1.name, "recorded under who authorized it")
+
+    # --- owner module ---------------------------------------------------------------
+
+    def test_the_owner_module_is_the_owners_only(self):
+        owner = self._owner_employee()
+        base = "/registers/%d/owner" % self.config.id
+        response, body = self._call("GET", base + "/sections", employee=self.manager1)
+        self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"))
+
+        response, body = self._call("GET", base + "/sections", employee=owner)
+        self.assertEqual(response.status_code, 200, body)
+        sections = body["data"]["items"]
+        self.assertIn("options", sections)
+        rows = {row["id"]: row for row in self._call("GET", "/registers/%d/employees" % self.config.id)[1]["data"]["items"]}
+        self.assertTrue(rows[owner.id]["is_owner"])
+        self.assertFalse(rows[self.manager1.id]["is_owner"])
+
+        if "dashboard" in sections:
+            response, body = self._call("GET", base + "/dashboard", employee=owner)
+            self.assertEqual(response.status_code, 200, body)
+        if "credit" in sections:
+            response, body = self._call("GET", base + "/credit", employee=owner)
+            self.assertEqual(response.status_code, 200, body)
+            self.assertIn("total_owed", body["data"])
+
+        _response, body = self._call("GET", base + "/options", employee=owner)
+        options = {row["name"]: row for row in body["data"]["items"]}
+        self.assertEqual(options["vlux_catalog_editors"]["type"], "selection")
+        self.assertFalse(options["vlux_cashier_cash_out"]["value"])
+        response, body = self._call("POST", base + "/options/save",
+                                    {"values": {"vlux_cashier_cash_out": True, "vlux_catalog_editors": "owner"}},
+                                    employee=owner)
+        self.assertEqual(response.status_code, 200, body)
+        self.config.invalidate_recordset()
+        self.assertTrue(self.config.vlux_cashier_cash_out)
+        self.assertEqual(self.config.vlux_catalog_editors, "owner")
+        for bad in ({"vlux_catalog_editors": "anyone"}, {"name": "Otra caja"}):
+            _response, body = self._call("POST", base + "/options/save", {"values": bad}, employee=owner)
+            self.assertEqual(body["error"], "VALIDATION_ERROR", bad)
+        _response, body = self._call("GET", base + "/authorizations", employee=owner)
+        self.assertIsInstance(body["data"]["items"], list)

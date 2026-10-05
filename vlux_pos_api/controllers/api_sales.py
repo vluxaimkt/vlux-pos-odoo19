@@ -58,6 +58,34 @@ def _acting_employee(config, token, body, required=False, session_raw=None):
     return config._vlux_api_employee(claimed), False
 
 
+def _pin_checked(config, body):
+    """The employee whose PIN the body carries, checked on the server, with the lockout."""
+    if not config.module_pos_hr:
+        raise VluxApiError("VALIDATION_ERROR", "Esta caja no usa inicio de sesión por empleado.")
+    employee = config._vlux_api_employee(body.get("employee_id"))
+    limiter = request.env["vlux.rate.limit"].sudo()
+    identity = "%s:%s" % (config.id, employee.id)
+    if limiter.exhausted("pin", identity, PIN_ATTEMPTS, LOCK_MINUTES * 60):
+        raise VluxApiError("PIN_LOCKED", "Demasiados PIN incorrectos: espera %d minutos." % LOCK_MINUTES)
+    if config._vlux_api_is_manager(employee) and not employee.sudo().pin:
+        raise VluxApiError("VALIDATION_ERROR",
+                           "%s es encargado y no tiene PIN: ponle uno en Odoo." % employee.name)
+    if not request.env["vlux.pos.employee.session"]._pin_matches(employee, body.get("pin")):
+        limiter.consume("pin", identity, PIN_ATTEMPTS, LOCK_MINUTES * 60)
+        raise VluxApiError("INVALID_PIN", "PIN incorrecto.")
+    limiter.reset("pin", identity)
+    return employee
+
+
+def _session_answer(config, employee, session, raw):
+    manager = config._vlux_api_is_manager(employee)
+    return {
+        "session": raw,
+        "expires_at": _stamp(session.expires_at),
+        "employee": {"id": employee.id, "name": employee.name, "role": "manager" if manager else "cashier"},
+    }
+
+
 def _amount(value, name, required=True):
     if value in (None, ""):
         if required:
@@ -191,28 +219,30 @@ class VluxApiSales(http.Controller):
         """
         body = json_body()
         config = _register(register_id, token)
-        if not config.module_pos_hr:
-            raise VluxApiError("VALIDATION_ERROR", "Esta caja no usa inicio de sesión por empleado.")
-        employee = config._vlux_api_employee(body.get("employee_id"))
-        limiter = request.env["vlux.rate.limit"].sudo()
-        identity = "%s:%s" % (config.id, employee.id)
-        if limiter.exhausted("pin", identity, PIN_ATTEMPTS, LOCK_MINUTES * 60):
-            raise VluxApiError("PIN_LOCKED", "Demasiados PIN incorrectos: espera %d minutos." % LOCK_MINUTES)
-        manager = config._vlux_api_is_manager(employee)
-        if manager and not employee.sudo().pin:
-            raise VluxApiError("VALIDATION_ERROR",
-                               "%s es encargado y no tiene PIN: ponle uno en Odoo." % employee.name)
+        employee = _pin_checked(config, body)
+        session, raw = request.env["vlux.pos.employee.session"]._issue(config, employee, token)
+        return _session_answer(config, employee, session, raw)
+
+    @api_route("/registers/<int:register_id>/employees/authorize", scope="orders:write", methods=("POST",),
+               summary="Autorizar un módulo con el PIN de alguien con permiso (sesión breve)")
+    def employee_authorize(self, token, register_id, **kwargs):
+        """Body ``{"employee_id", "pin", "purpose"}``: the authorizer's PIN opens one module.
+
+        Answers a short session (15 minutes) of the authorizer for that module;
+        the register uses it and drops it when the module closes. Who
+        authorized whom (the session in ``X-Vlux-Employee``) and for what is
+        logged. Same lockout as the login.
+        """
+        body = json_body()
+        config = _register(register_id, token)
+        purpose = str(body.get("purpose") or "").strip()[:40]
+        if not purpose:
+            raise VluxApiError("VALIDATION_ERROR", "Falta purpose (el módulo que se autoriza).")
+        employee = _pin_checked(config, body)
         Session = request.env["vlux.pos.employee.session"]
-        if not Session._pin_matches(employee, body.get("pin")):
-            limiter.consume("pin", identity, PIN_ATTEMPTS, LOCK_MINUTES * 60)
-            raise VluxApiError("INVALID_PIN", "PIN incorrecto.")
-        limiter.reset("pin", identity)
-        session, raw = Session._issue(config, employee, token)
-        return {
-            "session": raw,
-            "expires_at": _stamp(session.expires_at),
-            "employee": {"id": employee.id, "name": employee.name, "role": "manager" if manager else "cashier"},
-        }
+        requested_by = Session._resolve(request.httprequest.headers.get(EMPLOYEE_HEADER, ""), config, token)
+        session, raw = Session._issue(config, employee, token, purpose=purpose, requested_by=requested_by)
+        return _session_answer(config, employee, session, raw)
 
     @api_route("/registers/<int:register_id>/employees/logout", scope="orders:write", methods=("POST",),
                summary="Salir: la sesión del empleado deja de servir")

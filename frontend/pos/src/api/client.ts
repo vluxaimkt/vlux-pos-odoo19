@@ -2,7 +2,7 @@ import type { TaxInfo } from "../sale/pricing";
 import type {
   AbonoTicket, CashMove, CreditRow,
   ClosingSummary, Customer, Employee, Envelope, FeedPage, Me, OrderRequest, OrderResult, Product, ProductChanges, Quote,
-  PosCategory, RegisterState, SaleLine, StaffMember, StaffRole, StoreConfig, TokenInfo,
+  OptionField, OwnerCreditBalances, OwnerDashboard, OwnerStatement, PosCategory, RegisterState, SaleLine, StaffMember, StaffRole, StoreConfig, TokenInfo,
 } from "./types";
 
 export const API_ROOT = "/vlux/api/v1";
@@ -108,6 +108,43 @@ export class ApiClient {
       );
     }
     return envelope.data as T;
+  }
+
+  /** Someone allowed enters their PIN so this register may use one module (a brief session). */
+  employeeAuthorize(registerId: number, employeeId: number, pin: string, purpose: string) {
+    return this.request<{ session: string; expires_at: string; employee: { id: number; name: string } }>(
+      "POST", `/registers/${registerId}/employees/authorize`, { employee_id: employeeId, pin, purpose });
+  }
+
+  // --- owner module ---
+
+  ownerSections(registerId: number) {
+    return this.request<{ items: string[] }>("GET", `/registers/${registerId}/owner/sections`);
+  }
+
+  ownerDashboard(registerId: number, date?: string) {
+    return this.request<OwnerDashboard>("GET", `/registers/${registerId}/owner/dashboard${date ? `?date=${date}` : ""}`);
+  }
+
+  ownerCredit(registerId: number) {
+    return this.request<OwnerCreditBalances>("GET", `/registers/${registerId}/owner/credit`);
+  }
+
+  ownerStatement(registerId: number, partnerId: number) {
+    return this.request<OwnerStatement>("GET", `/registers/${registerId}/owner/credit/${partnerId}`);
+  }
+
+  ownerOptions(registerId: number) {
+    return this.request<{ items: OptionField[] }>("GET", `/registers/${registerId}/owner/options`);
+  }
+
+  saveOwnerOptions(registerId: number, values: Record<string, string | boolean>) {
+    return this.request<{ items: OptionField[] }>("POST", `/registers/${registerId}/owner/options/save`, { values });
+  }
+
+  ownerAuthorizations(registerId: number) {
+    return this.request<{ items: { date: string; authorized_by: string; requested_by: string | null; purpose: string }[] }>(
+      "GET", `/registers/${registerId}/owner/authorizations`);
   }
 
   // --- employees module (owner) ---

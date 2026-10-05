@@ -21,7 +21,21 @@ export function ProductGrid({ searched, onPick, onChanged }: {
   /** A product was edited here: the caller refreshes what it shows (search results, cart). */
   onChanged?: (row: ProductRow) => void;
 }) {
-  const { db, client, setup, online, canEditCatalog } = usePos();
+  const { db, client, setup, online, canEditCatalog, registerState, requestAuthorization, releaseAuthorization, authorizedBy } = usePos();
+  // Without the right, someone allowed authorizes the edit with their PIN (padlock).
+  const canAsk = online && !!registerState?.employee_login;
+  async function startEdit(product: ProductRow, picture: string | null) {
+    if (!canEditCatalog) {
+      const ok = await requestAuthorization("Editar productos", "catalog", (e) => !!e.can_edit_catalog);
+      if (!ok) return;
+    }
+    setEditing({ product, picture });
+    setInfo(null);
+  }
+  function stopEdit() {
+    setEditing(null);
+    if (authorizedBy) releaseAuthorization();
+  }
   const [editing, setEditing] = useState<{ product: ProductRow; picture: string | null } | null>(null);
   const [version, setVersion] = useState(0);
   const [categories, setCategories] = useState<PosCategory[]>([]);
@@ -81,10 +95,11 @@ export function ProductGrid({ searched, onPick, onChanged }: {
       {!searched && !browsed.items.length && <p class="opacity-60">No hay productos en esta categoría.</p>}
       {info && <ProductInfo product={info} currency={setup.store.currency}
         onAdd={() => { onPick(info); setInfo(null); }} onClose={() => setInfo(null)}
-        onEdit={canEditCatalog && online ? (picture) => { setEditing({ product: info, picture }); setInfo(null); } : undefined} />}
+        editLocked={!canEditCatalog}
+        onEdit={online && (canEditCatalog || canAsk) ? (picture) => void startEdit(info, picture) : undefined} />}
       {editing && <ProductEditDialog product={editing.product} picture={editing.picture} categories={shown}
-        onCancel={() => setEditing(null)}
-        onSaved={(row) => { setEditing(null); setInfo(row); setVersion((v) => v + 1); onChanged?.(row); }} />}
+        onCancel={stopEdit}
+        onSaved={(row) => { stopEdit(); setInfo(row); setVersion((v) => v + 1); onChanged?.(row); }} />}
     </div>
   );
 }
@@ -138,13 +153,15 @@ function ProductTile({ product, onPick, onInfo }: { product: ProductRow; onPick:
   );
 }
 
-function ProductInfo({ product, currency, onAdd, onClose, onEdit }: {
+function ProductInfo({ product, currency, onAdd, onClose, onEdit, editLocked }: {
   product: ProductRow;
   currency: Parameters<typeof formatMoney>[1];
   onAdd: () => void;
   onClose: () => void;
   /** Present when the person at the register may edit products. */
   onEdit?: (picture: string | null) => void;
+  /** Editing needs someone else's PIN. */
+  editLocked?: boolean;
 }) {
   const url = useImage(product, true);
   return (
@@ -164,7 +181,7 @@ function ProductInfo({ product, currency, onAdd, onClose, onEdit }: {
         </div>
         <div class="modal-action">
           <button class="btn" onClick={onClose}>Cerrar</button>
-          {onEdit && <button class="btn" onClick={() => onEdit(url)}>Editar</button>}
+          {onEdit && <button class="btn" onClick={() => onEdit(url)}>{editLocked ? "🔒 Editar" : "Editar"}</button>}
           <button class="btn btn-primary" onClick={onAdd}>Agregar</button>
         </div>
       </div>

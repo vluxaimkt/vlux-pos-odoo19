@@ -19,6 +19,12 @@ class PosConfig(models.Model):
         self.ensure_one()
         return self.vlux_credit_sellers == "all" or self._vlux_is_manager(employee, user)
 
+    def _vlux_api_owner_sections(self):
+        return [*super()._vlux_api_owner_sections(), "credit"]
+
+    def _vlux_api_option_fields(self):
+        return [*super()._vlux_api_option_fields(), "vlux_credit_sellers"]
+
     def _vlux_api_register_options(self):
         options = super()._vlux_api_register_options()
         options["credit_sellers"] = self.vlux_credit_sellers

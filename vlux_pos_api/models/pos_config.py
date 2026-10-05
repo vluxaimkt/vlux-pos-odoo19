@@ -106,9 +106,65 @@ class PosConfig(models.Model):
                 "barcode_sha1": row.get("_barcode") or None,
                 "can_manage_staff": self._vlux_api_can_manage_staff(employees.browse(row["id"])),
                 "can_edit_catalog": self._vlux_api_can_edit_catalog(employees.browse(row["id"])),
+                "is_owner": self._vlux_api_is_owner(employees.browse(row["id"])),
             }
             for row in rows
         ]
+
+    # --- owner module ----------------------------------------------------------
+
+    def _vlux_api_owner_sections(self):
+        """Sections of the owner module this store has (extension point: modules add theirs)."""
+        self.ensure_one()
+        sections = ["options", "authorizations"]
+        if "vlux.owner.dashboard.service" in self.env:
+            sections.insert(0, "dashboard")
+        return sections
+
+    def _vlux_api_option_fields(self):
+        """Register options the owner may change from the register (extension point)."""
+        return ["vlux_cashier_cash_out", "vlux_cash_in_reasons", "vlux_cash_out_reasons",
+                "vlux_catalog_editors", "vlux_staff_admins"]
+
+    def _vlux_api_options_form(self):
+        """The options as a form the register can draw: label, help, type, choices and value."""
+        self.ensure_one()
+        config = self.sudo()
+        rows = []
+        for name in self._vlux_api_option_fields():
+            field = config._fields[name]
+            value = config[name]
+            rows.append({
+                "name": name,
+                "label": field.string,
+                "help": field.help or "",
+                "type": field.type,
+                "choices": [{"value": key, "label": label} for key, label in field.selection] if field.type == "selection" else None,
+                "value": value if value is not False or field.type == "boolean" else "",
+            })
+        return rows
+
+    def _vlux_api_set_options(self, owner, values):
+        """Change register options from the register (only the published ones), as the owner's own user."""
+        self.ensure_one()
+        allowed = set(self._vlux_api_option_fields())
+        unknown = set(values) - allowed
+        if unknown:
+            raise ValidationError(_("Opción desconocida: %s", ", ".join(sorted(unknown))))
+        vals = {}
+        for name, value in values.items():
+            field = self._fields[name]
+            if field.type == "boolean":
+                vals[name] = bool(value)
+            elif field.type == "selection":
+                if value not in dict(field.selection):
+                    raise ValidationError(_("Valor inválido para %s.", field.string))
+                vals[name] = value
+            else:
+                vals[name] = str(value or "")[:2000]
+        owner_user = owner.sudo().user_id
+        self.with_user(owner_user or SUPERUSER_ID).sudo().write(vals)
+        return self._vlux_api_options_form()
 
     # --- staff (employees module of the register) ----------------------------
 
