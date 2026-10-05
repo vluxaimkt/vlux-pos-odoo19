@@ -6,16 +6,24 @@ total Odoo books. A client may send the unit price it charged (an offline
 register prices from its local copy of the catalog); a price that differs
 from the catalog is accepted and reported, never silently replaced.
 """
+import base64
+import binascii
+
 from odoo import SUPERUSER_ID, _, fields, models
 from odoo.exceptions import ValidationError
 from odoo.fields import Domain
-from odoo.tools import float_compare
+from odoo.tools import float_compare, plaintext2html
+from odoo.tools.image import ImageProcess
 
 # Lines per order: a guard against a runaway client, far above any real ticket.
 MAX_LINES = 500
 # Access to a register (pos_hr lists) the register's employees module can set.
 STAFF_ROLES = ("manager", "cashier", "minimal", "none")
 OWNER_GROUPS = ("vlux_core.group_vlux_owner", "vlux_owner.group_vlux_owner")
+# A product picture as sent by a register (it downsizes to ~1024 px first).
+IMAGE_MAX_BYTES = 6 * 1024 * 1024
+# vlux_pos_catalog's permission to quick-create products (optional module).
+QUICK_CREATE_GROUP = "vlux_pos_catalog.group_vlux_catalog_quick_create"
 
 
 class PosConfig(models.Model):
@@ -31,6 +39,12 @@ class PosConfig(models.Model):
         string="Motivos rápidos de salida de efectivo",
         default="Pago a proveedor\nRetiro del dueño\nGasto de la tienda",
         help="Uno por renglón: botones de motivo al sacar efectivo en la caja VLUX.",
+    )
+    vlux_catalog_editors = fields.Selection(
+        [("managers", "Encargados y dueño"), ("owner", "Sólo el dueño")],
+        string="Quién da de alta y edita productos desde la caja",
+        default="managers", required=True,
+        help="Alta rápida de productos desconocidos y edición (precio, descripción, foto…) desde la caja VLUX.",
     )
     vlux_staff_admins = fields.Selection(
         [("owner", "Sólo el dueño"), ("managers", "Encargados y dueño")],
@@ -91,9 +105,66 @@ class PosConfig(models.Model):
                 "pin_sha1": row.get("_pin") or None,
                 "barcode_sha1": row.get("_barcode") or None,
                 "can_manage_staff": self._vlux_api_can_manage_staff(employees.browse(row["id"])),
+                "can_edit_catalog": self._vlux_api_can_edit_catalog(employees.browse(row["id"])),
+                "is_owner": self._vlux_api_is_owner(employees.browse(row["id"])),
             }
             for row in rows
         ]
+
+    # --- owner module ----------------------------------------------------------
+
+    def _vlux_api_owner_sections(self):
+        """Sections of the owner module this store has (extension point: modules add theirs)."""
+        self.ensure_one()
+        sections = ["options", "authorizations"]
+        if "vlux.owner.dashboard.service" in self.env:
+            sections.insert(0, "dashboard")
+        return sections
+
+    def _vlux_api_option_fields(self):
+        """Register options the owner may change from the register (extension point)."""
+        return ["vlux_cashier_cash_out", "vlux_cash_in_reasons", "vlux_cash_out_reasons",
+                "vlux_catalog_editors", "vlux_staff_admins"]
+
+    def _vlux_api_options_form(self):
+        """The options as a form the register can draw: label, help, type, choices and value."""
+        self.ensure_one()
+        config = self.sudo()
+        rows = []
+        for name in self._vlux_api_option_fields():
+            field = config._fields[name]
+            value = config[name]
+            rows.append({
+                "name": name,
+                "label": field.string,
+                "help": field.help or "",
+                "type": field.type,
+                "choices": [{"value": key, "label": label} for key, label in field.selection] if field.type == "selection" else None,
+                "value": value if value is not False or field.type == "boolean" else "",
+            })
+        return rows
+
+    def _vlux_api_set_options(self, owner, values):
+        """Change register options from the register (only the published ones), as the owner's own user."""
+        self.ensure_one()
+        allowed = set(self._vlux_api_option_fields())
+        unknown = set(values) - allowed
+        if unknown:
+            raise ValidationError(_("Opción desconocida: %s", ", ".join(sorted(unknown))))
+        vals = {}
+        for name, value in values.items():
+            field = self._fields[name]
+            if field.type == "boolean":
+                vals[name] = bool(value)
+            elif field.type == "selection":
+                if value not in dict(field.selection):
+                    raise ValidationError(_("Valor inválido para %s.", field.string))
+                vals[name] = value
+            else:
+                vals[name] = str(value or "")[:2000]
+        owner_user = owner.sudo().user_id
+        self.with_user(owner_user or SUPERUSER_ID).sudo().write(vals)
+        return self._vlux_api_options_form()
 
     # --- staff (employees module of the register) ----------------------------
 
@@ -113,6 +184,26 @@ class PosConfig(models.Model):
         if self._vlux_api_is_owner(employee):
             return True
         return self.vlux_staff_admins == "managers" and self._vlux_api_is_manager(employee)
+
+    def _vlux_api_can_edit_catalog(self, employee):
+        """Who may add and edit products from the register: the register's option (extension point).
+
+        The owner always; managers unless the store keeps it to the owner; or
+        an employee whose Odoo user has the POS quick-create group.
+        """
+        self.ensure_one()
+        if not employee:
+            return False
+        if self._vlux_api_is_owner(employee):
+            return True
+        if self.vlux_catalog_editors == "managers" and self._vlux_api_is_manager(employee):
+            return True
+        return self._vlux_api_user_in(employee.sudo().user_id, QUICK_CREATE_GROUP)
+
+    def _vlux_api_user_in(self, user, xmlid):
+        """Whether ``user`` has the group ``xmlid``; False when its module is not installed."""
+        group = self.env.ref(xmlid, raise_if_not_found=False)
+        return bool(user and group and group in user.all_group_ids)
 
     def _vlux_api_staff_role(self, employee):
         """The employee's access to this register, as pos_hr decides it."""
@@ -213,6 +304,89 @@ class PosConfig(models.Model):
         if active is not None:
             employee.active = bool(active)
         return employee
+
+    # --- catalog from the register ---------------------------------------------
+
+    @staticmethod
+    def _vlux_api_clean_image(value):
+        """A picture sent by the register (base64 or data URI), checked to be an image."""
+        if not value:
+            return False
+        if not isinstance(value, str):
+            raise ValidationError(_("La imagen no es válida."))
+        payload = value.split(",", 1)[1] if value.startswith("data:") else value
+        try:
+            raw = base64.b64decode(payload, validate=True)
+        except (binascii.Error, ValueError):
+            raise ValidationError(_("La imagen no es válida."))
+        if len(raw) > IMAGE_MAX_BYTES:
+            raise ValidationError(_("La imagen es demasiado grande."))
+        try:
+            ImageProcess(raw)
+        except Exception:  # noqa: BLE001 - any decoding failure means "not an image"
+            raise ValidationError(_("El archivo no es una imagen reconocida."))
+        return base64.b64encode(raw)
+
+    def _vlux_api_update_product(self, product, actor, values):
+        """Change a product from the register: name, price, description, barcode,
+        POS category, sold by weight, sale tax and picture. Written as the
+        actor's own user (audit), or the system when the actor has none."""
+        self.ensure_one()
+        actor_user = actor.sudo().user_id if actor else self.env["res.users"]
+        env_user = actor_user or self.env.ref("base.user_root")
+        template = product.product_tmpl_id.with_user(env_user).sudo().with_company(self.company_id)
+        vals = {}
+        if "name" in values:
+            name = str(values["name"] or "").strip()
+            if not name or len(name) > 120:
+                raise ValidationError(_("Escribe el nombre del producto (hasta 120 letras)."))
+            vals["name"] = name
+        if "list_price" in values:
+            try:
+                price = float(values["list_price"])
+            except (TypeError, ValueError):
+                raise ValidationError(_("El precio debe ser un número."))
+            if price < 0 or price > 10_000_000:
+                raise ValidationError(_("El precio no es válido."))
+            # The register shows the variant's price (template price + attribute extras).
+            extra = sum(product.product_template_attribute_value_ids.mapped("price_extra"))
+            vals["list_price"] = price - extra
+        if "description" in values:
+            text = str(values["description"] or "").strip()[:2000]
+            vals["public_description"] = plaintext2html(text) if text else False
+        if "to_weight" in values:
+            vals["to_weight"] = bool(values["to_weight"])
+        if "pos_categ_id" in values:
+            categ_id = values["pos_categ_id"]
+            if categ_id:
+                category = self.env["pos.category"].sudo().search([("id", "=", int(categ_id))], limit=1)
+                if not category:
+                    raise ValidationError(_("La categoría no existe."))
+                vals["pos_categ_ids"] = [fields.Command.set(category.ids)]
+            else:
+                vals["pos_categ_ids"] = [fields.Command.clear()]
+        if "taxes_ids" in values:
+            taxes = self.env["account.tax"].sudo().search([
+                ("id", "in", [int(tax) for tax in values["taxes_ids"] or []]),
+                ("type_tax_use", "=", "sale"), ("company_id", "in", [False, self.company_id.id]),
+            ])
+            vals["taxes_id"] = [fields.Command.set(taxes.ids)]
+        if "image" in values:
+            vals["image_1920"] = self._vlux_api_clean_image(values["image"])
+        if "barcode" in values:
+            barcode = str(values["barcode"] or "").strip() or False
+            if barcode:
+                taken = self.env["product.product"].sudo().with_context(active_test=False).search([
+                    ("barcode", "=", barcode), ("id", "!=", product.id),
+                    ("company_id", "in", [False, self.company_id.id]),
+                ], limit=1)
+                if taken:
+                    raise ValidationError(_("El código %s ya es de %s.", barcode, taken.display_name))
+            # The barcode is the variant's own.
+            product.with_user(env_user).sudo().barcode = barcode
+        if vals:
+            template.write(vals)
+        return product
 
     def _vlux_api_add_staff(self, actor, name, role, pin):
         self.ensure_one()

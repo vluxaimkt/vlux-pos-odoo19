@@ -1,2 +1,3 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_vlux_pos_employee_session_system,vlux.pos.employee.session system,model_vlux_pos_employee_session,base.group_system,1,0,0,1
+access_vlux_pos_authorization_manager,vlux.pos.authorization manager,model_vlux_pos_authorization,point_of_sale.group_pos_manager,1,0,0,0

@@ -2,6 +2,7 @@ import { useState } from "preact/hooks";
 
 import type { Product } from "../api/types";
 import { usePos } from "../state";
+import { PhotoPicker } from "./PhotoPicker";
 import { explain } from "./SetupScreen";
 
 /**
@@ -18,6 +19,7 @@ export function QuickProductDialog({ barcode, onCreated, onCancel }: {
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [taxId, setTaxId] = useState("");
+  const [image, setImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const saleTaxes = [...taxes.values()].filter((tax) => tax.active);
@@ -42,6 +44,7 @@ export function QuickProductDialog({ barcode, onCreated, onCancel }: {
       const product = await client.quickProduct(setup.register.id, {
         name: name.trim(), barcode, list_price: Math.round(listPrice * 100) / 100,
         ...(taxId ? { taxes_ids: [Number(taxId)] } : {}),
+        ...(image ? { image } : {}),
       });
       await onCreated(product);
     } catch (err) {
@@ -55,6 +58,7 @@ export function QuickProductDialog({ barcode, onCreated, onCancel }: {
     <dialog class="modal modal-open" aria-label="Alta rápida de producto">
       <form class="modal-box flex flex-col gap-3" onSubmit={(e) => void submit(e)}>
         <h3 class="text-lg font-bold">Producto nuevo</h3>
+        <p class="text-xs opacity-60">El formulario se queda abierto hasta que lo des de alta o lo canceles.</p>
         <div class="font-mono opacity-70">{barcode}</div>
         <input class="input w-full" type="text" maxLength={120} placeholder="Nombre (como en el empaque)" autofocus
           value={name} onInput={(e) => setName(e.currentTarget.value)} />
@@ -67,6 +71,7 @@ export function QuickProductDialog({ barcode, onCreated, onCancel }: {
           <option value="">Impuesto predeterminado de la tienda</option>
           {saleTaxes.map((tax) => <option key={tax.id} value={String(tax.id)}>{tax.name}</option>)}
         </select>
+        <PhotoPicker value={image} onChange={setImage} barcode={barcode} label={name.trim()} canRemove />
         {error && <div role="alert" class="alert alert-error">{error}</div>}
         <div class="modal-action">
           <button type="button" class="btn" onClick={onCancel}>Cancelar</button>

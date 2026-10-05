@@ -128,6 +128,55 @@ class VluxApiMobileScanner(http.Controller):
             "items": [{"request_id": event.request_id, "barcode": event.barcode} for event in fresh],
         }
 
+    # --- a picture from the phone ---------------------------------------------
+
+    @api_route("/registers/<int:register_id>/scanner/photo-request", scope="orders:write", methods=("POST",),
+               summary="Pedir al celular vinculado una foto de producto")
+    def photo_request(self, token, register_id, **kwargs):
+        """Body ``{"device_id", "pairing_id", "barcode"?, "label"?}``: the phone shows the request."""
+        config = _register(register_id, token)
+        body = json_body()
+        pairing = _pairing(config, body.get("pairing_id"), _device(body.get("device_id")))
+        pairing.refresh_state()
+        if pairing.state != "paired":
+            raise VluxApiError("CONFLICT", "El celular ya no está vinculado.")
+        photo = request.env["vlux.mobile.scanner.photo"].create_request(pairing, body.get("barcode"), body.get("label"))
+        return {"request_id": photo.request_id, "expires_at": fields.Datetime.to_string(photo.expires_at) + "Z"}
+
+    @api_route("/registers/<int:register_id>/scanner/photo", scope="orders:write",
+               summary="La foto pedida al celular, cuando llega",
+               params=[{"name": "request_id", "in": "query", "schema": {"type": "string"}},
+                       {"name": "device_id", "in": "query", "schema": {"type": "string"}}])
+    def photo(self, token, register_id, request_id=None, device_id=None, **kwargs):
+        """``status``: requested, uploaded (with ``image`` as a data URI) or cancelled/expired."""
+        config = _register(register_id, token)
+        photo = request.env["vlux.mobile.scanner.photo"].sudo().search([
+            ("request_id", "=", str(request_id or "")), ("pos_config_id", "=", config.id),
+            ("pairing_id.device_identifier", "=", _device(device_id)),
+        ], limit=1)
+        if not photo:
+            raise VluxApiError("NOT_FOUND", "El pedido de foto no existe en este equipo.")
+        if photo.state == "requested" and photo.expires_at <= fields.Datetime.now():
+            return {"status": "expired"}
+        if photo.state != "uploaded":
+            return {"status": photo.state}
+        data = photo.image.decode() if isinstance(photo.image, bytes) else photo.image
+        mime = "image/png" if data.startswith("iVBOR") else "image/jpeg"
+        return {"status": "uploaded", "image": "data:%s;base64,%s" % (mime, data)}
+
+    @api_route("/registers/<int:register_id>/scanner/photo-cancel", scope="orders:write", methods=("POST",),
+               summary="Ya no se necesita la foto pedida")
+    def photo_cancel(self, token, register_id, **kwargs):
+        config = _register(register_id, token)
+        body = json_body()
+        photo = request.env["vlux.mobile.scanner.photo"].sudo().search([
+            ("request_id", "=", str(body.get("request_id") or "")), ("pos_config_id", "=", config.id),
+            ("pairing_id.device_identifier", "=", _device(body.get("device_id"))),
+        ], limit=1)
+        if photo.state == "requested":
+            photo.state = "cancelled"
+        return {"status": photo.state or "cancelled"}
+
     @api_route("/registers/<int:register_id>/scanner/ack", scope="orders:write", methods=("POST",),
                summary="Resultado de una lectura (se muestra en el celular)")
     def ack(self, token, register_id, **kwargs):

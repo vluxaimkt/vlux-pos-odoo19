@@ -20,6 +20,9 @@ import { CashMoveScreen } from "./screens/CashMoveScreen";
 import { EmployeesScreen } from "./screens/EmployeesScreen";
 import { dropImageUrls } from "./sync/images";
 import { forgetPhoneScanner } from "./screens/PhoneScanner";
+import { AuthorizeDialog } from "./screens/AuthorizeDialog";
+import { OwnerScreen } from "./screens/OwnerScreen";
+import { type AccessContext, authorizersFor, canOpen, isAvailable, type ModuleDef, type ModuleId, moduleById, MODULES } from "./modules";
 import { syncFeed } from "./sync/catalog";
 import { flushOutbox } from "./sync/outbox";
 import { renewIfDue } from "./sync/token";
@@ -72,7 +75,29 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
 
   // Leaving the register (or the idle lock) ends the employee session on the
   // server too; a new token (renewal) means a new PIN, since sessions are tied to it.
+  // Someone else's PIN opened one module (or one action) for the person at the register.
+  const [authorization, setAuthorization] = useState<{ employee: Employee; purpose: string } | null>(null);
+  const cashierSession = useRef<string | null>(null);
+
+  /** End an authorization: its brief session ends and the cashier's comes back. */
+  const releaseAuthorization = useCallback(() => {
+    if (cashierSession.current !== null) {
+      // The logout carries the brief session (still in the client), then the cashier's comes back.
+      if (navigator.onLine) void client.employeeLogout(registerId).catch(() => undefined);
+      client.employeeSession = cashierSession.current || null;
+      cashierSession.current = null;
+    }
+    setAuthorization(null);
+  }, [client, registerId]);
+
   const setEmployee = useCallback((next: Employee | null) => {
+    if (cashierSession.current !== null) {
+      // An authorization in course ends with the cashier's turn.
+      if (navigator.onLine) void client.employeeLogout(registerId).catch(() => undefined);
+      client.employeeSession = cashierSession.current || null;
+      cashierSession.current = null;
+      setAuthorization(null);
+    }
     if (!next && client.employeeSession) {
       if (navigator.onLine) void client.employeeLogout(registerId).catch(() => undefined);
       client.employeeSession = null;
@@ -94,7 +119,10 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   const [catalogReady, setCatalogReady] = useState(false);
   const [taxes, setTaxes] = useState<Map<number, TaxInfo>>(new Map());
   const [credit, setCredit] = useState<Map<number, CreditRow>>(new Map());
-  const [view, setView] = useState<"register" | "queue" | "closing" | "customers" | "sales" | "cash" | "staff">("register");
+  const [view, setViewState] = useState<ModuleId>("sell");
+  // A module waiting for someone's PIN (padlock).
+  const [asking, setAsking] = useState<{ title: string; purpose: string; authorizers: Employee[]; resolve: (ok: boolean) => void } | null>(null);
+  const [drawer, setDrawer] = useState(false);
   const [status, setStatus] = useState({ syncing: false, pending: 0, attention: 0, error: null as string | null });
 
   // Unpairing wipes everything this device knows about the store (token,
@@ -219,15 +247,70 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   useInterval(syncCatalog, CATALOG_EVERY_MS, online);
   useInterval(flush, OUTBOX_EVERY_MS);
 
+  const access: AccessContext = {
+    employeeLogin: !!registerState?.employee_login,
+    options: registerState?.options,
+    sessionOpen: registerState?.session?.state === "opened",
+  };
+  // Inside an authorized module, the screen acts as whoever authorized it.
+  const acting = authorization?.employee ?? employee;
+
+  /** Ask someone allowed for their PIN; resolves true once the server granted a brief session. */
+  const requestAuthorization = useCallback((title: string, purpose: string, authorizers: Employee[]) => {
+    return new Promise<boolean>((resolve) => setAsking({ title, purpose, authorizers, resolve }));
+  }, []);
+
+  async function authorize(person: Employee, pin: string) {
+    if (!asking) return;
+    const answer = await client.employeeAuthorize(registerId, person.id, pin, asking.purpose);
+    cashierSession.current = client.employeeSession ?? "";
+    client.employeeSession = answer.session;
+    setAuthorization({ employee: person, purpose: asking.purpose });
+    asking.resolve(true);
+    setAsking(null);
+  }
+
+  /** Go to a module: directly if allowed, else after someone's PIN. Leaving one ends its authorization. */
+  async function open(def: ModuleDef) {
+    setDrawer(false);
+    if (!isAvailable(def, access) || (def.needsSession && !access.sessionOpen)) return;
+    if (authorization && authorization.purpose !== def.id) releaseAuthorization();
+    if (canOpen(def, employee, access) || authorization?.purpose === def.id) return setViewState(def.id);
+    if (!online) return setStatus((s) => ({ ...s, error: "Para autorizar con PIN se necesita internet." }));
+    const ok = await requestAuthorization(def.label, def.id, authorizersFor(def, employees, access, employee));
+    if (ok) setViewState(def.id);
+  }
+  const setView = (id: ModuleId) => void open(moduleById(id));
+
+  // F1…F8 open the modules (as on many registers); not while a PIN is being typed.
+  const openRef = useRef(open);
+  openRef.current = open;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (asking || (registerState?.employee_login && !employee)) return;
+      const def = MODULES.find((m) => m.key === event.key);
+      if (!def) return;
+      event.preventDefault();
+      void openRef.current(def);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [asking, employee, registerState?.employee_login]);
+
   // Money and dates the way the store's language writes them.
   setLocale(paired.setup.store.company.locale);
 
   const context: PosContextValue = {
-    db, client, setup: paired.setup, employees, employee, online, registerState, taxes, setEmployee, forget,
+    db, client, setup: paired.setup, employees, employee: acting, online, registerState, taxes, setEmployee, forget,
+    authorizedBy: authorization ? authorization.employee : null,
+    requestAuthorization: (title, purpose, allowed) => requestAuthorization(title, purpose,
+      employees.filter((e) => e.id !== employee?.id && !!e.pin_sha1 && allowed(e))),
+    releaseAuthorization,
     flushNow: flush,
     credit, saveCredit, refreshCredit,
-    canSellOnCredit: canSellOnCredit(!!registerState?.employee_login, employee?.role, registerState?.options?.credit_sellers),
-    canAuthorizeCredit: canAuthorizeCredit(!!registerState?.employee_login, employee?.role),
+    canSellOnCredit: canSellOnCredit(!!registerState?.employee_login, acting?.role, registerState?.options?.credit_sellers),
+    canAuthorizeCredit: canAuthorizeCredit(!!registerState?.employee_login, acting?.role),
+    canEditCatalog: !!registerState?.employee_login && !!acting?.can_edit_catalog,
   };
 
   const waiting = online ? null : "Conéctate a internet para la primera carga de esta caja.";
@@ -235,44 +318,50 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   if (!catalogReady) body = <Splash text={waiting ?? "Descargando catálogo…"} />;
   else if (!registerState) body = <Splash text={waiting ?? "Consultando la caja…"} />;
   else if (registerState.employee_login && !employee) body = <LoginScreen />;
-  else if (view === "queue") body = <QueueScreen onClose={() => setView("register")} />;
-  else if (view === "customers") body = <CustomersScreen onClose={() => setView("register")} />;
-  else if (view === "sales") body = <SalesScreen onClose={() => setView("register")} />;
-  else if (view === "cash") body = <CashMoveScreen onClose={() => setView("register")} />;
-  else if (view === "staff") body = <EmployeesScreen onClose={() => setView("register")} onChanged={refreshRegister} />;
+  else if (view === "queue") body = <QueueScreen onClose={() => setView("sell")} />;
+  else if (view === "customers") body = <CustomersScreen onClose={() => setView("sell")} />;
+  else if (view === "sales") body = <SalesScreen onClose={() => setView("sell")} />;
+  else if (view === "cash") body = <CashMoveScreen onClose={() => setView("sell")} />;
+  else if (view === "staff") body = <EmployeesScreen onClose={() => setView("sell")} onChanged={refreshRegister} />;
+  else if (view === "owner") body = <OwnerScreen onClose={() => setView("sell")} onOptionsSaved={refreshRegister} />;
   else if (view === "closing") {
     body = (
       <CloseScreen
-        onCancel={() => setView("register")}
+        onCancel={() => setView("sell")}
         onQueue={() => setView("queue")}
         onClosed={(state) => {
           applyRegisterState(state);
-          setView("register");
+          setView("sell");
         }}
       />
     );
   }
   else body = <Opened state={registerState} onOpened={applyRegisterState} />;
+  const locked = !catalogReady || !registerState || (registerState.employee_login && !employee);
 
   return (
     <PosContext.Provider value={context}>
-      <div class="min-h-screen flex flex-col bg-base-200">
-        <Header
-          status={status}
-          onQueue={() => setView("queue")}
-          onCustomers={() => setView("customers")}
-          onSales={() => setView("sales")}
-          onClosing={registerState?.session?.state === "opened" ? () => setView("closing") : null}
-          // Managers move cash; cashiers take it out only where the register allows it. The server checks it too.
-          onCash={registerState?.session?.state === "opened"
-            && (!registerState.employee_login || employee?.role === "manager"
-              || (employee?.role === "cashier" && !!registerState.options?.cashier_cash_out))
-            ? () => setView("cash") : null}
-          // The employees module: whoever the register's option allows (the owner by default).
-          onStaff={registerState?.employee_login && employee?.can_manage_staff ? () => setView("staff") : null}
-        />
-        {status.error && <div role="alert" class="alert alert-error rounded-none">{status.error}</div>}
-        <main class="flex-1">{body}</main>
+      <div class="min-h-screen flex bg-base-200">
+        {!locked && (
+          <Sidebar view={view} access={access} status={status} open={(def) => void open(def)} person={employee}
+            drawer={drawer} onDrawer={setDrawer} authorization={authorization} />
+        )}
+        <div class="flex-1 min-w-0 flex flex-col">
+          {!locked && (
+            <div class="lg:hidden navbar bg-base-100 shadow-sm print:hidden">
+              <button class="btn btn-ghost btn-square" aria-label="Abrir menú" onClick={() => setDrawer(true)}>☰</button>
+              <span class="font-bold flex-1">{moduleById(view).label}</span>
+              <span class={`badge ${online ? "badge-success" : "badge-neutral"}`}>{online ? "En línea" : "Sin internet"}</span>
+            </div>
+          )}
+          {locked && <TopBar status={status} />}
+          {status.error && <div role="alert" class="alert alert-error rounded-none">{status.error}</div>}
+          <main class="flex-1">{body}</main>
+        </div>
+        {asking && (
+          <AuthorizeDialog title={asking.title} authorizers={asking.authorizers} onAuthorize={authorize}
+            onCancel={() => { asking.resolve(false); setAsking(null); }} />
+        )}
       </div>
     </PosContext.Provider>
   );
@@ -282,47 +371,87 @@ function Opened({ state, onOpened }: { state: RegisterState; onOpened: (state: R
   return state.session?.state === "opened" ? <SellScreen /> : <RegisterScreen state={state} onOpened={onOpened} />;
 }
 
-function Header({ status, onQueue, onCustomers, onSales, onClosing, onCash, onStaff }: {
+/** The modules, always in sight (padlock where someone's PIN is needed); a drawer on small screens. */
+function Sidebar({ view, access, status, open, drawer, onDrawer, person, authorization }: {
+  view: ModuleId;
+  access: AccessContext;
   status: { syncing: boolean; pending: number; attention: number };
-  onQueue: () => void;
-  onCustomers: () => void;
-  onSales: () => void;
-  onClosing: (() => void) | null;
-  onCash: (() => void) | null;
-  onStaff: (() => void) | null;
+  open: (def: ModuleDef) => void;
+  drawer: boolean;
+  onDrawer: (open: boolean) => void;
+  /** The person at the register: the padlocks are theirs, whoever authorized a module. */
+  person: Employee | null;
+  authorization: { employee: Employee; purpose: string } | null;
 }) {
-  const { setup, employee, online, setEmployee, forget } = usePos();
+  const { setup, online, setEmployee, forget } = usePos();
+  const authorizedBy = authorization?.employee ?? null;
+  return (
+    <>
+      {drawer && <button class="fixed inset-0 bg-black/40 z-30 lg:hidden" aria-label="Cerrar menú" onClick={() => onDrawer(false)} />}
+      <aside class={`print:hidden bg-base-100 border-r border-base-300 w-64 shrink-0 flex-col h-screen z-40
+        ${drawer ? "flex fixed inset-y-0 left-0 shadow-2xl" : "hidden"} lg:flex lg:sticky lg:top-0 lg:shadow-none`} aria-label="Módulos">
+        <div class="p-3 border-b border-base-300">
+          <div class="font-bold leading-tight">{setup.register.name}</div>
+          <div class="text-xs opacity-60">{setup.store.company.name}</div>
+          <div class="flex flex-wrap gap-1 mt-2">
+            <span class={`badge badge-sm ${online ? "badge-success" : "badge-neutral"}`}>{online ? "En línea" : "Sin internet"}</span>
+            {status.pending > 0 && <span class="badge badge-sm badge-warning">{status.pending} por enviar</span>}
+            {status.attention > 0 && <span class="badge badge-sm badge-error">{status.attention} por revisar</span>}
+            {status.syncing && <span class="loading loading-dots loading-xs" aria-label="Sincronizando" />}
+          </div>
+        </div>
+        <nav class="flex-1 overflow-y-auto p-2">
+          <ul class="menu w-full gap-1">
+            {MODULES.filter((def) => isAvailable(def, access)).map((def) => {
+              const disabled = !!def.needsSession && !access.sessionOpen;
+              const lockedModule = !disabled && !canOpen(def, person, access) && authorization?.purpose !== def.id;
+              return (
+                <li key={def.id}>
+                  <button class={`flex items-center gap-2 ${view === def.id ? "menu-active" : ""}`} disabled={disabled}
+                    aria-current={view === def.id ? "page" : undefined}
+                    title={disabled ? "Abre la caja primero" : lockedModule ? "Pide el PIN de alguien con permiso" : undefined}
+                    onClick={() => open(def)}>
+                    <span aria-hidden="true">{def.icon}</span>
+                    <span class="flex-1 text-left">{def.label}</span>
+                    {lockedModule && <span aria-label="Requiere autorización">🔒</span>}
+                    <kbd class="kbd kbd-xs opacity-60">{def.key}</kbd>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+        <div class="p-3 border-t border-base-300 flex flex-col gap-1">
+          {person && (
+            <div class="text-sm">
+              <span class="opacity-60">En caja:</span> <strong>{person.name}</strong>
+              {authorizedBy && <div class="text-xs text-warning">Autorizó {authorizedBy.name} (sólo este módulo)</div>}
+            </div>
+          )}
+          {person && <button class="btn btn-sm" onClick={() => setEmployee(null)}>Cambiar de empleado / bloquear</button>}
+          <button class="btn btn-ghost btn-xs opacity-70" onClick={() => {
+            if (confirm("¿Desvincular este equipo? Se borran de este equipo el token, el catálogo, los clientes y los empleados. Las ventas por enviar se conservan.")) void forget();
+          }}>Desvincular equipo</button>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+/** Before anyone is at the register (catalog loading, PIN keypad): the register and the connection. */
+function TopBar({ status }: { status: { syncing: boolean; pending: number } }) {
+  const { setup, online } = usePos();
   return (
     <header class="navbar bg-base-100 shadow-sm gap-2 print:hidden">
       <div class="flex-1 flex flex-col items-start">
         <span class="font-bold">{setup.register.name}</span>
         <span class="text-xs opacity-60">{setup.store.company.name}</span>
       </div>
-      {status.attention > 0 && <button class="badge badge-error" onClick={onQueue}>{status.attention} por revisar</button>}
-      {status.pending > 0 && <button class="badge badge-warning" onClick={onQueue}>{status.pending} por enviar</button>}
+      {status.pending > 0 && <span class="badge badge-warning">{status.pending} por enviar</span>}
       {status.syncing && <span class="loading loading-dots loading-sm" aria-label="Sincronizando" />}
       <span class={`badge ${online ? "badge-success" : "badge-neutral"}`}>{online ? "En línea" : "Sin internet"}</span>
-      <div class="dropdown dropdown-end">
-        <button class="btn btn-ghost btn-sm" tabIndex={0}>{employee?.name ?? "Menú"} ▾</button>
-        <ul tabIndex={0} class="dropdown-content menu bg-base-200 border border-base-300 rounded-box z-20 w-60 p-2 mt-2 shadow-2xl"
-          onClick={closeMenu}>
-          <li><button onClick={onSales}>Ventas y devoluciones</button></li>
-          <li><button onClick={onCustomers}>Clientes y crédito</button></li>
-          <li><button onClick={onQueue}>Ventas por enviar</button></li>
-          {onCash && <li><button onClick={onCash}>Entradas y salidas de efectivo</button></li>}
-          {onClosing && <li><button onClick={onClosing}>Corte de caja</button></li>}
-          {onStaff && <li><button onClick={onStaff}>Empleados</button></li>}
-          {employee && <li><button onClick={() => setEmployee(null)}>Cambiar de empleado</button></li>}
-          <li><button onClick={() => { if (confirm("¿Desvincular este equipo? Se borran de este equipo el token, el catálogo, los clientes y los empleados. Las ventas por enviar se conservan.")) void forget(); }}>Desvincular equipo</button></li>
-        </ul>
-      </div>
     </header>
   );
-}
-
-/** A daisyUI dropdown stays open while it has focus: drop it after a choice. */
-function closeMenu() {
-  (document.activeElement as HTMLElement | null)?.blur();
 }
 
 function Splash({ text = "Cargando…" }: { text?: string }) {

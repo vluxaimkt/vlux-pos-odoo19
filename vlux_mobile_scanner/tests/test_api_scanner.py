@@ -88,3 +88,44 @@ class TestVluxApiMobileScanner(HttpCase, VluxApiCase):
         self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"))
         response, body = self._api("POST", "/registers/%d/scanner/pair" % self.config.id, {"device_id": "x"})
         self.assertEqual(body["error"], "VALIDATION_ERROR")
+
+    def test_the_register_asks_the_phone_for_a_product_picture(self):
+        import base64
+        import io
+
+        from PIL import Image
+        stream = io.BytesIO()
+        Image.new("RGB", (8, 8), (10, 120, 200)).save(stream, format="JPEG")
+        jpeg = "data:image/jpeg;base64," + base64.b64encode(stream.getvalue()).decode()
+
+        base = "/registers/%d/scanner" % self.config.id
+        _response, body = self._api("POST", base + "/pair", {"device_id": "caja-pwa-0004"})
+        pairing_id = body["data"]["pairing_id"]
+        phone = self._phone("/vlux/mobile/pair", {"code": body["data"]["code"]})
+
+        response, asked = self._api("POST", base + "/photo-request", {
+            "device_id": "caja-pwa-0004", "pairing_id": pairing_id, "barcode": "7501234567895", "label": "Chicles",
+        })
+        self.assertEqual(response.status_code, 200, asked)
+        request_id = asked["data"]["request_id"]
+        beat = self._phone("/vlux/mobile/heartbeat", {}, token=phone["token"])
+        self.assertEqual(beat["photo_request"], {"request_id": request_id, "barcode": "7501234567895", "label": "Chicles"})
+
+        query = base + "/photo?request_id=%s&device_id=caja-pwa-0004" % request_id
+        self.assertEqual(self._api("GET", query)[1]["data"]["status"], "requested")
+        bad = self._phone("/vlux/mobile/photo", {"request_id": request_id, "image": "data:image/png;base64,bm9wZQ=="}, token=phone["token"])
+        self.assertEqual(bad.get("code"), "INVALID_PHOTO")
+        sent = self._phone("/vlux/mobile/photo", {"request_id": request_id, "image": jpeg}, token=phone["token"])
+        self.assertTrue(sent["ok"], sent)
+
+        _response, got = self._api("GET", query)
+        self.assertEqual(got["data"]["status"], "uploaded")
+        self.assertTrue(got["data"]["image"].startswith("data:image/jpeg;base64,"))
+        self.assertIsNone(self._phone("/vlux/mobile/heartbeat", {}, token=phone["token"])["photo_request"])
+        _response, other = self._api("GET", base + "/photo?request_id=%s&device_id=otro-equipo-77" % request_id)
+        self.assertEqual(other["error"], "NOT_FOUND", "another device does not get the picture")
+
+        _response, again = self._api("POST", base + "/photo-request", {"device_id": "caja-pwa-0004", "pairing_id": pairing_id})
+        self._api("POST", base + "/photo-cancel", {"device_id": "caja-pwa-0004", "request_id": again["data"]["request_id"]})
+        late = self._phone("/vlux/mobile/photo", {"request_id": again["data"]["request_id"], "image": jpeg}, token=phone["token"])
+        self.assertEqual(late.get("code"), "INVALID_PHOTO", "a cancelled request takes no picture")

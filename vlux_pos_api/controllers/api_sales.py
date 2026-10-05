@@ -10,11 +10,9 @@ Every write runs inside the savepoint ``api_route`` opens: a refused closing
 or sale leaves nothing behind.
 """
 from odoo import _, fields, http
-from odoo.exceptions import ValidationError
 from odoo.http import request
 
 from odoo.addons.vlux_core.controllers.api import VluxApiError, api_route, json_body
-from odoo.addons.vlux_core.controllers.api_catalog import _product_payload
 from odoo.addons.vlux_pos_api.models.employee_session import LOCK_MINUTES, PIN_ATTEMPTS
 from odoo.addons.vlux_pos_api.models.pos_order import VluxSaleRefused
 
@@ -58,6 +56,34 @@ def _acting_employee(config, token, body, required=False, session_raw=None):
     elif required:
         raise VluxApiError("PIN_REQUIRED", "Entra con tu PIN (con internet) para hacer esto.")
     return config._vlux_api_employee(claimed), False
+
+
+def _pin_checked(config, body):
+    """The employee whose PIN the body carries, checked on the server, with the lockout."""
+    if not config.module_pos_hr:
+        raise VluxApiError("VALIDATION_ERROR", "Esta caja no usa inicio de sesión por empleado.")
+    employee = config._vlux_api_employee(body.get("employee_id"))
+    limiter = request.env["vlux.rate.limit"].sudo()
+    identity = "%s:%s" % (config.id, employee.id)
+    if limiter.exhausted("pin", identity, PIN_ATTEMPTS, LOCK_MINUTES * 60):
+        raise VluxApiError("PIN_LOCKED", "Demasiados PIN incorrectos: espera %d minutos." % LOCK_MINUTES)
+    if config._vlux_api_is_manager(employee) and not employee.sudo().pin:
+        raise VluxApiError("VALIDATION_ERROR",
+                           "%s es encargado y no tiene PIN: ponle uno en Odoo." % employee.name)
+    if not request.env["vlux.pos.employee.session"]._pin_matches(employee, body.get("pin")):
+        limiter.consume("pin", identity, PIN_ATTEMPTS, LOCK_MINUTES * 60)
+        raise VluxApiError("INVALID_PIN", "PIN incorrecto.")
+    limiter.reset("pin", identity)
+    return employee
+
+
+def _session_answer(config, employee, session, raw):
+    manager = config._vlux_api_is_manager(employee)
+    return {
+        "session": raw,
+        "expires_at": _stamp(session.expires_at),
+        "employee": {"id": employee.id, "name": employee.name, "role": "manager" if manager else "cashier"},
+    }
 
 
 def _amount(value, name, required=True):
@@ -193,28 +219,30 @@ class VluxApiSales(http.Controller):
         """
         body = json_body()
         config = _register(register_id, token)
-        if not config.module_pos_hr:
-            raise VluxApiError("VALIDATION_ERROR", "Esta caja no usa inicio de sesión por empleado.")
-        employee = config._vlux_api_employee(body.get("employee_id"))
-        limiter = request.env["vlux.rate.limit"].sudo()
-        identity = "%s:%s" % (config.id, employee.id)
-        if limiter.exhausted("pin", identity, PIN_ATTEMPTS, LOCK_MINUTES * 60):
-            raise VluxApiError("PIN_LOCKED", "Demasiados PIN incorrectos: espera %d minutos." % LOCK_MINUTES)
-        manager = config._vlux_api_is_manager(employee)
-        if manager and not employee.sudo().pin:
-            raise VluxApiError("VALIDATION_ERROR",
-                               "%s es encargado y no tiene PIN: ponle uno en Odoo." % employee.name)
+        employee = _pin_checked(config, body)
+        session, raw = request.env["vlux.pos.employee.session"]._issue(config, employee, token)
+        return _session_answer(config, employee, session, raw)
+
+    @api_route("/registers/<int:register_id>/employees/authorize", scope="orders:write", methods=("POST",),
+               summary="Autorizar un módulo con el PIN de alguien con permiso (sesión breve)")
+    def employee_authorize(self, token, register_id, **kwargs):
+        """Body ``{"employee_id", "pin", "purpose"}``: the authorizer's PIN opens one module.
+
+        Answers a short session (15 minutes) of the authorizer for that module;
+        the register uses it and drops it when the module closes. Who
+        authorized whom (the session in ``X-Vlux-Employee``) and for what is
+        logged. Same lockout as the login.
+        """
+        body = json_body()
+        config = _register(register_id, token)
+        purpose = str(body.get("purpose") or "").strip()[:40]
+        if not purpose:
+            raise VluxApiError("VALIDATION_ERROR", "Falta purpose (el módulo que se autoriza).")
+        employee = _pin_checked(config, body)
         Session = request.env["vlux.pos.employee.session"]
-        if not Session._pin_matches(employee, body.get("pin")):
-            limiter.consume("pin", identity, PIN_ATTEMPTS, LOCK_MINUTES * 60)
-            raise VluxApiError("INVALID_PIN", "PIN incorrecto.")
-        limiter.reset("pin", identity)
-        session, raw = Session._issue(config, employee, token)
-        return {
-            "session": raw,
-            "expires_at": _stamp(session.expires_at),
-            "employee": {"id": employee.id, "name": employee.name, "role": "manager" if manager else "cashier"},
-        }
+        requested_by = Session._resolve(request.httprequest.headers.get(EMPLOYEE_HEADER, ""), config, token)
+        session, raw = Session._issue(config, employee, token, purpose=purpose, requested_by=requested_by)
+        return _session_answer(config, employee, session, raw)
 
     @api_route("/registers/<int:register_id>/employees/logout", scope="orders:write", methods=("POST",),
                summary="Salir: la sesión del empleado deja de servir")
@@ -397,44 +425,6 @@ class VluxApiSales(http.Controller):
         line, duplicate = session._vlux_api_cash_move(employee, kind, amount, reason, move_uuid)
         move = next(row for row in session._vlux_api_cash_moves() if row["id"] == line.id)
         return {**move, "session_id": session.id, "duplicate": duplicate}
-
-    # --- quick product creation ------------------------------------------------
-
-    @api_route("/registers/<int:register_id>/products", scope="orders:write", methods=("POST",),
-               summary="Alta rápida de un producto desde la caja (encargado con PIN)")
-    def quick_product(self, token, register_id, **kwargs):
-        """Body ``{"name", "barcode", "list_price", "taxes_ids"?}`` (needs vlux_pos_catalog).
-
-        A scanned code the store does not know becomes a sellable product.
-        As the POS's own quick create, a person must be allowed to: here a
-        manager of the register (or an employee whose user has the
-        quick-create group), proven by PIN. A taken barcode answers
-        ``CONFLICT``. Returns the product as the catalog feed sends it.
-        """
-        Template = request.env["product.template"]
-        if not hasattr(Template, "_vlux_quick_create_for"):
-            raise VluxApiError("NOT_FOUND", "El alta rápida no está instalada en esta tienda.")
-        config = _register(register_id, token)
-        body = json_body()
-        session = config.current_session_id
-        if not session or session.state != "opened":
-            raise VluxApiError("NO_OPEN_SESSION", "La caja no tiene una sesión abierta.")
-        employee, _verified = _acting_employee(config, token, body, required=True)
-        user = employee.sudo().user_id if employee else request.env.user
-        allowed = (config._vlux_api_is_manager(employee) if employee else False) or (
-            user and user.has_group("vlux_pos_catalog.group_vlux_catalog_quick_create"))
-        if not allowed:
-            raise VluxApiError("FORBIDDEN", "Sólo un encargado puede dar de alta productos.")
-        values = {key: body[key] for key in ("name", "barcode", "list_price", "taxes_ids") if key in body}
-        try:
-            result = Template._vlux_quick_create_for(values, config)
-        except ValidationError as error:
-            raise VluxApiError("VALIDATION_ERROR", str(error.args[0]) if error.args else "Datos inválidos.")
-        if not result.get("ok"):
-            raise VluxApiError("CONFLICT", "El código de barras ya está asignado a otro producto.",
-                               details={"existing": result.get("existing")})
-        product = request.env["product.product"].browse(result["product_id"])
-        return _product_payload(product)
 
     # --- selling ------------------------------------------------------------
 

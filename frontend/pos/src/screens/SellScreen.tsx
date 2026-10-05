@@ -7,7 +7,8 @@ import { productByBarcode, searchProducts } from "../db/search";
 import { parseBarcode } from "../lib/barcode";
 import { formatMoney } from "../lib/money";
 import {
-  addProduct, type AddOptions, type Cart, emptyCart, isWeighed, itemCount, qtyLabel, removeLine, setCustomer, setQty, unitPrice,
+  addProduct, type AddOptions, type Cart, emptyCart, isWeighed, itemCount, qtyLabel, refreshProduct, removeLine, setCustomer, setQty,
+  unitPrice,
 } from "../sale/cart";
 import { fromQuote, localPricing, type Pricing } from "../sale/pricing";
 import { META_CART, usePos } from "../state";
@@ -31,10 +32,12 @@ type Stage =
 
 /** Ring up a sale: scan or search, adjust the cart, charge, print the ticket. */
 export function SellScreen() {
-  const { db, client, setup, online, taxes, credit, employee, registerState } = usePos();
+  const { db, client, setup, online, taxes, credit, canEditCatalog, registerState, requestAuthorization, releaseAuthorization, authorizedBy } = usePos();
   const [cart, setCart] = useState<Cart | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ProductRow[]>([]);
+  // Bumped when a product is edited, so search results show the change.
+  const [searchVersion, setSearchVersion] = useState(0);
   const [stage, setStage] = useState<Stage>({ name: "cart" });
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -42,8 +45,23 @@ export function SellScreen() {
   const [weighing, setWeighing] = useState<{ product: ProductRow | Cart["lines"][number]["product"]; lineUuid?: string; qty?: number } | null>(null);
   /** A scanned code the store does not know: a manager may add it on the spot. */
   const [unknown, setUnknown] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const canCreate = online && (!registerState?.employee_login || employee?.role === "manager");
+  // The code being added: the dialog keeps it, so the notice clearing itself never closes the form.
+  const [creating, setCreating] = useState<string | null>(null);
+  const canCreate = online && canEditCatalog;
+  // Without the right, someone allowed authorizes it with their PIN (padlock).
+  const canAskCreate = online && !canEditCatalog && !!registerState?.employee_login;
+  async function startCreate(code: string) {
+    setNotice(null);
+    if (!canEditCatalog) {
+      const ok = await requestAuthorization("Dar de alta productos", "catalog", (e) => !!e.can_edit_catalog);
+      if (!ok) return;
+    }
+    setCreating(code);
+  }
+  function stopCreate() {
+    setCreating(null);
+    if (authorizedBy) releaseAuthorization();
+  }
   const search = useRef<HTMLInputElement>(null);
   const rounding = setup.store.tax_rounding;
 
@@ -68,7 +86,7 @@ export function SellScreen() {
   useEffect(() => {
     if (!notice) return;
     // Longer when it offers to add the unknown product.
-    const id = setTimeout(() => { setNotice(null); setUnknown(null); }, unknown && canCreate ? 15000 : 4000);
+    const id = setTimeout(() => { setNotice(null); setUnknown(null); }, unknown && (canCreate || canAskCreate) ? 15000 : 4000);
     return () => clearTimeout(id);
   }, [notice]);
 
@@ -81,7 +99,7 @@ export function SellScreen() {
     return () => {
       current = false;
     };
-  }, [db, query]);
+  }, [db, query, searchVersion]);
 
   /** Add to the cart; false when it waits for the weight. */
   function add(product: ProductRow, qty?: number, options: AddOptions = {}): boolean {
@@ -228,10 +246,16 @@ export function SellScreen() {
         {notice && (
           <div role="alert" class="alert alert-warning">
             <span class="flex-1">{notice}</span>
-            {unknown && canCreate && <button class="btn btn-sm" onClick={() => setCreating(true)}>Dar de alta</button>}
+            {unknown && (canCreate || canAskCreate) && (
+              <button class="btn btn-sm" onClick={() => void startCreate(unknown)}>{canCreate ? "Dar de alta" : "🔒 Dar de alta"}</button>
+            )}
           </div>
         )}
-        <ProductGrid searched={query.trim() ? results : null} onPick={(product) => add(product)} />
+        <ProductGrid searched={query.trim() ? results : null} onPick={(product) => add(product)}
+          onChanged={(row) => {
+            setSearchVersion((v) => v + 1);
+            if (cartRef.current) update(refreshProduct(cartRef.current, row));
+          }} />
         {query && !results.length && <p class="opacity-60">Sin resultados en esta caja.</p>}
       </div>
 
@@ -292,14 +316,14 @@ export function SellScreen() {
           )}
         </div>
       </aside>
-      {creating && unknown && (
-        <QuickProductDialog barcode={unknown}
-          onCancel={() => { setCreating(false); search.current?.focus(); }}
+      {creating && (
+        <QuickProductDialog barcode={creating}
+          onCancel={() => { stopCreate(); search.current?.focus(); }}
           onCreated={async (product) => {
             // Into the local catalog now; the next sync brings the same row.
             const row = productRow(product);
             await db.products.put(row);
-            setCreating(false);
+            stopCreate();
             setUnknown(null);
             add(row);
           }} />

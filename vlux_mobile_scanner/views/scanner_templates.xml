@@ -60,6 +60,18 @@
                             <div id="httpsWarning" class="vlux-message is-warning is-hidden">La camara del navegador requiere HTTPS. Puedes probar la integracion usando el campo manual.</div>
                         </section>
 
+                        <section id="photoPanel" class="vlux-card vlux-photo-card is-hidden">
+                            <div class="vlux-eyebrow">FOTO PARA LA CAJA</div>
+                            <h2>La caja pide una foto del producto</h2>
+                            <div id="photoLabel" class="vlux-muted"></div>
+                            <img id="photoPreview" class="vlux-photo-preview is-hidden" alt="Vista previa de la foto"/>
+                            <input id="photoInput" type="file" accept="image/*" capture="environment" class="is-hidden"/>
+                            <button id="photoTakeButton" class="vlux-btn vlux-btn-primary" type="button">Tomar foto</button>
+                            <button id="photoSendButton" class="vlux-btn vlux-btn-primary is-hidden" type="button">Enviar a la caja</button>
+                            <button id="photoCancelButton" class="vlux-btn vlux-btn-ghost" type="button">Ahora no</button>
+                            <div id="photoMessage" class="vlux-message is-hidden"></div>
+                        </section>
+
                         <section class="vlux-card vlux-result-card">
                             <div class="vlux-result-head">
                                 <div class="vlux-eyebrow">ULTIMO RESULTADO</div>

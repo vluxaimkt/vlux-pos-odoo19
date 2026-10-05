@@ -271,6 +271,15 @@ rápida), con PIN verificado y la caja abierta. Responde el producto como lo
 manda el catálogo, para venderlo en ese momento; `CONFLICT` si el código ya
 existe. Requiere `vlux_pos_catalog`.
 
+**Quién y cómo edita productos desde la caja.** Opción de la caja
+`vlux_catalog_editors` (`managers`: encargados y dueño, por defecto; `owner`:
+sólo el dueño); `/employees` trae `can_edit_catalog`. El alta rápida acepta
+`image` (data URI). `POST /registers/<id>/products/<product_id>` cambia
+cualquiera de `name, list_price, description` (texto plano), `barcode` (no
+repetido), `pos_categ_id`, `to_weight`, `taxes_ids` e `image` (`null` la
+quita); se escribe como el usuario de quien lo hizo y responde el producto
+como lo manda el catálogo, con la versión de la foto.
+
 ### 4.3 Operación de venta (fase C)
 
 Módulo `vlux_pos_api`. Todo pasa por los mismos métodos de Odoo que usa su POS
@@ -391,6 +400,34 @@ espera esa cantidad de más o de menos. Como en Odoo, sólo un encargado de la
 caja con PIN verificado; un cajero sólo puede sacar si la caja lo permite (opción `vlux_cashier_cash_out`, apagada por defecto como en Odoo; el estado de la caja la publica como `cashier_cash_out`), a su nombre; motivo obligatorio;
 idempotente por `uuid` (`duplicate: true`). `GET /registers/<id>/session/cash-moves`
 lista los de la sesión abierta; el corte los incluye con quién los hizo.
+
+**Foto desde el celular vinculado.** La caja pide una foto
+(`POST /registers/<id>/scanner/photo-request {"device_id", "pairing_id", "barcode"?, "label"?}`),
+el celular la recibe por su canal (y en el latido, `photo_request`), la toma
+y la sube (`POST /vlux/mobile/photo {"request_id", "image"}`, reducida a
+~1024 px en el celular), y la caja la recoge
+(`GET /registers/<id>/scanner/photo?request_id&device_id`: `requested`,
+`uploaded` con `image`, `cancelled` o `expired`; vence a los 10 minutos).
+`POST .../scanner/photo-cancel` la cancela.
+
+**Autorizar con el PIN de alguien con permiso.** Cuando un módulo está
+cerrado para quien está en caja (candado), alguien con permiso pone su PIN:
+`POST /registers/<id>/employees/authorize {"employee_id", "pin", "purpose"}`
+(mismo bloqueo por PIN que el inicio de sesión). Responde una sesión **breve
+(15 min) de quien autoriza** para ese módulo; la caja la usa mientras está en
+él y la termina al salir. Queda registro (`vlux.pos.authorization`) de quién
+autorizó, a quién (la sesión de `X-Vlux-Employee`) y para qué; lo que se haga
+queda a nombre de quien autorizó.
+
+**Módulo del dueño (sólo el dueño, con su PIN).** `GET /registers/<id>/owner/sections`
+lista las secciones según lo instalado (`pos.config._vlux_api_owner_sections`,
+cada módulo agrega la suya): `dashboard` (`GET .../owner/dashboard?date`, el
+mismo servicio de VLUX Owner ejecutado como el usuario del dueño), `credit`
+(`GET .../owner/credit` y `.../owner/credit/<partner_id>`, con vlux_pos_credit),
+`options` (`GET .../owner/options` las describe como formulario y
+`POST .../owner/options/save {"values"}` las cambia; cada módulo publica las
+suyas en `pos.config._vlux_api_option_fields`) y `authorizations`
+(`GET .../owner/authorizations`). `/employees` trae `is_owner`.
 
 **Empleados (módulo del dueño).** `GET /registers/<id>/staff` lista los
 empleados de la tienda con su acceso a esta caja (`manager`, `cashier`,

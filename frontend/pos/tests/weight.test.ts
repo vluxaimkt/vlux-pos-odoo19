@@ -57,3 +57,16 @@ describe("products sold by weight", () => {
     expect(pricing.lines[0]).toMatchObject({ displayUnit: 17.4, unit: "kg", total: 6.53 });
   });
 });
+
+describe("editing a product from the register", () => {
+  it("updates its cart lines but keeps a scale-label price", async () => {
+    const { refreshProduct } = await import("../src/sale/cart");
+    let cart = addProduct(emptyCart(newId), soda, newId, 2);
+    cart = addProduct(cart, ham, newId, 1, { priceUnit: 37.5 });
+    cart = refreshProduct(cart, { ...soda, list_price: 22, name: "Refresco 600" });
+    cart = refreshProduct(cart, { ...ham, list_price: 99 });
+    expect(cart.lines[0]!.product).toMatchObject({ list_price: 22, name: "Refresco 600" });
+    expect(cart.lines[0]!.qty).toBe(2);
+    expect(cart.lines[1]!.priceUnit).toBe(37.5);
+  });
+});
