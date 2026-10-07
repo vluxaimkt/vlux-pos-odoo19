@@ -1,4 +1,5 @@
 import type { Employee, RegisterOptions } from "./api/types";
+import type { IconName } from "./ui/Icon";
 
 /**
  * The register's modules: one list for the sidebar, the padlocks and who may
@@ -18,7 +19,7 @@ export interface AccessContext {
 export interface ModuleDef {
   id: ModuleId;
   label: string;
-  icon: string;
+  icon: IconName;
   /** Keyboard shortcut (F1…). */
   key: string;
   /** Who may use it; others see a padlock and ask someone allowed for their PIN. */
@@ -33,18 +34,18 @@ const anyone = () => true;
 const manager = (e: Employee | null) => e?.role === "manager";
 
 export const MODULES: ModuleDef[] = [
-  { id: "sell", label: "Vender", icon: "🛒", key: "F1", allows: anyone },
-  { id: "sales", label: "Ventas y devoluciones", icon: "🧾", key: "F2", allows: anyone },
-  { id: "customers", label: "Clientes y crédito", icon: "👥", key: "F3", allows: anyone },
+  { id: "sell", label: "Vender", icon: "cart", key: "F1", allows: anyone },
+  { id: "sales", label: "Ventas y devoluciones", icon: "receipt", key: "F2", allows: anyone },
+  { id: "customers", label: "Clientes y crédito", icon: "people", key: "F3", allows: anyone },
   {
-    id: "cash", label: "Entradas y salidas", icon: "💵", key: "F4", needsSession: true,
+    id: "cash", label: "Entradas y salidas", icon: "cash", key: "F4", needsSession: true,
     // Managers move cash; cashiers take it out where the store allows it.
     allows: (e, ctx) => manager(e) || (e?.role === "cashier" && !!ctx.options?.cashier_cash_out),
   },
-  { id: "closing", label: "Corte de caja", icon: "🧮", key: "F5", needsSession: true, allows: anyone },
-  { id: "staff", label: "Empleados", icon: "🪪", key: "F6", needsEmployees: true, allows: (e) => !!e?.can_manage_staff },
-  { id: "owner", label: "Dueño", icon: "👑", key: "F7", needsEmployees: true, allows: (e) => !!e?.is_owner },
-  { id: "queue", label: "Ventas por enviar", icon: "📤", key: "F8", allows: anyone },
+  { id: "closing", label: "Corte de caja", icon: "calculator", key: "F5", needsSession: true, allows: anyone },
+  { id: "staff", label: "Empleados", icon: "idcard", key: "F6", needsEmployees: true, allows: (e) => !!e?.can_manage_staff },
+  { id: "owner", label: "Dueño", icon: "crown", key: "F7", needsEmployees: true, allows: (e) => !!e?.is_owner },
+  { id: "queue", label: "Ventas por enviar", icon: "tray", key: "F8", allows: anyone },
 ];
 
 export function moduleById(id: ModuleId): ModuleDef {

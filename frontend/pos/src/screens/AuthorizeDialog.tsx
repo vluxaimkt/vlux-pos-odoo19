@@ -3,8 +3,8 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { Employee } from "../api/types";
 import { explain } from "./SetupScreen";
 import { pinKey } from "./LoginScreen";
-
-const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
+import { Icon } from "../ui/Icon";
+import { PinDots, PinPad } from "../ui/Pin";
 
 /**
  * "Ask someone allowed": the module is locked for the person at the register,
@@ -64,7 +64,7 @@ export function AuthorizeDialog({ title, authorizers, onAuthorize, onCancel }: {
   return (
     <dialog class="modal modal-open" aria-label={`Autorizar: ${title}`}>
       <div class="modal-box flex flex-col items-center gap-3 text-center">
-        <div class="text-3xl" aria-hidden="true">🔒</div>
+        <div class="avatar-disc w-16 h-16" data-role="manager" aria-hidden="true"><Icon name="lock" size={32} /></div>
         <h3 class="text-lg font-bold">{title}</h3>
         {!authorizers.length ? (
           <p>Nadie en esta caja puede autorizarlo todavía (o no tiene PIN).</p>
@@ -73,19 +73,15 @@ export function AuthorizeDialog({ title, authorizers, onAuthorize, onCancel }: {
             <p class="text-sm opacity-70">Pide a alguien con permiso que ponga su PIN:</p>
             <div class="flex flex-wrap gap-2 justify-center">
               {authorizers.map((e) => (
-                <button key={e.id} class="btn btn-outline" onClick={() => setChosen(e)}>{e.name}</button>
+                <button key={e.id} class="btn" onClick={() => setChosen(e)}>{e.name}</button>
               ))}
             </div>
           </>
         ) : (
           <>
             <p class="text-sm">PIN de <strong>{chosen.name}</strong></p>
-            <div class="text-3xl tracking-[0.5em] h-10" aria-label="PIN">{"•".repeat(pin.length)}</div>
-            <div class="grid grid-cols-3 gap-2 w-56">
-              {KEYS.map((key, index) => key
-                ? <button key={index} class="btn" disabled={busy} onClick={() => press(key)}>{key}</button>
-                : <span key={index} />)}
-            </div>
+            <PinDots length={pin.length} shakeKey={error} />
+            <PinPad compact disabled={busy} onPress={press} />
             {authorizers.length > 1 && <button class="btn btn-ghost btn-xs" onClick={() => { setChosen(null); setPin(""); }}>Otra persona</button>}
           </>
         )}
