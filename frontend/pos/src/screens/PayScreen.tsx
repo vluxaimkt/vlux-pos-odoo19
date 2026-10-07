@@ -11,7 +11,7 @@ import { addPayment, cashSuggestions, type Payment, paymentState } from "../sale
 import type { Pricing } from "../sale/pricing";
 import { usePos } from "../state";
 import { enqueueSale } from "../sync/outbox";
-import { Icon } from "../ui/Icon";
+import { Icon, type IconName } from "../ui/Icon";
 
 /** What a sale on credit prints: the customer and the balances. */
 export interface CreditTicket {
@@ -111,86 +111,113 @@ export function PayScreen({ cart, pricing, onBack, onPaid }: {
   }
 
   const cashMethod = methods.find((method) => method.is_cash);
+  const done = state.complete;
   return (
-    <section class="p-4 max-w-xl mx-auto flex flex-col gap-4">
-      <div class="stats shadow bg-base-100">
-        <div class="stat">
-          <div class="stat-title">Total</div>
-          <div class="stat-value">{formatMoney(pricing.total, currency)}</div>
-          {pricing.source === "local" && <div class="stat-desc">Calculado sin internet</div>}
-        </div>
-        <div class="stat">
-          <div class="stat-title">{state.change > 0 ? "Cambio" : "Falta"}</div>
-          <div class={`stat-value ${state.change > 0 ? "text-success" : ""}`}>
-            {formatMoney(state.change > 0 ? state.change : state.remaining, currency)}
-          </div>
+    <section class="p-4 lg:p-8 max-w-2xl mx-auto flex flex-col gap-6 rise">
+      <header class="grid grid-cols-[1fr_auto_1fr] items-center">
+        <button class="btn btn-ghost text-primary -ml-2 justify-self-start" disabled={busy} onClick={onBack}>
+          <Icon name="back" size={20} /> Venta
+        </button>
+        <h1 class="text-xl">Cobrar</h1>
+      </header>
+
+      <div class="surface p-6 flex flex-col items-center gap-2 text-center">
+        <span class="label-2 font-medium">Total</span>
+        <span class="display">{money(pricing.total)}</span>
+        {pricing.source === "local" && (
+          <span class="pill pill-plain"><Icon name="cloudOff" size={14} /> Calculado sin internet</span>
+        )}
+        <div class="mt-2 flex items-baseline gap-2">
+          <span class="label-2">{state.change > 0 ? "Cambio" : done ? "Pagado" : "Falta"}</span>
+          <span class={`text-2xl font-semibold num ${state.change > 0 ? "text-success" : done ? "text-success" : ""}`}>
+            {money(state.change > 0 ? state.change : state.remaining)}
+          </span>
         </div>
       </div>
 
       {payments.length > 0 && (
-        <ul class="list bg-base-100 rounded-box">
+        <div class="grouped" aria-label="Pagos">
           {payments.map((payment, index) => (
-            <li key={index} class="list-row items-center">
-              <div class="list-col-grow">{payment.method.name}</div>
-              <div>{formatMoney(payment.amount, currency)}</div>
-              <button class="btn btn-ghost btn-xs" aria-label="Quitar pago"
-                onClick={() => setPayments(payments.filter((_, i) => i !== index))}><Icon name="close" size={18} /></button>
-            </li>
+            <div key={index} class="row">
+              <span class="method-icon !w-8 !h-8 !rounded-[8px]" style={{ background: methodColor(payment.method) }}>
+                <Icon name={methodIcon(payment.method)} size={18} />
+              </span>
+              <span class="flex-1 font-medium">{payment.method.name}</span>
+              <span class="font-semibold num">{money(payment.amount)}</span>
+              <button class="btn btn-ghost btn-sm btn-square label-2" aria-label="Quitar pago"
+                onClick={() => setPayments(payments.filter((_, i) => i !== index))}><Icon name="close" size={16} /></button>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
       {state.problem && <div role="alert" class="alert alert-error">{state.problem}</div>}
       {error && <div role="alert" class="alert alert-error">{error}</div>}
 
-      {!state.complete && (
+      {!done && (
         <>
           {cashMethod && (
-            <div class="flex flex-wrap gap-2">
-              {cashSuggestions(state.remaining).map((value) => (
-                <button key={value} class="btn" onClick={() => void pay(cashMethod, String(value))}>
-                  {formatMoney(value, currency)}
-                </button>
-              ))}
+            <div class="flex flex-col gap-2">
+              <span class="text-sm label-2 font-medium px-1">Efectivo rápido</span>
+              <div class="flex flex-wrap gap-2">
+                {cashSuggestions(state.remaining).map((value) => (
+                  <button key={value} class="chip num" onClick={() => void pay(cashMethod, String(value))}>
+                    {money(value)}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
-          <fieldset class="fieldset">
-            <legend class="fieldset-legend">Monto (vacío = lo que falta)</legend>
+          <label class="flex flex-col gap-2">
+            <span class="text-sm label-2 font-medium px-1">Monto recibido</span>
             <input
-              class="input input-lg w-full"
+              class="input input-lg w-full text-2xl num"
               type="number"
               inputMode="decimal"
               min="0"
               step="0.01"
-              placeholder={String(state.remaining)}
+              placeholder={money(state.remaining)}
               value={amount}
               onInput={(event) => setAmount(event.currentTarget.value)}
             />
-            <p class="label whitespace-normal">
-              Pago mixto: escribe cuánto paga con una forma (p. ej. 50), tócala, y paga lo que falta con otra.
-            </p>
-          </fieldset>
+            <span class="text-xs label-2 px-1">
+              Vacío cobra lo que falta. Para pago mixto, escribe cuánto paga con una forma, tócala y paga el resto con otra.
+            </span>
+          </label>
           {creditMethod && !offerCredit && (
-            <p class="text-xs opacity-70">
+            <p class="text-xs label-2 px-1">
               {canSellOnCredit ? "Para fiar, elige al cliente en la venta." : "En esta caja sólo el encargado o el dueño pueden fiar."}
             </p>
           )}
-          <div class="grid grid-cols-2 gap-2">
+          <div class="grid grid-cols-2 gap-4">
             {methods.map((method) => (
-              <button key={method.id} class={`btn btn-lg ${method.type === "pay_later" ? "btn-warning btn-outline" : "btn-outline"}`}
-                disabled={state.remaining <= 0} onClick={() => void pay(method)}>
-                {method.type === "pay_later" ? `Fiar a ${cart.customer?.name ?? ""}` : `Pagar con ${method.name}`}
+              <button key={method.id} class="method" disabled={state.remaining <= 0} onClick={() => void pay(method)}>
+                <span class="method-icon" style={{ background: methodColor(method) }}>
+                  <Icon name={methodIcon(method)} size={22} />
+                </span>
+                <span class="leading-tight">
+                  {method.type === "pay_later" ? `Fiar a ${cart.customer?.name ?? ""}` : method.name}
+                  {method.type !== "pay_later" && amount && <span class="block text-sm font-normal label-2 num">{money(Number(amount) || 0)}</span>}
+                </span>
               </button>
             ))}
           </div>
         </>
       )}
 
-      <div class="flex gap-2">
-        <button class="btn btn-ghost flex-1" disabled={busy} onClick={onBack}>Volver</button>
-        <button class="btn btn-primary btn-lg flex-[2]" disabled={!state.complete || busy} onClick={() => void confirm()}>
-          {busy ? <span class="loading loading-spinner" /> : "Terminar venta"}
-        </button>
-      </div>
+      <button class="btn btn-primary btn-xl w-full" disabled={!done || busy} onClick={() => void confirm()}>
+        {busy ? <span class="loading loading-spinner" /> : <><Icon name="checkCircle" size={22} /> Terminar venta</>}
+      </button>
     </section>
   );
+}
+
+/** Cash, card or credit: the icon and system color of each kind of payment method. */
+function methodIcon(method: { is_cash: boolean; type?: string }): IconName {
+  if (method.is_cash) return "cash";
+  return method.type === "pay_later" ? "person" : "card";
+}
+
+function methodColor(method: { is_cash: boolean; type?: string }): string {
+  if (method.is_cash) return "linear-gradient(180deg, #34c759, #248a3d)";
+  return method.type === "pay_later" ? "linear-gradient(180deg, #ffb340, #ff9500)" : "linear-gradient(180deg, #5ac8fa, #007aff)";
 }

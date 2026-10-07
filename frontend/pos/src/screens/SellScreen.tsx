@@ -64,6 +64,7 @@ export function SellScreen() {
     if (authorizedBy) releaseAuthorization();
   }
   const search = useRef<HTMLInputElement>(null);
+  const cartPanel = useRef<HTMLElement>(null);
   const rounding = setup.store.tax_rounding;
 
   // The latest cart, for scans that arrive one after another (phone, scanner).
@@ -226,29 +227,43 @@ export function SellScreen() {
   }
 
   const estimate = localPricing(cart, taxes, setup.register.use_pricelist, rounding);
+  const money = (value: number) => formatMoney(value, setup.store.currency);
+  const count = itemCount(cart);
   return (
-    <section class="p-3 grid gap-3 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_24rem]">
-      <div class="flex flex-col gap-3 min-w-0">
-        <input
-          ref={search}
-          class="input input-lg w-full"
-          type="search"
-          placeholder="Escanea o busca un producto"
-          autofocus
-          autocomplete="off"
-          value={query}
-          onInput={(event) => {
-            setQuery(event.currentTarget.value);
-            setNotice(null);
-          }}
-          onKeyDown={(event) => void onEnter(event)}
-        />
-        <div class="flex justify-end"><PhoneScannerButton /></div>
+    <section class="p-4 pb-32 lg:p-6 grid gap-6 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_24rem] items-start">
+      <div class="flex flex-col gap-4 min-w-0">
+        <div class="flex items-center gap-2">
+          <label class="search-field flex-1">
+            <Icon name="search" size={22} />
+            <input
+              ref={search}
+              type="search"
+              placeholder="Escanea o busca un producto"
+              aria-label="Escanea o busca un producto"
+              autofocus
+              autocomplete="off"
+              value={query}
+              onInput={(event) => {
+                setQuery(event.currentTarget.value);
+                setNotice(null);
+              }}
+              onKeyDown={(event) => void onEnter(event)}
+            />
+            {query && (
+              <button type="button" class="info-dot !static !w-6 !h-6 !text-[var(--label-secondary)]" aria-label="Borrar búsqueda"
+                onClick={() => { setQuery(""); search.current?.focus(); }}>
+                <Icon name="close" size={14} />
+              </button>
+            )}
+          </label>
+          <PhoneScannerButton />
+        </div>
         {notice && (
-          <div role="alert" class="alert alert-warning">
+          <div role="alert" class="surface rise flex items-center gap-3 px-4 py-3">
+            <Icon name="warning" class="text-warning" />
             <span class="flex-1">{notice}</span>
             {unknown && (canCreate || canAskCreate) && (
-              <button class="btn btn-sm" onClick={() => void startCreate(unknown)}>{!canCreate && <Icon name="lock" size={16} />}Dar de alta</button>
+              <button class="btn btn-sm btn-primary" onClick={() => void startCreate(unknown)}>{!canCreate && <Icon name="lock" size={16} />}Dar de alta</button>
             )}
           </div>
         )}
@@ -257,65 +272,110 @@ export function SellScreen() {
             setSearchVersion((v) => v + 1);
             if (cartRef.current) update(refreshProduct(cartRef.current, row));
           }} />
-        {query && !results.length && <p class="opacity-60">Sin resultados en esta caja.</p>}
+        {query && !results.length && (
+          <div class="py-16 flex flex-col items-center gap-2 text-center label-2">
+            <Icon name="search" size={40} />
+            <p class="font-semibold text-base-content">Sin resultados</p>
+            <p class="text-sm">Nada en esta caja coincide con "{query}".</p>
+          </div>
+        )}
       </div>
 
-      <aside class="card bg-base-100 shadow min-w-0">
-        <div class="card-body gap-2 p-4">
-          <h2 class="card-title">Venta <span class="badge">{itemCount(cart)}</span></h2>
-          <div class="flex items-start gap-2 text-sm">
-            {cart.customer ? (
-              <div class="flex-1">
-                <div>Cliente: <strong>{cart.customer.name}</strong></div>
-                <CreditLine row={credit.get(cart.customer.id)} money={(n) => formatMoney(n, setup.store.currency)} />
-              </div>
-            ) : (
-              <span class="flex-1 opacity-70">Sin cliente</span>
-            )}
-            <button class="btn btn-xs" onClick={() => setStage({ name: "customer" })}>{cart.customer ? "Cambiar" : "Elegir cliente"}</button>
-            {cart.customer && <button class="btn btn-xs btn-ghost" aria-label="Quitar cliente" onClick={() => update(setCustomer(cart, null))}><Icon name="close" size={16} /></button>}
+      {/* Phones: the cart sits below the products, so its total and "Cobrar" float at the bottom. */}
+      {cart.lines.length > 0 && (
+        <div class="lg:hidden glass fixed bottom-4 inset-x-4 z-20 rounded-[20px] p-2 pl-4 flex items-center gap-3 shadow-xl rise print:hidden">
+          <button class="flex-1 min-w-0 text-left" onClick={() => cartPanel.current?.scrollIntoView({ behavior: "smooth" })}>
+            <div class="text-xs label-2 num">{count} {count === 1 ? "artículo" : "artículos"} · ver venta</div>
+            <div class="text-xl font-semibold num">{money(estimate.total)}</div>
+          </button>
+          <button class="btn btn-primary btn-xl" disabled={busy} onClick={() => void charge()}>
+            {busy ? <span class="loading loading-spinner" /> : "Cobrar"}
+          </button>
+        </div>
+      )}
+
+      <aside ref={cartPanel} class="surface min-w-0 flex flex-col lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)]" aria-label="Venta">
+        <header class="px-4 pt-4 pb-2 flex items-baseline gap-2">
+          <h2 class="text-2xl flex-1">Venta</h2>
+          {count > 0 && <span class="label-2 text-sm num">{count} {count === 1 ? "artículo" : "artículos"}</span>}
+        </header>
+        <div class="px-4 pb-2">
+          <div class="grouped !bg-transparent">
+            <div class="row !px-3 !min-h-14 bg-[var(--fill)]">
+              <span class="avatar-disc w-8 h-8 text-sm" data-role={cart.customer ? "manager" : undefined}>
+                {cart.customer ? (cart.customer.name.trim()[0] ?? "?").toUpperCase() : <Icon name="person" size={18} />}
+              </span>
+              <button class="flex-1 min-w-0 text-left" onClick={() => setStage({ name: "customer" })}>
+                {cart.customer ? (
+                  <>
+                    <div class="font-semibold truncate">{cart.customer.name}</div>
+                    <CreditLine row={credit.get(cart.customer.id)} money={money} />
+                  </>
+                ) : (
+                  <span class="label-2">Agregar cliente</span>
+                )}
+              </button>
+              {cart.customer
+                ? <button class="btn btn-ghost btn-sm btn-square label-2" aria-label="Quitar cliente" onClick={() => update(setCustomer(cart, null))}><Icon name="close" size={16} /></button>
+                : <Icon name="chevron" size={18} class="label-2" />}
+            </div>
           </div>
-          {!cart.lines.length && <p class="opacity-60">Escanea un producto para empezar.</p>}
-          <ul class="flex flex-col gap-2 max-h-[55vh] overflow-y-auto">
+        </div>
+        {!cart.lines.length ? (
+          <div class="flex-1 py-16 px-4 flex flex-col items-center justify-center gap-2 text-center label-2">
+            <Icon name="cart" size={40} />
+            <p class="font-semibold text-base-content">Carrito vacío</p>
+            <p class="text-sm">Escanea o toca un producto para empezar.</p>
+          </div>
+        ) : (
+          <ul class="flex-1 overflow-y-auto px-4 min-h-0 max-h-[50vh] lg:max-h-none">
             {cart.lines.map((line) => (
-              <li key={line.uuid} class="flex items-center gap-2">
-                <div class="flex-1 min-w-0">
-                  <div class="truncate">{line.product.name}</div>
-                  <div class="text-xs opacity-60">
+              <li key={line.uuid} class="py-3 border-b border-[var(--hairline)] last:border-0 rise flex flex-col gap-2">
+                <div class="flex items-start gap-3">
+                  <div class="flex-1 min-w-0 font-medium leading-snug line-clamp-2">{line.product.name}</div>
+                  <span class="font-semibold num">{money(unitPrice(line) * line.qty)}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <div class="flex-1 min-w-0 text-xs label-2 num truncate">
                     {isWeighed(line)
-                      ? `${qtyLabel(line.qty, line.product.uom?.name ?? "kg")} x ${formatMoney(unitPrice(line), setup.store.currency)} = ${formatMoney(unitPrice(line) * line.qty, setup.store.currency)}`
-                      : `${formatMoney(unitPrice(line), setup.store.currency)} c/u`}
+                      ? `${qtyLabel(line.qty, line.product.uom?.name ?? "kg")} × ${money(unitPrice(line))}`
+                      : `${money(unitPrice(line))} c/u`}
                     {line.priceFromBarcode && " · precio de etiqueta"}
                   </div>
+                  {isWeighed(line) ? (
+                    <button class="btn btn-sm" onClick={() => setWeighing({ product: line.product, lineUuid: line.uuid, qty: line.qty })}>
+                      <Icon name="scale" size={16} /> Pesar
+                    </button>
+                  ) : (
+                    <div class="stepper">
+                      <button aria-label="Menos" onClick={() => update(setQty(cart, line.uuid, line.qty - 1))}><Icon name="minus" size={16} /></button>
+                      <output aria-label="Cantidad">{line.qty}</output>
+                      <button aria-label="Más" onClick={() => update(setQty(cart, line.uuid, line.qty + 1))}><Icon name="plus" size={16} /></button>
+                    </div>
+                  )}
+                  <button class="btn btn-ghost btn-sm btn-square label-2" aria-label="Quitar" onClick={() => update(removeLine(cart, line.uuid))}>
+                    <Icon name="trash" size={16} />
+                  </button>
                 </div>
-                {isWeighed(line) ? (
-                  <button class="btn btn-sm" onClick={() => setWeighing({ product: line.product, lineUuid: line.uuid, qty: line.qty })}>Pesar</button>
-                ) : (
-                  <div class="join">
-                    <button class="btn btn-sm join-item" aria-label="Menos" onClick={() => update(setQty(cart, line.uuid, line.qty - 1))}>−</button>
-                    <span class="btn btn-sm join-item pointer-events-none">{line.qty}</span>
-                    <button class="btn btn-sm join-item" aria-label="Más" onClick={() => update(setQty(cart, line.uuid, line.qty + 1))}>+</button>
-                  </div>
-                )}
-                <button class="btn btn-ghost btn-sm" aria-label="Quitar" onClick={() => update(removeLine(cart, line.uuid))}><Icon name="close" size={18} /></button>
               </li>
             ))}
           </ul>
-          <div class="divider my-1" />
-          <div class="flex justify-between text-2xl font-bold">
-            <span>Total</span>
-            <span>{formatMoney(estimate.total, setup.store.currency)}</span>
+        )}
+        <footer class="p-4 border-t border-[var(--hairline)] flex flex-col gap-3">
+          <div class="flex items-baseline justify-between">
+            <span class="label-2 font-medium">Total</span>
+            <span class="text-4xl font-semibold num">{money(estimate.total)}</span>
           </div>
-          {!estimate.exact && <p class="text-xs opacity-70">El total final lo confirma el servidor al cobrar.</p>}
-          <button class="btn btn-primary btn-lg" disabled={!cart.lines.length || busy} onClick={() => void charge()}>
+          {!estimate.exact && <p class="text-xs label-2 -mt-2 text-right">El total final lo confirma el servidor al cobrar.</p>}
+          <button class="btn btn-primary btn-xl" disabled={!cart.lines.length || busy} onClick={() => void charge()}>
             {busy ? <span class="loading loading-spinner" /> : "Cobrar"}
           </button>
           {cart.lines.length > 0 && (
-            <button class="btn btn-ghost btn-sm" onClick={() => { if (confirm("¿Cancelar esta venta?")) update(emptyCart(newId)); }}>
-              Cancelar venta
+            <button class="btn btn-ghost btn-sm text-danger" onClick={() => { if (confirm("¿Cancelar esta venta?")) update(emptyCart(newId)); }}>
+              <Icon name="trash" size={16} /> Cancelar venta
             </button>
           )}
-        </div>
+        </footer>
       </aside>
       {creating && (
         <QuickProductDialog barcode={creating}

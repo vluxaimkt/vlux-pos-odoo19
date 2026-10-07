@@ -24,7 +24,18 @@ const PATHS = {
   camera: <><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.3l1.5-2h5.4l1.5 2h2.3A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5v-9Z" /><circle cx="12" cy="13" r="3.25" /></>,
   check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
   warning: <><path d="M10.3 4.2a2 2 0 0 1 3.4 0l7.5 13A2 2 0 0 1 19.5 20h-15a2 2 0 0 1-1.7-2.8l7.5-13Z" /><path d="M12 9.5v4M12 16.5h.01" /></>,
-  link:<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.7l1-1" />,
+  search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></>,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5.5M12 7.5h.01" /></>,
+  card: <><rect x="3" y="5.5" width="18" height="13" rx="3" /><path d="M3 10h18M7 15h3" /></>,
+  person: <><circle cx="12" cy="8.5" r="3.75" /><path d="M5 20c.6-3.6 3.3-5.5 7-5.5s6.4 1.9 7 5.5" /></>,
+  plus: <path d="M12 5v14M5 12h14" />,
+  minus: <path d="M5 12h14" />,
+  scale: <><path d="M5 20h14l-1.6-9.2A2 2 0 0 0 15.4 9H8.6a2 2 0 0 0-2 1.8L5 20Z" /><circle cx="12" cy="5.5" r="2.5" /><path d="m12 13.5 1.8-1.8" /></>,
+  printer: <><path d="M7 9V3.5h10V9" /><rect x="3.5" y="9" width="17" height="8" rx="2.5" /><path d="M7 14.5h10v6H7z" /></>,
+  trash: <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.9 12.1a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4L17.5 7" />,
+  checkCircle: <><circle cx="12" cy="12" r="9" /><path d="m8 12.5 2.8 2.8L16.5 9.5" /></>,
+  cloudOff: <><path d="M3 3l18 18" /><path d="M8.5 7.4A6 6 0 0 1 17.6 11a4 4 0 0 1 2.6 6.4M16 18H7a4.5 4.5 0 0 1-1.8-8.6" /></>,
+  link: <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.7l1-1" />,
 } satisfies Record<string, JSX.Element>;
 
 export type IconName = keyof typeof PATHS;
