@@ -11,6 +11,7 @@ import { addPayment, cashSuggestions, type Payment, paymentState } from "../sale
 import type { Pricing } from "../sale/pricing";
 import { usePos } from "../state";
 import { enqueueSale } from "../sync/outbox";
+import { Icon } from "../ui/Icon";
 
 /** What a sale on credit prints: the customer and the balances. */
 export interface CreditTicket {
@@ -133,7 +134,7 @@ export function PayScreen({ cart, pricing, onBack, onPaid }: {
               <div class="list-col-grow">{payment.method.name}</div>
               <div>{formatMoney(payment.amount, currency)}</div>
               <button class="btn btn-ghost btn-xs" aria-label="Quitar pago"
-                onClick={() => setPayments(payments.filter((_, i) => i !== index))}>✕</button>
+                onClick={() => setPayments(payments.filter((_, i) => i !== index))}><Icon name="close" size={18} /></button>
             </li>
           ))}
         </ul>

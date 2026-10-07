@@ -7,7 +7,7 @@ describe("PIN from the keyboard", () => {
     expect(pinKey({ key: "7", code: "Digit7" })).toBe("7");
     expect(pinKey({ key: "7", code: "Numpad7" })).toBe("7");
     expect(pinKey({ key: "Home", code: "Numpad7" })).toBe("7");
-    expect(pinKey({ key: "Backspace", code: "Backspace" })).toBe("⌫");
+    expect(pinKey({ key: "Backspace", code: "Backspace" })).toBe("Backspace");
     expect(pinKey({ key: "a", code: "KeyA" })).toBeNull();
     expect(pinKey({ key: "Enter", code: "NumpadEnter" })).toBeNull();
   });

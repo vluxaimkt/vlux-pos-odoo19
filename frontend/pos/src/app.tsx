@@ -26,6 +26,7 @@ import { type AccessContext, authorizersFor, canOpen, isAvailable, type ModuleDe
 import { syncFeed } from "./sync/catalog";
 import { flushOutbox } from "./sync/outbox";
 import { renewIfDue } from "./sync/token";
+import { Icon } from "./ui/Icon";
 
 const META_REGISTER_STATE = "register_state";
 const CATALOG_EVERY_MS = 5 * 60_000;
@@ -341,17 +342,19 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
 
   return (
     <PosContext.Provider value={context}>
-      <div class="min-h-screen flex bg-base-200">
+      <div class="min-h-screen flex app-backdrop">
         {!locked && (
           <Sidebar view={view} access={access} status={status} open={(def) => void open(def)} person={employee}
             drawer={drawer} onDrawer={setDrawer} authorization={authorization} />
         )}
         <div class="flex-1 min-w-0 flex flex-col">
           {!locked && (
-            <div class="lg:hidden navbar bg-base-100 shadow-sm print:hidden">
-              <button class="btn btn-ghost btn-square" aria-label="Abrir menú" onClick={() => setDrawer(true)}>☰</button>
-              <span class="font-bold flex-1">{moduleById(view).label}</span>
-              <span class={`badge ${online ? "badge-success" : "badge-neutral"}`}>{online ? "En línea" : "Sin internet"}</span>
+            <div class="lg:hidden glass sticky top-0 z-30 h-14 px-2 flex items-center gap-1 rounded-none border-x-0 border-t-0 print:hidden">
+              <button class="btn btn-ghost btn-square text-primary" aria-label="Abrir menú" onClick={() => setDrawer(true)}>
+                <Icon name="menu" />
+              </button>
+              <span class="font-semibold flex-1 tracking-tight">{moduleById(view).label}</span>
+              <span class={`pill ${online ? "pill-ok" : ""}`}>{online ? "En línea" : "Sin internet"}</span>
             </div>
           )}
           {locked && <TopBar status={status} />}
@@ -387,51 +390,67 @@ function Sidebar({ view, access, status, open, drawer, onDrawer, person, authori
   const authorizedBy = authorization?.employee ?? null;
   return (
     <>
-      {drawer && <button class="fixed inset-0 bg-black/40 z-30 lg:hidden" aria-label="Cerrar menú" onClick={() => onDrawer(false)} />}
-      <aside class={`print:hidden bg-base-100 border-r border-base-300 w-64 shrink-0 flex-col h-screen z-40
-        ${drawer ? "flex fixed inset-y-0 left-0 shadow-2xl" : "hidden"} lg:flex lg:sticky lg:top-0 lg:shadow-none`} aria-label="Módulos">
-        <div class="p-3 border-b border-base-300">
-          <div class="font-bold leading-tight">{setup.register.name}</div>
-          <div class="text-xs opacity-60">{setup.store.company.name}</div>
-          <div class="flex flex-wrap gap-1 mt-2">
-            <span class={`badge badge-sm ${online ? "badge-success" : "badge-neutral"}`}>{online ? "En línea" : "Sin internet"}</span>
-            {status.pending > 0 && <span class="badge badge-sm badge-warning">{status.pending} por enviar</span>}
-            {status.attention > 0 && <span class="badge badge-sm badge-error">{status.attention} por revisar</span>}
-            {status.syncing && <span class="loading loading-dots loading-xs" aria-label="Sincronizando" />}
+      <button class={`fixed inset-0 z-30 lg:hidden bg-black/30 transition-opacity duration-300 ${drawer ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        style={{ backdropFilter: "blur(4px)" }} tabIndex={-1} aria-label="Cerrar menú" onClick={() => onDrawer(false)} />
+      <aside class={`glass print:hidden w-72 shrink-0 flex flex-col h-screen z-40 rounded-none border-y-0 border-l-0
+        fixed inset-y-0 left-0 transition-[transform,visibility] duration-300 [transition-timing-function:cubic-bezier(0.4,0,0.2,1.4)]
+        ${drawer ? "visible translate-x-0 shadow-2xl" : "invisible -translate-x-full"}
+        lg:visible lg:translate-x-0 lg:sticky lg:top-0 lg:shadow-none`} aria-label="Módulos">
+        <div class="px-4 pt-6 pb-4 flex flex-col gap-3">
+          <div class="flex items-center gap-3">
+            <img src="/vlux_pos_app/static/img/icon-192.png" alt="" width={40} height={40} class="rounded-[12px] shadow-sm" />
+            <div class="min-w-0">
+              <div class="font-semibold leading-tight truncate">{setup.register.name}</div>
+              <div class="text-xs text-[var(--label-secondary)] truncate">{setup.store.company.name}</div>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class={`pill ${online ? "pill-ok" : ""}`}>{online ? "En línea" : "Sin internet"}</span>
+            {status.pending > 0 && <span class="pill pill-warn">{status.pending} por enviar</span>}
+            {status.attention > 0 && <span class="pill pill-bad">{status.attention} por revisar</span>}
+            {status.syncing && <span class="loading loading-dots loading-xs text-primary" aria-label="Sincronizando" />}
           </div>
         </div>
-        <nav class="flex-1 overflow-y-auto p-2">
-          <ul class="menu w-full gap-1">
+        <nav class="flex-1 overflow-y-auto px-3 py-1">
+          <ul class="flex flex-col gap-1">
             {MODULES.filter((def) => isAvailable(def, access)).map((def) => {
               const disabled = !!def.needsSession && !access.sessionOpen;
               const lockedModule = !disabled && !canOpen(def, person, access) && authorization?.purpose !== def.id;
               return (
                 <li key={def.id}>
-                  <button class={`flex items-center gap-2 ${view === def.id ? "menu-active" : ""}`} disabled={disabled}
+                  <button class="nav-item" disabled={disabled}
                     aria-current={view === def.id ? "page" : undefined}
                     title={disabled ? "Abre la caja primero" : lockedModule ? "Pide el PIN de alguien con permiso" : undefined}
                     onClick={() => open(def)}>
-                    <span aria-hidden="true">{def.icon}</span>
+                    <Icon name={def.icon} size={22} />
                     <span class="flex-1 text-left">{def.label}</span>
-                    {lockedModule && <span aria-label="Requiere autorización">🔒</span>}
-                    <kbd class="kbd kbd-xs opacity-60">{def.key}</kbd>
+                    {lockedModule && <Icon name="lock" size={16} class="opacity-60" />}
+                    <span class="keycap" aria-hidden="true">{def.key}</span>
                   </button>
                 </li>
               );
             })}
           </ul>
         </nav>
-        <div class="p-3 border-t border-base-300 flex flex-col gap-1">
+        <div class="p-3 border-t border-[var(--hairline)] flex flex-col gap-2">
           {person && (
-            <div class="text-sm">
-              <span class="opacity-60">En caja:</span> <strong>{person.name}</strong>
-              {authorizedBy && <div class="text-xs text-warning">Autorizó {authorizedBy.name} (sólo este módulo)</div>}
+            <div class="flex items-center gap-3 px-1">
+              <span class="avatar-disc w-10 h-10 text-base" data-role={person.role}>{(person.name.trim()[0] ?? "?").toUpperCase()}</span>
+              <div class="min-w-0 flex-1">
+                <div class="font-semibold leading-tight truncate">{person.name}</div>
+                <div class="text-xs text-[var(--label-secondary)]">{authorizedBy ? `Autorizó ${authorizedBy.name} (sólo este módulo)` : person.role === "manager" ? "Encargado" : "Cajero"}</div>
+              </div>
+              <button class="btn btn-ghost btn-square text-primary" aria-label="Cambiar de empleado / bloquear" title="Cambiar de empleado / bloquear"
+                onClick={() => setEmployee(null)}>
+                <Icon name="lock" size={22} />
+              </button>
             </div>
           )}
-          {person && <button class="btn btn-sm" onClick={() => setEmployee(null)}>Cambiar de empleado / bloquear</button>}
-          <button class="btn btn-ghost btn-xs opacity-70" onClick={() => {
+          <button class="btn btn-ghost btn-sm justify-start text-[var(--label-secondary)] font-normal" onClick={() => {
             if (confirm("¿Desvincular este equipo? Se borran de este equipo el token, el catálogo, los clientes y los empleados. Las ventas por enviar se conservan.")) void forget();
-          }}>Desvincular equipo</button>
+          }}>
+            <Icon name="link" size={16} /> Desvincular equipo
+          </button>
         </div>
       </aside>
     </>
@@ -442,23 +461,24 @@ function Sidebar({ view, access, status, open, drawer, onDrawer, person, authori
 function TopBar({ status }: { status: { syncing: boolean; pending: number } }) {
   const { setup, online } = usePos();
   return (
-    <header class="navbar bg-base-100 shadow-sm gap-2 print:hidden">
-      <div class="flex-1 flex flex-col items-start">
-        <span class="font-bold">{setup.register.name}</span>
-        <span class="text-xs opacity-60">{setup.store.company.name}</span>
+    <header class="glass sticky top-0 z-30 h-[72px] px-6 flex items-center gap-3 rounded-none border-x-0 border-t-0 print:hidden">
+      <img src="/vlux_pos_app/static/img/icon-192.png" alt="" width={40} height={40} class="rounded-[12px] shadow-sm" />
+      <div class="flex-1 min-w-0 flex flex-col items-start">
+        <span class="font-semibold leading-tight truncate max-w-full">{setup.register.name}</span>
+        <span class="text-xs text-[var(--label-secondary)] truncate max-w-full">{setup.store.company.name}</span>
       </div>
-      {status.pending > 0 && <span class="badge badge-warning">{status.pending} por enviar</span>}
-      {status.syncing && <span class="loading loading-dots loading-sm" aria-label="Sincronizando" />}
-      <span class={`badge ${online ? "badge-success" : "badge-neutral"}`}>{online ? "En línea" : "Sin internet"}</span>
+      {status.pending > 0 && <span class="pill pill-warn">{status.pending} por enviar</span>}
+      {status.syncing && <span class="loading loading-dots loading-sm text-primary" aria-label="Sincronizando" />}
+      <span class={`pill ${online ? "pill-ok" : ""}`}>{online ? "En línea" : "Sin internet"}</span>
     </header>
   );
 }
 
 function Splash({ text = "Cargando…" }: { text?: string }) {
   return (
-    <div class="min-h-[60vh] grid place-items-center gap-2 text-center p-4">
-      <span class="loading loading-spinner loading-lg" />
-      <p class="opacity-70">{text}</p>
+    <div class="min-h-[60vh] grid place-items-center content-center gap-4 text-center p-4 rise">
+      <span class="loading loading-spinner loading-lg text-primary" />
+      <p class="text-[var(--label-secondary)]">{text}</p>
     </div>
   );
 }

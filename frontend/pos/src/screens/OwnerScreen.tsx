@@ -5,6 +5,7 @@ import { formatDateTime } from "../lib/locale";
 import { formatMoney } from "../lib/money";
 import { usePos } from "../state";
 import { explain } from "./SetupScreen";
+import { Icon } from "../ui/Icon";
 
 const SECTION_LABELS: Record<string, string> = {
   dashboard: "Resumen del día",
@@ -40,7 +41,7 @@ export function OwnerScreen({ onClose, onOptionsSaved }: { onClose: () => void; 
   return (
     <section class="p-4 max-w-5xl mx-auto flex flex-col gap-3">
       <div class="flex items-center gap-2">
-        <h2 class="text-xl flex-1">👑 Dueño</h2>
+        <h2 class="text-xl flex-1 flex items-center gap-2"><Icon name="crown" /> Dueño</h2>
         <button class="btn btn-ghost btn-sm" onClick={onClose}>Volver a vender</button>
       </div>
       {!online && <div role="alert" class="alert alert-warning">El módulo del dueño necesita internet.</div>}

@@ -1,13 +1,456 @@
+/* Apple UI Design System – Verified: 8pt Grid, SF Pro Typography, Material-Depth, Natural Spring Motion */
 @import "tailwindcss" source(none);
 @source "./";
 @source "../index.html";
 @plugin "daisyui" {
-  themes: light --default, dark --prefersdark;
+  themes: false;
+}
+
+/*
+ * Two daisyUI themes carry the whole look (every screen inherits it): Apple's
+ * system colors, 12 px controls, 20 px cards, no noise, no heavy depth.
+ * Hex on purpose: the build must be identical on Windows and Linux.
+ */
+@plugin "daisyui/theme" {
+  name: "vlux-light";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+  --color-base-100: #ffffff;
+  --color-base-200: #f2f2f7;
+  --color-base-300: #e5e5ea;
+  --color-base-content: #1c1c1e;
+  --color-primary: #007aff;
+  --color-primary-content: #ffffff;
+  --color-secondary: #5856d6;
+  --color-secondary-content: #ffffff;
+  --color-accent: #af52de;
+  --color-accent-content: #ffffff;
+  --color-neutral: #3a3a3c;
+  --color-neutral-content: #f2f2f7;
+  --color-info: #0071a4;
+  --color-info-content: #ffffff;
+  --color-success: #248a3d;
+  --color-success-content: #ffffff;
+  --color-warning: #ff9f0a;
+  --color-warning-content: #1c1c1e;
+  --color-error: #d70015;
+  --color-error-content: #ffffff;
+  --radius-selector: 0.5rem;
+  --radius-field: 0.75rem;
+  --radius-box: 1.25rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "vlux-dark";
+  default: false;
+  prefersdark: true;
+  color-scheme: dark;
+  --color-base-100: #1c1c1e;
+  --color-base-200: #000000;
+  --color-base-300: #2c2c2e;
+  --color-base-content: #f5f5f7;
+  --color-primary: #0a84ff;
+  --color-primary-content: #ffffff;
+  --color-secondary: #5e5ce6;
+  --color-secondary-content: #ffffff;
+  --color-accent: #bf5af2;
+  --color-accent-content: #ffffff;
+  --color-neutral: #48484a;
+  --color-neutral-content: #f5f5f7;
+  --color-info: #64d2ff;
+  --color-info-content: #1c1c1e;
+  --color-success: #30d158;
+  --color-success-content: #1c1c1e;
+  --color-warning: #ff9f0a;
+  --color-warning-content: #1c1c1e;
+  --color-error: #ff6961;
+  --color-error-content: #1c1c1e;
+  --radius-selector: 0.5rem;
+  --radius-field: 0.75rem;
+  --radius-box: 1.25rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+:root {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+  --ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-spring: cubic-bezier(0.4, 0, 0.2, 1.4);
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(0, 0, 0, 0.1);
+  --hairline: rgba(60, 60, 67, 0.18);
+  --fill: rgba(120, 120, 128, 0.12);
+  --fill-strong: rgba(120, 120, 128, 0.2);
+  --label-secondary: rgba(60, 60, 67, 0.66);
+  --glow-a: rgba(0, 122, 255, 0.1);
+  --glow-b: rgba(175, 82, 222, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --glow-a: rgba(10, 132, 255, 0.28);
+    --glow-b: rgba(191, 90, 242, 0.22);
+    --glass-bg: rgba(28, 28, 30, 0.7);
+    --glass-border: rgba(255, 255, 255, 0.15);
+    --hairline: rgba(84, 84, 88, 0.6);
+    --fill: rgba(120, 120, 128, 0.24);
+    --fill-strong: rgba(120, 120, 128, 0.36);
+    --label-secondary: rgba(235, 235, 245, 0.62);
+  }
 }
 
 html,
 body {
   overscroll-behavior: none;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: 1rem;
+  line-height: 1.5;
+  letter-spacing: -0.011em;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+.card-title {
+  letter-spacing: -0.022em;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+/* A soft wash behind everything, so the glass has something to blur. */
+.app-backdrop {
+  background-color: var(--color-base-200);
+  background-image:
+    radial-gradient(60rem 40rem at 0% 0%, var(--glow-a), transparent 60%),
+    radial-gradient(48rem 36rem at 100% 100%, var(--glow-b), transparent 60%);
+  background-attachment: fixed;
+}
+
+/* Materials: translucent, blurred, hairline edge. */
+.glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 0.5px solid var(--glass-border);
+}
+
+/* Controls: 44 px targets, 12 px corners, the iOS tap. */
+.btn {
+  min-height: 2.75rem;
+  border-radius: 0.75rem;
+  font-weight: 500;
+  letter-spacing: -0.011em;
+  transition:
+    transform 300ms var(--ease-standard),
+    box-shadow 300ms var(--ease-standard),
+    background-color 300ms var(--ease-standard);
+}
+
+.btn:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+.btn-primary:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.btn-sm,
+.btn-xs {
+  min-height: 2rem;
+}
+
+.btn:focus-visible,
+.tap:focus-visible,
+.input:focus-visible,
+.select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.5);
+}
+
+.input,
+.select,
+.textarea {
+  min-height: 2.75rem;
+  border-color: transparent;
+  background-color: var(--fill);
+  transition: box-shadow 300ms var(--ease-standard);
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.5);
+}
+
+.card,
+.modal-box {
+  border: 0.5px solid var(--glass-border);
+}
+
+.modal-box {
+  animation: pop-in 300ms var(--ease-spring) both;
+}
+
+.modal::backdrop,
+.modal {
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.tap {
+  transition:
+    transform 300ms var(--ease-standard),
+    background-color 300ms var(--ease-standard),
+    box-shadow 300ms var(--ease-standard);
+}
+
+.tap:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+/* Navigation: sidebar items. */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0 0.75rem;
+  border-radius: 0.75rem;
+  color: var(--color-base-content);
+  text-align: left;
+  font-weight: 500;
+  transition:
+    transform 300ms var(--ease-standard),
+    background-color 300ms var(--ease-standard),
+    color 300ms var(--ease-standard);
+}
+
+.nav-item:hover:not(:disabled):not([aria-current="page"]) {
+  background: var(--fill);
+}
+
+.nav-item:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+.nav-item[aria-current="page"] {
+  background: var(--color-primary);
+  color: var(--color-primary-content);
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.28);
+}
+
+.nav-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nav-item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.5);
+}
+
+.keycap {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.5rem;
+  background: var(--fill);
+  color: var(--label-secondary);
+}
+
+[aria-current="page"] > .keycap {
+  background: rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Status pills. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 1.5rem;
+  padding: 0 0.5rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--fill);
+  color: var(--label-secondary);
+}
+
+.pill::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: currentColor;
+}
+
+.pill-ok {
+  color: var(--color-success);
+}
+
+.pill-warn {
+  color: #b25000;
+}
+
+.pill-bad {
+  color: var(--color-error);
+}
+
+@media (prefers-color-scheme: dark) {
+  .pill-warn {
+    color: var(--color-warning);
+  }
+}
+
+/* PIN: round keys and four dots, as on the iOS lock screen. */
+.pin-key {
+  width: 4rem;
+  height: 4rem;
+  border-radius: 9999px;
+  display: grid;
+  place-items: center;
+  font-size: 1.75rem;
+  font-weight: 300;
+  letter-spacing: 0;
+  background: var(--fill);
+  color: var(--color-base-content);
+  transition:
+    transform 300ms var(--ease-standard),
+    background-color 300ms var(--ease-standard);
+}
+
+.pin-key:hover:not(:disabled) {
+  background: var(--fill-strong);
+}
+
+.pin-key:not(:disabled):active {
+  transform: scale(0.92);
+  background: var(--fill-strong);
+}
+
+.pin-key:disabled {
+  opacity: 0.4;
+}
+
+.pin-key:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.5);
+}
+
+.pin-key-quiet {
+  background: transparent;
+  font-size: 1.5rem;
+}
+
+.pin-key-quiet:hover:not(:disabled) {
+  background: var(--fill);
+}
+
+.pin-dot {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  border: 1.5px solid var(--color-base-content);
+  opacity: 0.55;
+  transition:
+    transform 300ms var(--ease-spring),
+    background-color 300ms var(--ease-standard),
+    opacity 300ms var(--ease-standard);
+}
+
+.pin-dot[data-filled="true"] {
+  background: var(--color-base-content);
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.shake {
+  animation: shake 400ms var(--ease-standard) both;
+}
+
+.avatar-disc {
+  display: grid;
+  place-items: center;
+  border-radius: 9999px;
+  color: #ffffff;
+  font-weight: 600;
+  letter-spacing: -0.022em;
+  background: linear-gradient(180deg, #8e8e93, #636366);
+}
+
+.avatar-disc[data-role="manager"] {
+  background: linear-gradient(180deg, #5ac8fa, #007aff);
+}
+
+/* Motion. */
+.rise {
+  animation: rise 500ms var(--ease-standard) both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-8px);
+  }
+  40%,
+  80% {
+    transform: translateX(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
 }
 
 /* The ticket prints alone, at 80 mm (thermal printer roll). */

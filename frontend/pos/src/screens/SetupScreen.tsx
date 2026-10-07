@@ -79,10 +79,11 @@ export function SetupScreen({ db, onReady }: { db: PosDb; onReady: (token: strin
   }
 
   return (
-    <main class="min-h-screen grid place-items-center p-4 bg-base-200">
-      <div class="card w-full max-w-md bg-base-100 shadow-xl">
-        <div class="card-body gap-4">
-          <h1 class="card-title text-2xl">VLUX POS</h1>
+    <main class="min-h-screen grid place-items-center p-4 app-backdrop">
+      <div class="card rise w-full max-w-md glass">
+        <div class="card-body gap-4 p-8">
+          <img src="/vlux_pos_app/static/img/icon-192.png" alt="" width={64} height={64} class="rounded-[16px] shadow-md" />
+          <h1 class="card-title text-3xl">VLUX POS</h1>
           {!checked ? (
             <form class="flex flex-col gap-3" onSubmit={check}>
               <p class="text-base-content/70">

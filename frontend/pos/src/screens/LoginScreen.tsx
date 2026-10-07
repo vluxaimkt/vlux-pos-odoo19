@@ -1,3 +1,4 @@
+import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 
 import { ApiError, isRetryable } from "../api/client";
@@ -6,8 +7,9 @@ import { getMeta, setMeta } from "../db/db";
 import { type GuardState, lockedFor, OPEN, recordFailure, recordSuccess } from "../lib/guard";
 import { pinMatches } from "../lib/pin";
 import { usePos } from "../state";
+import { Icon } from "../ui/Icon";
+import { BACKSPACE, PinDots, PinPad } from "../ui/Pin";
 
-const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
 const META_GUARD = "pin_guard";
 
 /** The digit a key stands for: top-row numbers and the numeric keypad (with or without Num Lock). */
@@ -15,7 +17,7 @@ export function pinKey(event: Pick<KeyboardEvent, "key" | "code">): string | nul
   if (/^[0-9]$/.test(event.key)) return event.key;
   const pad = /^Numpad([0-9])$/.exec(event.code);
   if (pad) return pad[1] ?? null;
-  if (event.key === "Backspace" || event.key === "Delete") return "⌫";
+  if (event.key === "Backspace" || event.key === "Delete") return BACKSPACE;
   return null;
 }
 
@@ -115,7 +117,7 @@ export function LoginScreen() {
   function press(key: string) {
     if (waitMs) return;
     setError(null);
-    if (key === "⌫") return setPin((value) => value.slice(0, -1));
+    if (key === BACKSPACE) return setPin((value) => value.slice(0, -1));
     if (!key) return;
     const next = (pin + key).slice(0, 8);
     setPin(next);
@@ -124,9 +126,11 @@ export function LoginScreen() {
 
   if (!employees.length) {
     return (
-      <div role="alert" class="alert alert-warning m-4">
-        No hay empleados para esta caja todavía. Conéctate a internet para descargarlos.
-      </div>
+      <Stage>
+        <div role="alert" class="alert alert-warning">
+          No hay empleados para esta caja todavía. Conéctate a internet para descargarlos.
+        </div>
+      </Stage>
     );
   }
 
@@ -146,46 +150,62 @@ export function LoginScreen() {
 
   if (!chosen) {
     return (
-      <section class="p-4 flex flex-col gap-3">
-        <h2 class="text-xl">¿Quién está en la caja?</h2>
-        {error && <div role="alert" class="alert alert-warning">{error}</div>}
-        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {employees.map((employee) => (
-            <button key={employee.id}
-              class="btn btn-lg btn-outline h-auto py-6 flex-col gap-2 border-2 bg-base-100 hover:btn-primary"
-              onClick={() => pick(employee)}>
-              <span class="text-lg">{employee.name}</span>
-              <span class={`badge ${employee.role === "manager" ? "badge-primary" : "badge-neutral"}`}>
-                {employee.role === "manager" ? "Encargado" : "Cajero"}
-              </span>
-            </button>
-          ))}
+      <Stage wide>
+        <div class="rise flex flex-col items-center gap-8 w-full">
+          <header class="text-center">
+            <h1 class="text-3xl">¿Quién está en la caja?</h1>
+            <p class="mt-2 text-[var(--label-secondary)]">Elige tu nombre para empezar.</p>
+          </header>
+          {error && <div role="alert" class="alert alert-warning max-w-xl">{error}</div>}
+          <div class="flex flex-wrap justify-center gap-4 w-full">
+            {employees.map((employee, index) => (
+              <button key={employee.id} type="button"
+                class="tap glass rounded-[20px] w-40 py-6 px-4 flex flex-col items-center gap-3 hover:scale-[1.02] hover:shadow-lg rise"
+                style={{ animationDelay: `${index * 50}ms` }}
+                onClick={() => pick(employee)}>
+                <span class="avatar-disc w-16 h-16 text-2xl" data-role={employee.role}>{initial(employee.name)}</span>
+                <span class="font-semibold leading-tight text-center break-words w-full">{employee.name}</span>
+                <span class="text-xs text-[var(--label-secondary)]">{employee.role === "manager" ? "Encargado" : "Cajero"}</span>
+              </button>
+            ))}
+          </div>
         </div>
-      </section>
+      </Stage>
     );
   }
 
   return (
-    <section class="p-4 flex flex-col items-center gap-4">
-      <h2 class="text-xl">{chosen.name}</h2>
-      <div class="text-3xl tracking-[0.5em] h-10" aria-label="PIN">{"•".repeat(pin.length)}</div>
-      {waitMs > 0 && (
-        <div role="alert" class="alert alert-warning">
-          Demasiados intentos. Espera {Math.ceil(waitMs / 1000)} s.
+    <Stage>
+      <div class="rise glass rounded-[20px] w-full max-w-sm p-6 flex flex-col items-center gap-4">
+        <span class="avatar-disc w-16 h-16 text-2xl" data-role={chosen.role}>{initial(chosen.name)}</span>
+        <div class="text-center">
+          <h1 class="text-2xl">{chosen.name}</h1>
+          <p class="text-sm text-[var(--label-secondary)]">Escribe tu PIN</p>
         </div>
-      )}
-      {error && <div role="alert" class="alert alert-error">{error}</div>}
-      <p class="text-sm opacity-60">Puedes escribirlo con el teclado o el teclado numérico.</p>
-      <div class="grid grid-cols-3 gap-2 w-64">
-        {KEYS.map((key, index) =>
-          key ? (
-            <button key={index} class="btn btn-lg" disabled={waitMs > 0} onClick={() => press(key)}>{key}</button>
-          ) : (
-            <span key={index} />
-          ),
-        )}
+        <PinDots length={pin.length} shakeKey={error} />
+        <div class="min-h-5 text-sm text-center" aria-live="polite">
+          {waitMs > 0
+            ? <span class="text-warning">Demasiados intentos. Espera {Math.ceil(waitMs / 1000)} s.</span>
+            : error && <span class="text-error" role="alert">{error}</span>}
+        </div>
+        <PinPad disabled={waitMs > 0} onPress={press} />
+        <button class="btn btn-ghost text-primary" onClick={() => { setChosen(null); setPin(""); }}>
+          <Icon name="back" size={20} /> Cambiar de empleado
+        </button>
       </div>
-      <button class="btn btn-ghost" onClick={() => { setChosen(null); setPin(""); }}>Cambiar de empleado</button>
-    </section>
+    </Stage>
+  );
+}
+
+function initial(name: string): string {
+  return (name.trim()[0] ?? "?").toUpperCase();
+}
+
+/** Full-height stage under the lock screen: a soft wash with the content centered. */
+function Stage({ children, wide = false }: { children: ComponentChildren; wide?: boolean }) {
+  return (
+    <div class="min-h-[calc(100vh-4.5rem)] grid place-items-center p-4 sm:p-8">
+      <div class={`w-full flex justify-center ${wide ? "max-w-4xl" : "max-w-sm"}`}>{children}</div>
+    </div>
   );
 }
