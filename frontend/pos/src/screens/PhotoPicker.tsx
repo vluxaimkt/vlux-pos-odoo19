@@ -4,6 +4,7 @@ import { downsizeImage } from "../lib/photo";
 import { usePos } from "../state";
 import { usePhonePairing } from "./PhoneScanner";
 import { explain } from "./SetupScreen";
+import { Icon } from "../ui/Icon";
 
 const POLL_MS = 1500;
 const WAIT_MS = 10 * 60 * 1000;
@@ -106,14 +107,14 @@ export function PhotoPicker({ value, onChange, barcode, label, canRemove = false
       ) : (
         <div class="flex flex-wrap gap-2">
           <input ref={input} type="file" accept="image/*" capture="environment" class="hidden" onChange={() => void picked()} />
-          <button type="button" class="btn btn-sm" onClick={() => input.current?.click()}>📷 Foto con este equipo</button>
+          <button type="button" class="btn btn-sm" onClick={() => input.current?.click()}><Icon name="camera" size={18} /> Foto con este equipo</button>
           {pairing && (
-            <button type="button" class="btn btn-sm" disabled={!online} onClick={() => void askPhone()}>📱 Tomar con el celular</button>
+            <button type="button" class="btn btn-sm" disabled={!online} onClick={() => void askPhone()}><Icon name="phone" size={18} /> Tomar con el celular</button>
           )}
           {value && canRemove && <button type="button" class="btn btn-sm btn-ghost" onClick={() => onChange(null)}>Quitar foto</button>}
         </div>
       )}
-      {!pairing && <p class="text-xs opacity-60">Para tomarla con el celular, vincúlalo primero con "📱 Escáner del celular".</p>}
+      {!pairing && <p class="text-xs opacity-60">Para tomarla con el celular, vincúlalo primero con "Escáner del celular".</p>}
       {error && <div role="alert" class="alert alert-error text-sm">{error}</div>}
     </fieldset>
   );

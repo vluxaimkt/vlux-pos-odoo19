@@ -7,6 +7,7 @@ import { formatMoney } from "../lib/money";
 import { type ClosingCount, closingRequest, countClosing } from "../sale/closing";
 import { usePos } from "../state";
 import { explain } from "./SetupScreen";
+import { Icon } from "../ui/Icon";
 
 type Done = { summary: ClosingSummary; count: ClosingCount; closedAt: Date; notes: string };
 
@@ -192,7 +193,7 @@ function CreditDetail({ credit, money }: { credit: CreditSection; money: (n: num
         <div class="font-semibold">Fiado (no entra al cajón)</div>
         {credit.sales.map((row) => (
           <div key={row.reference} class="flex justify-between text-sm gap-2">
-            <span class="truncate">{row.customer} <span class="opacity-60">· {row.reference}</span>{row.flagged && " ⚠"}</span>
+            <span class="truncate">{row.customer} <span class="opacity-60">· {row.reference}</span>{row.flagged && <span title="Revisar" aria-label="Revisar"><Icon name="warning" size={16} class="inline ml-2 text-warning align-[-2px]" /></span>}</span>
             <span>{money(row.amount)}</span>
           </div>
         ))}

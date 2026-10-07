@@ -21,6 +21,7 @@ import { QuickProductDialog } from "./QuickProductDialog";
 import { WeighDialog } from "./WeighDialog";
 import { type ScanOutcome } from "../input/sources";
 import { PhoneScannerButton, usePhoneScanner } from "./PhoneScanner";
+import { Icon } from "../ui/Icon";
 
 const newId = () => crypto.randomUUID();
 
@@ -247,7 +248,7 @@ export function SellScreen() {
           <div role="alert" class="alert alert-warning">
             <span class="flex-1">{notice}</span>
             {unknown && (canCreate || canAskCreate) && (
-              <button class="btn btn-sm" onClick={() => void startCreate(unknown)}>{canCreate ? "Dar de alta" : "🔒 Dar de alta"}</button>
+              <button class="btn btn-sm" onClick={() => void startCreate(unknown)}>{!canCreate && <Icon name="lock" size={16} />}Dar de alta</button>
             )}
           </div>
         )}
@@ -272,7 +273,7 @@ export function SellScreen() {
               <span class="flex-1 opacity-70">Sin cliente</span>
             )}
             <button class="btn btn-xs" onClick={() => setStage({ name: "customer" })}>{cart.customer ? "Cambiar" : "Elegir cliente"}</button>
-            {cart.customer && <button class="btn btn-xs btn-ghost" aria-label="Quitar cliente" onClick={() => update(setCustomer(cart, null))}>✕</button>}
+            {cart.customer && <button class="btn btn-xs btn-ghost" aria-label="Quitar cliente" onClick={() => update(setCustomer(cart, null))}><Icon name="close" size={16} /></button>}
           </div>
           {!cart.lines.length && <p class="opacity-60">Escanea un producto para empezar.</p>}
           <ul class="flex flex-col gap-2 max-h-[55vh] overflow-y-auto">
@@ -296,7 +297,7 @@ export function SellScreen() {
                     <button class="btn btn-sm join-item" aria-label="Más" onClick={() => update(setQty(cart, line.uuid, line.qty + 1))}>+</button>
                   </div>
                 )}
-                <button class="btn btn-ghost btn-sm" aria-label="Quitar" onClick={() => update(removeLine(cart, line.uuid))}>✕</button>
+                <button class="btn btn-ghost btn-sm" aria-label="Quitar" onClick={() => update(removeLine(cart, line.uuid))}><Icon name="close" size={18} /></button>
               </li>
             ))}
           </ul>

@@ -7,6 +7,7 @@ import { formatMoney } from "../lib/money";
 import { usePos } from "../state";
 import { productImageUrl } from "../sync/images";
 import { ProductEditDialog } from "./ProductEditDialog";
+import { Icon } from "../ui/Icon";
 
 const META_CATEGORIES = "pos-categories";
 
@@ -181,7 +182,7 @@ function ProductInfo({ product, currency, onAdd, onClose, onEdit, editLocked }: 
         </div>
         <div class="modal-action">
           <button class="btn" onClick={onClose}>Cerrar</button>
-          {onEdit && <button class="btn" onClick={() => onEdit(url)}>{editLocked ? "🔒 Editar" : "Editar"}</button>}
+          {onEdit && <button class="btn" onClick={() => onEdit(url)}>{editLocked && <Icon name="lock" size={18} />}Editar</button>}
           <button class="btn btn-primary" onClick={onAdd}>Agregar</button>
         </div>
       </div>

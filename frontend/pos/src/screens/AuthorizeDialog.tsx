@@ -4,7 +4,7 @@ import type { Employee } from "../api/types";
 import { explain } from "./SetupScreen";
 import { pinKey } from "./LoginScreen";
 import { Icon } from "../ui/Icon";
-import { PinDots, PinPad } from "../ui/Pin";
+import { BACKSPACE, PinDots, PinPad } from "../ui/Pin";
 
 /**
  * "Ask someone allowed": the module is locked for the person at the register,
@@ -39,7 +39,7 @@ export function AuthorizeDialog({ title, authorizers, onAuthorize, onCancel }: {
   function press(key: string) {
     if (busy || !key) return;
     setError(null);
-    if (key === "⌫") return setPin((value) => value.slice(0, -1));
+    if (key === BACKSPACE) return setPin((value) => value.slice(0, -1));
     const next = (pin + key).slice(0, 8);
     setPin(next);
     if (next.length >= 4) void submit(next);

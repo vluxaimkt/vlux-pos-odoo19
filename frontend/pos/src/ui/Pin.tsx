@@ -1,6 +1,9 @@
 import { Icon } from "./Icon";
 
-const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
+/** The key that deletes the last digit (keypad and keyboard). */
+export const BACKSPACE = "Backspace";
+
+const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", BACKSPACE];
 
 /** Dots that fill as the PIN is typed (four at least, as on the iOS lock screen). */
 export function PinDots({ length, shakeKey }: { length: number; shakeKey?: string | null }) {
@@ -20,7 +23,7 @@ export function PinPad({ onPress, disabled = false, compact = false }: { onPress
     <div class="grid grid-cols-3 gap-4 justify-items-center">
       {KEYS.map((key, index) => {
         if (!key) return <span key={index} />;
-        const back = key === "⌫";
+        const back = key === BACKSPACE;
         return (
           <button
             key={index}

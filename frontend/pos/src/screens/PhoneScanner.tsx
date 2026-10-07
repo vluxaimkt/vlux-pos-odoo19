@@ -6,6 +6,7 @@ import { type PhonePairing, PhoneScannerSource } from "../input/phoneScanner";
 import type { ScanHandler } from "../input/sources";
 import { usePos } from "../state";
 import { explain } from "./SetupScreen";
+import { Icon } from "../ui/Icon";
 
 const META_DEVICE = "device-id";
 const META_PHONE = "phone-scanner";
@@ -142,7 +143,7 @@ export function PhoneScannerButton() {
     <>
       <button class={`btn btn-sm ${pairing ? "btn-success" : "btn-ghost"}`} disabled={busy || (!online && !pairing)}
         onClick={() => void open()} title="Usar un celular como escáner">
-        {busy ? <span class="loading loading-spinner loading-xs" /> : pairing ? "📱 Celular vinculado" : "📱 Escáner del celular"}
+        {busy ? <span class="loading loading-spinner loading-xs" /> : <><Icon name="phone" size={18} /> {pairing ? "Celular vinculado" : "Escáner del celular"}</>}
       </button>
       {error && step.name === "closed" && <span role="alert" class="text-sm text-error ml-2">{error}</span>}
       {step.name !== "closed" && (
@@ -159,7 +160,7 @@ export function PhoneScannerButton() {
               </>
             ) : (
               <>
-                <h3 class="text-lg font-bold">Celular vinculado ✓</h3>
+                <h3 class="text-lg font-bold flex items-center gap-2">Celular vinculado <Icon name="check" class="text-success" /></h3>
                 <p>Lo que escanees con el celular entra a esta venta.</p>
                 {lastSeen && <p class="text-xs opacity-60">Última señal: {formatTime(lastSeen)}</p>}
                 <button class="btn btn-warning btn-sm" onClick={() => void unlink()}>Desvincular celular</button>

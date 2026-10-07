@@ -8,7 +8,7 @@ import { type GuardState, lockedFor, OPEN, recordFailure, recordSuccess } from "
 import { pinMatches } from "../lib/pin";
 import { usePos } from "../state";
 import { Icon } from "../ui/Icon";
-import { PinDots, PinPad } from "../ui/Pin";
+import { BACKSPACE, PinDots, PinPad } from "../ui/Pin";
 
 const META_GUARD = "pin_guard";
 
@@ -17,7 +17,7 @@ export function pinKey(event: Pick<KeyboardEvent, "key" | "code">): string | nul
   if (/^[0-9]$/.test(event.key)) return event.key;
   const pad = /^Numpad([0-9])$/.exec(event.code);
   if (pad) return pad[1] ?? null;
-  if (event.key === "Backspace" || event.key === "Delete") return "⌫";
+  if (event.key === "Backspace" || event.key === "Delete") return BACKSPACE;
   return null;
 }
 
@@ -117,7 +117,7 @@ export function LoginScreen() {
   function press(key: string) {
     if (waitMs) return;
     setError(null);
-    if (key === "⌫") return setPin((value) => value.slice(0, -1));
+    if (key === BACKSPACE) return setPin((value) => value.slice(0, -1));
     if (!key) return;
     const next = (pin + key).slice(0, 8);
     setPin(next);
