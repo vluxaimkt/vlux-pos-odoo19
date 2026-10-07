@@ -27,6 +27,7 @@ import { syncFeed } from "./sync/catalog";
 import { flushOutbox } from "./sync/outbox";
 import { renewIfDue } from "./sync/token";
 import { Icon } from "./ui/Icon";
+import { Banner } from "./ui/Page";
 
 const META_REGISTER_STATE = "register_state";
 const CATALOG_EVERY_MS = 5 * 60_000;
@@ -358,7 +359,7 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
             </div>
           )}
           {locked && <TopBar status={status} />}
-          {status.error && <div role="alert" class="alert alert-error rounded-none">{status.error}</div>}
+          {status.error && <div class="px-4 pt-4 lg:px-6 print:hidden"><Banner tone="error">{status.error}</Banner></div>}
           <main class="flex-1">{body}</main>
         </div>
         {asking && (

@@ -8,7 +8,8 @@ import { type GuardState, lockedFor, OPEN, recordFailure, recordSuccess } from "
 import { pinMatches } from "../lib/pin";
 import { usePos } from "../state";
 import { Icon } from "../ui/Icon";
-import { BACKSPACE, PinDots, PinPad } from "../ui/Pin";
+import { Banner, EmptyState } from "../ui/Page";
+import { BACKSPACE, PinDots, PinPad, usePinEntry } from "../ui/Pin";
 
 const META_GUARD = "pin_guard";
 
@@ -28,7 +29,7 @@ export function pinKey(event: Pick<KeyboardEvent, "key" | "code">): string | nul
 export function LoginScreen() {
   const { db, client, setup, online, employees, setEmployee } = usePos();
   const [chosen, setChosen] = useState<Employee | null>(null);
-  const [pin, setPin] = useState("");
+  const { pin, set: setPin, type: typeKey } = usePinEntry();
   const [error, setError] = useState<string | null>(null);
   const [guard, setGuard] = useState<GuardState>(OPEN);
   const [now, setNow] = useState(() => Date.now());
@@ -117,19 +118,16 @@ export function LoginScreen() {
   function press(key: string) {
     if (waitMs) return;
     setError(null);
-    if (key === BACKSPACE) return setPin((value) => value.slice(0, -1));
     if (!key) return;
-    const next = (pin + key).slice(0, 8);
-    setPin(next);
-    if (next.length >= 4) void submit(next);
+    const next = typeKey(key);
+    if (key !== BACKSPACE && next.length >= 4) void submit(next);
   }
 
   if (!employees.length) {
     return (
       <Stage>
-        <div role="alert" class="alert alert-warning">
-          No hay empleados para esta caja todavía. Conéctate a internet para descargarlos.
-        </div>
+        <EmptyState icon="people" title="No hay empleados para esta caja todavía"
+          hint="Conéctate a internet para descargarlos." />
       </Stage>
     );
   }
@@ -156,7 +154,7 @@ export function LoginScreen() {
             <h1 class="text-3xl">¿Quién está en la caja?</h1>
             <p class="mt-2 text-[var(--label-secondary)]">Elige tu nombre para empezar.</p>
           </header>
-          {error && <div role="alert" class="alert alert-warning max-w-xl">{error}</div>}
+          {error && <div class="max-w-xl w-full"><Banner tone="warn">{error}</Banner></div>}
           <div class="flex flex-wrap justify-center gap-4 w-full">
             {employees.map((employee, index) => (
               <button key={employee.id} type="button"

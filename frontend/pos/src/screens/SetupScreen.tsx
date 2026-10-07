@@ -5,6 +5,8 @@ import type { Me, RegisterConfig, StoreConfig } from "../api/types";
 import { type PosDb, setMeta } from "../db/db";
 import { META_SETUP, META_TOKEN, type Setup } from "../state";
 import { META_TOKEN_INFO } from "../sync/token";
+import { Icon } from "../ui/Icon";
+import { Banner, Field } from "../ui/Page";
 
 const NEEDED_SCOPES = ["system:read", "catalog:read", "orders:write", "session:manage"];
 // Tokens are URL-safe base64 with a short prefix: anything else is a paste
@@ -80,17 +82,18 @@ export function SetupScreen({ db, onReady }: { db: PosDb; onReady: (token: strin
 
   return (
     <main class="min-h-screen grid place-items-center p-4 app-backdrop">
-      <div class="card rise w-full max-w-md glass">
-        <div class="card-body gap-4 p-8">
-          <img src="/vlux_pos_app/static/img/icon-192.png" alt="" width={64} height={64} class="rounded-[16px] shadow-md" />
-          <h1 class="card-title text-3xl">VLUX POS</h1>
+      <div class="rise w-full max-w-md glass rounded-[20px] shadow-xl">
+        <div class="flex flex-col gap-6 p-8">
+          <div class="flex flex-col items-center gap-3 text-center">
+            <img src="/vlux_pos_app/static/img/icon-192.png" alt="" width={80} height={80} class="rounded-[20px] shadow-lg pop" />
+            <h1 class="text-3xl">VLUX POS</h1>
+            <p class="label-2">{checked ? "Confirma la caja de este equipo." : "Vincula este equipo con una caja de tu tienda."}</p>
+          </div>
           {!checked ? (
-            <form class="flex flex-col gap-3" onSubmit={check}>
-              <p class="text-base-content/70">
-                Pega el token de esta caja. Se emite en Odoo: Ajustes → API VLUX → Emitir token.
-              </p>
+            <form class="flex flex-col gap-4" onSubmit={check}>
+              <Field label="Token de la caja" hint="Se emite en Odoo: Ajustes → API VLUX → Emitir token.">
               <input
-                class="input w-full font-mono"
+                class="input input-lg w-full font-mono"
                 type="password"
                 autocomplete="off"
                 autocapitalize="off"
@@ -101,18 +104,25 @@ export function SetupScreen({ db, onReady }: { db: PosDb; onReady: (token: strin
                 onInput={(event) => setToken(event.currentTarget.value)}
                 required
               />
-              {error && <div role="alert" class="alert alert-error">{error}</div>}
-              <button class="btn btn-primary" type="submit" disabled={busy || !token.trim()}>
+              </Field>
+              {error && <Banner tone="error">{error}</Banner>}
+              <button class="btn btn-primary btn-xl" type="submit" disabled={busy || !token.trim()}>
                 {busy ? <span class="loading loading-spinner" /> : "Conectar"}
               </button>
             </form>
           ) : (
-            <div class="flex flex-col gap-3">
-              <p>
-                Este equipo será <strong>{checked.register.name}</strong> de {checked.store.company.name}.
-              </p>
-              <button class="btn btn-primary btn-lg" onClick={() => void confirm()}>Usar este equipo como {checked.register.name}</button>
-              <button class="btn btn-ghost" onClick={() => setChecked(null)}>Usar otro token</button>
+            <div class="flex flex-col gap-4">
+              <div class="grouped">
+                <div class="row">
+                  <span class="avatar-disc w-10 h-10 shrink-0" data-role="manager" aria-hidden="true"><Icon name="cart" size={20} /></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="font-semibold truncate">{checked.register.name}</div>
+                    <div class="text-xs label-2 truncate">{checked.store.company.name}</div>
+                  </div>
+                </div>
+              </div>
+              <button class="btn btn-primary btn-xl" onClick={() => void confirm()}>Usar este equipo como {checked.register.name}</button>
+              <button class="btn btn-ghost text-primary" onClick={() => setChecked(null)}>Usar otro token</button>
             </div>
           )}
         </div>
