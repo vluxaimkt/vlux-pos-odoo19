@@ -102,9 +102,12 @@ jobs:
             vlux-addons/requirements-extra.txt
 
       - name: Install system dependencies
+        # A slow apt mirror once hung this step for 10+ minutes (normally under 1):
+        # fail fast so the job can be re-run instead of waiting for the job timeout.
+        timeout-minutes: 8
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
             build-essential \
             git \
             libevent-dev \
@@ -235,9 +238,12 @@ jobs:
             vlux-addons/requirements-extra.txt
 
       - name: Install system dependencies
+        # A slow apt mirror once hung this step for 10+ minutes (normally under 1):
+        # fail fast so the job can be re-run instead of waiting for the job timeout.
+        timeout-minutes: 8
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
             build-essential \
             git \
             libevent-dev \
@@ -367,9 +373,12 @@ jobs:
             vlux-addons/requirements-extra.txt
 
       - name: Install system dependencies
+        # A slow apt mirror once hung this step for 10+ minutes (normally under 1):
+        # fail fast so the job can be re-run instead of waiting for the job timeout.
+        timeout-minutes: 8
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
             build-essential \
             git \
             libevent-dev \
