@@ -4,6 +4,8 @@ import type { CashMove } from "../api/types";
 import { formatDateTime, formatTime } from "../lib/locale";
 import { formatMoney } from "../lib/money";
 import { usePos } from "../state";
+import { Icon } from "../ui/Icon";
+import { Banner, EmptyState, Field, PageHeader, Section, Segmented, SLIP, SlipActions, Stat, SuccessHeader } from "../ui/Page";
 import { explain } from "./SetupScreen";
 
 /**
@@ -71,63 +73,66 @@ export function CashMoveScreen({ onClose }: { onClose: () => void }) {
 
   const total = (type: "in" | "out") => moves.filter((m) => m.type === type).reduce((t, m) => t + m.amount, 0);
   return (
-    <section class="p-4 max-w-2xl mx-auto flex flex-col gap-3">
-      <div class="flex items-center gap-2">
-        <h2 class="text-xl flex-1">Entradas y salidas de efectivo</h2>
-        <button class="btn btn-ghost btn-sm" onClick={onClose}>Volver a vender</button>
-      </div>
-      {!online && <div role="alert" class="alert alert-warning">Meter o sacar efectivo necesita internet.</div>}
-      <form class="card bg-base-100 shadow" onSubmit={(e) => void submit(e)}>
-        <div class="card-body gap-3">
-          <div class="join">
-            <button type="button" class={`btn join-item ${kind === "out" ? "btn-warning" : "btn-outline"}`}
-              onClick={() => { setKind("out"); setReason(""); }}>Salida (sacar)</button>
-            {canPutIn && (
-              <button type="button" class={`btn join-item ${kind === "in" ? "btn-success" : "btn-outline"}`}
-                onClick={() => { setKind("in"); setReason(""); }}>Entrada (meter)</button>
-            )}
-          </div>
-          <label class="input input-lg w-full">
-            <span class="opacity-70">$</span>
-            <input type="text" inputMode="decimal" autocomplete="off" placeholder="0.00" value={amount}
+    <section class="p-4 lg:p-8 max-w-2xl mx-auto flex flex-col gap-6 rise">
+      <PageHeader title="Entradas y salidas" subtitle="Efectivo del cajón" icon="cash" back={onClose} />
+      {!online && <Banner tone="warn">Meter o sacar efectivo necesita internet.</Banner>}
+      <form class="surface p-4 flex flex-col gap-4" onSubmit={(e) => void submit(e)}>
+        {canPutIn && (
+          <Segmented label="Tipo de movimiento" value={kind} onChange={(value) => { setKind(value); setReason(""); }}
+            options={[{ value: "out", label: "Salida (sacar)" }, { value: "in", label: "Entrada (meter)" }]} />
+        )}
+        <Field label={kind === "out" ? "¿Cuánto sale?" : "¿Cuánto entra?"}>
+          <label class="input input-lg w-full !h-16 text-3xl num">
+            <span class="label-2">$</span>
+            <input type="text" inputMode="decimal" autocomplete="off" placeholder="0.00" value={amount} aria-label="Importe"
               onInput={(e) => setAmount(e.currentTarget.value)} />
           </label>
-          <div class="flex flex-wrap gap-1">
-            {reasons[kind].map((text) => (
-              <button key={text} type="button" class="btn btn-xs" onClick={() => setReason(text)}>{text}</button>
-            ))}
-          </div>
+        </Field>
+        <Field label="Motivo">
+          {reasons[kind].length > 0 && (
+            <div class="flex flex-wrap gap-2">
+              {reasons[kind].map((text) => (
+                <button key={text} type="button" class="chip" aria-selected={reason === text} onClick={() => setReason(text)}>{text}</button>
+              ))}
+            </div>
+          )}
           <input class="input w-full" type="text" maxLength={200} placeholder="Motivo (p. ej. pago a Coca-Cola)"
             value={reason} onInput={(e) => setReason(e.currentTarget.value)} />
-          {error && <div role="alert" class="alert alert-error">{error}</div>}
-          <button class="btn btn-primary btn-lg" disabled={busy || !online}>
-            {busy ? <span class="loading loading-spinner" /> : kind === "out" ? "Registrar salida" : "Registrar entrada"}
-          </button>
-          {employee && <p class="text-xs opacity-60">Queda registrado a nombre de {employee.name} y aparece en el corte.</p>}
-        </div>
+        </Field>
+        {error && <Banner tone="error">{error}</Banner>}
+        <button class="btn btn-primary btn-xl" disabled={busy || !online}>
+          {busy ? <span class="loading loading-spinner" /> : kind === "out" ? "Registrar salida" : "Registrar entrada"}
+        </button>
+        {employee && <p class="text-xs label-2 text-center">Queda registrado a nombre de {employee.name} y aparece en el corte.</p>}
       </form>
 
-      <h3 class="font-semibold">Movimientos de este turno</h3>
-      <ul class="list bg-base-100 rounded-box">
-        {moves.map((move) => (
-          <li key={move.id} class="list-row items-center">
-            <div class="list-col-grow">
-              <div>{move.name}</div>
-              <div class="text-xs opacity-70">
-                {move.employee ?? ""}{move.date && ` · ${formatTime(move.date)}`}
-              </div>
-            </div>
-            <div class={`font-semibold ${move.type === "out" ? "text-warning" : "text-success"}`}>
-              {move.type === "out" ? "−" : "+"}{money(move.amount)}
-            </div>
-            <button class="btn btn-xs" onClick={() => setVoucher(move)}>Reimprimir</button>
-          </li>
-        ))}
-      </ul>
-      {!moves.length && online && <p class="opacity-60">Sin movimientos en este turno.</p>}
       {moves.length > 0 && (
-        <p class="text-sm opacity-70">Entradas {money(total("in"))} · Salidas {money(total("out"))}</p>
+        <div class="grid gap-4 grid-cols-2">
+          <Stat label="Entradas" value={money(total("in"))} tone="good" />
+          <Stat label="Salidas" value={money(total("out"))} tone="warn" />
+        </div>
       )}
+      {moves.length ? (
+        <Section title="Movimientos de este turno">
+          {moves.map((move) => (
+            <div key={move.id} class="row !py-3">
+              <span class="method-icon !w-9 !h-9 !rounded-[10px] shrink-0" aria-hidden="true"
+                style={{ background: move.type === "out" ? "linear-gradient(180deg, #ffb340, #ff9500)" : "linear-gradient(180deg, #34c759, #248a3d)" }}>
+                <Icon name={move.type === "out" ? "arrowUp" : "arrowDown"} size={18} />
+              </span>
+              <div class="flex-1 min-w-0">
+                <div class="font-medium truncate">{move.name}</div>
+                <div class="text-xs label-2">{move.employee ?? ""}{move.date && ` · ${formatTime(move.date)}`}</div>
+              </div>
+              <span class={`font-semibold num ${move.type === "out" ? "pill-warn" : "text-success"}`}>
+                {move.type === "out" ? "−" : "+"}{money(move.amount)}
+              </span>
+              <button class="btn btn-ghost btn-sm btn-square text-primary" aria-label="Reimprimir comprobante" title="Reimprimir"
+                onClick={() => setVoucher(move)}><Icon name="printer" size={18} /></button>
+            </div>
+          ))}
+        </Section>
+      ) : online && <EmptyState icon="cash" title="Sin movimientos en este turno" />}
     </section>
   );
 }
@@ -136,8 +141,11 @@ function CashMoveVoucher({ move, onDone }: { move: CashMove; onDone: () => void 
   const { setup } = usePos();
   const money = (n: number) => formatMoney(n, setup.store.currency);
   return (
-    <section class="p-4 flex flex-col items-center gap-4">
-      <article class="receipt bg-white text-black font-mono text-sm p-4 w-[80mm] max-w-full shadow print:shadow-none">
+    <section class="p-4 lg:p-8 flex flex-col items-center gap-6">
+      <SuccessHeader title={move.type === "out" ? "Salida registrada" : "Entrada registrada"} tone={move.type === "out" ? "warn" : "good"}>
+        <span class="num">{money(move.amount)} · {move.name}</span>
+      </SuccessHeader>
+      <article class={SLIP} style={{ animationDelay: "100ms" }}>
         <div class="text-center font-bold text-base">{move.type === "out" ? "SALIDA DE EFECTIVO" : "ENTRADA DE EFECTIVO"}</div>
         <div class="text-center">{setup.store.company.name}</div>
         <hr class="my-2 border-dashed border-black" />
@@ -152,10 +160,7 @@ function CashMoveVoucher({ move, onDone }: { move: CashMove; onDone: () => void 
           <div class="text-xs">{move.type === "out" ? "Firma de quien recibe" : "Firma de quien entrega"}</div>
         </div>
       </article>
-      <div class="flex gap-2 print:hidden">
-        <button class="btn btn-lg" onClick={() => window.print()}>Imprimir</button>
-        <button class="btn btn-primary btn-lg" onClick={onDone}>Listo</button>
-      </div>
+      <SlipActions onDone={onDone} />
     </section>
   );
 }

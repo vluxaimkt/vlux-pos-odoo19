@@ -5,6 +5,7 @@ import { usePos } from "../state";
 import { usePhonePairing } from "./PhoneScanner";
 import { explain } from "./SetupScreen";
 import { Icon } from "../ui/Icon";
+import { Banner } from "../ui/Page";
 
 const POLL_MS = 1500;
 const WAIT_MS = 10 * 60 * 1000;
@@ -93,29 +94,32 @@ export function PhotoPicker({ value, onChange, barcode, label, canRemove = false
   }
 
   return (
-    <fieldset class="fieldset">
-      <legend class="fieldset-legend">Foto</legend>
-      {value
-        ? <img src={value} alt="Foto del producto" class="max-h-40 object-contain self-center rounded bg-white" />
-        : !waiting && <p class="text-xs opacity-60">Sin foto.</p>}
-      {waiting ? (
-        <div class="flex items-center gap-2">
-          <span class="loading loading-dots" />
-          <span class="flex-1 text-sm">Esperando la foto del celular… (en el celular aparece "La caja pide una foto")</span>
-          <button type="button" class="btn btn-xs" onClick={() => void stopWaiting()}>Cancelar</button>
+    <div class="flex flex-col gap-2">
+      <span class="text-sm label-2 font-medium px-1">Foto</span>
+      <div class="flex items-center gap-4">
+        <div class="w-24 h-24 shrink-0 rounded-[16px] overflow-hidden grid place-items-center bg-[var(--fill)] label-2">
+          {value
+            ? <img src={value} alt="Foto del producto" class="w-full h-full object-contain bg-white" />
+            : waiting ? <span class="loading loading-dots" /> : <Icon name="camera" size={32} />}
         </div>
-      ) : (
-        <div class="flex flex-wrap gap-2">
-          <input ref={input} type="file" accept="image/*" capture="environment" class="hidden" onChange={() => void picked()} />
-          <button type="button" class="btn btn-sm" onClick={() => input.current?.click()}><Icon name="camera" size={18} /> Foto con este equipo</button>
-          {pairing && (
-            <button type="button" class="btn btn-sm" disabled={!online} onClick={() => void askPhone()}><Icon name="phone" size={18} /> Tomar con el celular</button>
-          )}
-          {value && canRemove && <button type="button" class="btn btn-sm btn-ghost" onClick={() => onChange(null)}>Quitar foto</button>}
-        </div>
-      )}
-      {!pairing && <p class="text-xs opacity-60">Para tomarla con el celular, vincúlalo primero con "Escáner del celular".</p>}
-      {error && <div role="alert" class="alert alert-error text-sm">{error}</div>}
-    </fieldset>
+        {waiting ? (
+          <div class="flex-1 flex flex-col gap-2">
+            <span class="text-sm">Esperando la foto del celular… En el celular aparece "La caja pide una foto".</span>
+            <button type="button" class="btn btn-sm w-fit" onClick={() => void stopWaiting()}>Cancelar</button>
+          </div>
+        ) : (
+          <div class="flex-1 flex flex-col items-start gap-2">
+            <input ref={input} type="file" accept="image/*" capture="environment" class="hidden" onChange={() => void picked()} />
+            <button type="button" class="btn btn-sm" onClick={() => input.current?.click()}><Icon name="camera" size={18} /> Foto con este equipo</button>
+            {pairing && (
+              <button type="button" class="btn btn-sm" disabled={!online} onClick={() => void askPhone()}><Icon name="phone" size={18} /> Tomar con el celular</button>
+            )}
+            {value && canRemove && <button type="button" class="btn btn-sm btn-ghost text-danger" onClick={() => onChange(null)}><Icon name="trash" size={16} /> Quitar foto</button>}
+          </div>
+        )}
+      </div>
+      {!pairing && <p class="text-xs label-2 px-1">Para tomarla con el celular, vincúlalo primero con "Escáner del celular".</p>}
+      {error && <Banner tone="error">{error}</Banner>}
+    </div>
   );
 }

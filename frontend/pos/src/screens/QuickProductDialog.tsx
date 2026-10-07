@@ -2,6 +2,8 @@ import { useState } from "preact/hooks";
 
 import type { Product } from "../api/types";
 import { usePos } from "../state";
+import { Icon } from "../ui/Icon";
+import { Banner, Field } from "../ui/Page";
 import { PhotoPicker } from "./PhotoPicker";
 import { explain } from "./SetupScreen";
 
@@ -56,24 +58,35 @@ export function QuickProductDialog({ barcode, onCreated, onCancel }: {
 
   return (
     <dialog class="modal modal-open" aria-label="Alta rápida de producto">
-      <form class="modal-box flex flex-col gap-3" onSubmit={(e) => void submit(e)}>
-        <h3 class="text-lg font-bold">Producto nuevo</h3>
-        <p class="text-xs opacity-60">El formulario se queda abierto hasta que lo des de alta o lo canceles.</p>
-        <div class="font-mono opacity-70">{barcode}</div>
-        <input class="input w-full" type="text" maxLength={120} placeholder="Nombre (como en el empaque)" autofocus
-          value={name} onInput={(e) => setName(e.currentTarget.value)} />
-        <label class="input w-full">
-          <span class="opacity-70">$</span>
-          <input type="text" inputMode="decimal" autocomplete="off" placeholder={priceHint} aria-label={priceHint} value={price}
-            onInput={(e) => setPrice(e.currentTarget.value)} />
-        </label>
-        <select class="select w-full" value={taxId} onChange={(e) => setTaxId(e.currentTarget.value)}>
-          <option value="">Impuesto predeterminado de la tienda</option>
-          {saleTaxes.map((tax) => <option key={tax.id} value={String(tax.id)}>{tax.name}</option>)}
-        </select>
+      <form class="modal-box flex flex-col gap-4" onSubmit={(e) => void submit(e)}>
+        <div class="flex items-center gap-3">
+          <span class="avatar-disc w-12 h-12 shrink-0" data-role="manager" aria-hidden="true"><Icon name="plus" size={24} /></span>
+          <div class="min-w-0">
+            <h3 class="text-xl">Producto nuevo</h3>
+            <div class="font-mono text-sm label-2 truncate">{barcode}</div>
+          </div>
+        </div>
+        <Field label="Nombre" hint="Como viene en el empaque.">
+          <input class="input w-full" type="text" maxLength={120} autofocus
+            value={name} onInput={(e) => setName(e.currentTarget.value)} />
+        </Field>
+        <Field label={priceHint}>
+          <label class="input w-full num">
+            <span class="label-2">$</span>
+            <input type="text" inputMode="decimal" autocomplete="off" placeholder="0.00" aria-label={priceHint} value={price}
+              onInput={(e) => setPrice(e.currentTarget.value)} />
+          </label>
+        </Field>
+        <Field label="Impuesto">
+          <select class="select w-full" value={taxId} onChange={(e) => setTaxId(e.currentTarget.value)}>
+            <option value="">Impuesto predeterminado de la tienda</option>
+            {saleTaxes.map((tax) => <option key={tax.id} value={String(tax.id)}>{tax.name}</option>)}
+          </select>
+        </Field>
         <PhotoPicker value={image} onChange={setImage} barcode={barcode} label={name.trim()} canRemove />
-        {error && <div role="alert" class="alert alert-error">{error}</div>}
-        <div class="modal-action">
+        {error && <Banner tone="error">{error}</Banner>}
+        <p class="text-xs label-2">El formulario se queda abierto hasta que lo des de alta o lo canceles.</p>
+        <div class="modal-action mt-0">
           <button type="button" class="btn" onClick={onCancel}>Cancelar</button>
           <button class="btn btn-primary" disabled={busy}>{busy ? <span class="loading loading-spinner" /> : "Dar de alta y vender"}</button>
         </div>

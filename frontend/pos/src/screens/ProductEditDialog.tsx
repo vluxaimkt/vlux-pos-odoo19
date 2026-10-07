@@ -3,6 +3,8 @@ import { useState } from "preact/hooks";
 import type { PosCategory, ProductChanges } from "../api/types";
 import { productRow, type ProductRow } from "../db/db";
 import { usePos } from "../state";
+import { Icon } from "../ui/Icon";
+import { Banner, Field } from "../ui/Page";
 import { PhotoPicker } from "./PhotoPicker";
 import { explain } from "./SetupScreen";
 
@@ -64,43 +66,54 @@ export function ProductEditDialog({ product, picture, categories, onSaved, onCan
 
   return (
     <dialog class="modal modal-open" aria-label={`Editar ${product.name}`}>
-      <form class="modal-box flex flex-col gap-2" onSubmit={(e) => void save(e)}>
-        <h3 class="text-lg font-bold">Editar producto</h3>
-        <label class="text-sm">Nombre
+      <form class="modal-box flex flex-col gap-4 max-h-[90vh] overflow-y-auto" onSubmit={(e) => void save(e)}>
+        <div class="flex items-center gap-3">
+          <span class="avatar-disc w-12 h-12 shrink-0" data-role="manager" aria-hidden="true"><Icon name="info" size={24} /></span>
+          <div class="min-w-0">
+            <h3 class="text-xl">Editar producto</h3>
+            <div class="text-sm label-2 truncate">{product.name}</div>
+          </div>
+        </div>
+        <Field label="Nombre">
           <input class="input w-full" type="text" maxLength={120} value={name} onInput={(e) => setName(e.currentTarget.value)} />
-        </label>
-        <label class="text-sm">Precio de venta{toWeight ? ` (por ${product.uom.name})` : ""}
-          <input class="input w-full" type="text" inputMode="decimal" value={price} onInput={(e) => setPrice(e.currentTarget.value)} />
-        </label>
-        <label class="text-sm">Descripción
+        </Field>
+        <Field label={`Precio de venta${toWeight ? ` (por ${product.uom.name})` : ""}`}>
+          <label class="input w-full num">
+            <span class="label-2">$</span>
+            <input type="text" inputMode="decimal" value={price} aria-label="Precio de venta" onInput={(e) => setPrice(e.currentTarget.value)} />
+          </label>
+        </Field>
+        <Field label="Descripción">
           <textarea class="textarea w-full" rows={3} maxLength={2000} value={description}
             onInput={(e) => setDescription(e.currentTarget.value)} />
-        </label>
-        <label class="text-sm">Código de barras
+        </Field>
+        <Field label="Código de barras">
           <input class="input w-full font-mono" type="text" maxLength={128} value={barcode} onInput={(e) => setBarcode(e.currentTarget.value)} />
-        </label>
-        <div class="grid grid-cols-2 gap-2">
-          <label class="text-sm">Categoría
+        </Field>
+        <div class="grid grid-cols-2 gap-4">
+          <Field label="Categoría">
             <select class="select w-full" value={category} onChange={(e) => setCategory(e.currentTarget.value)}>
               <option value="">Sin categoría</option>
               {categories.map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
             </select>
-          </label>
-          <label class="text-sm">Impuesto
+          </Field>
+          <Field label="Impuesto">
             <select class="select w-full" value={taxId} onChange={(e) => setTaxId(e.currentTarget.value)}>
               <option value="">Sin impuesto</option>
               {saleTaxes.map((tax) => <option key={tax.id} value={String(tax.id)}>{tax.name}</option>)}
             </select>
+          </Field>
+        </div>
+        <div class="grouped">
+          <label class="row cursor-pointer">
+            <span class="flex-1 font-medium">Se vende por peso</span>
+            <input type="checkbox" class="toggle" checked={toWeight} onChange={(e) => setToWeight(e.currentTarget.checked)} />
           </label>
         </div>
-        <label class="flex items-center gap-2 text-sm cursor-pointer">
-          <input type="checkbox" class="checkbox checkbox-sm" checked={toWeight} onChange={(e) => setToWeight(e.currentTarget.checked)} />
-          Se vende por peso
-        </label>
         <PhotoPicker value={image === undefined ? picture : image} onChange={setImage}
           barcode={barcode || undefined} label={name.trim()} canRemove />
-        {error && <div role="alert" class="alert alert-error">{error}</div>}
-        <div class="modal-action">
+        {error && <Banner tone="error">{error}</Banner>}
+        <div class="modal-action mt-0">
           <button type="button" class="btn" onClick={onCancel}>Cancelar</button>
           <button class="btn btn-primary" disabled={busy}>{busy ? <span class="loading loading-spinner" /> : "Guardar cambios"}</button>
         </div>

@@ -5,6 +5,8 @@ import { formatDateTime } from "../lib/locale";
 import { formatMoney } from "../lib/money";
 import { round } from "../sale/money";
 import { usePos } from "../state";
+import { Icon } from "../ui/Icon";
+import { Banner, EmptyState, Field, Loading, PageHeader, Section, SLIP, SlipActions, SuccessHeader } from "../ui/Page";
 import { explain } from "./SetupScreen";
 
 type Mode =
@@ -53,43 +55,48 @@ export function SalesScreen({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <section class="p-4 max-w-3xl mx-auto flex flex-col gap-3">
-      <div class="flex items-center gap-2">
-        <h2 class="text-xl flex-1">Ventas y devoluciones</h2>
-        <button class="btn btn-ghost btn-sm" onClick={onClose}>Volver a vender</button>
-      </div>
-      {!online && <div role="alert" class="alert alert-warning">Las ventas del día y las devoluciones necesitan internet.</div>}
-      <form class="join w-full" onSubmit={(e) => { e.preventDefault(); void load(query); }}>
-        <input class="input join-item w-full" type="search" placeholder="Folio del ticket (p. ej. 260-4-000008)"
-          value={query} onInput={(e) => setQuery(e.currentTarget.value)} />
-        <button class="btn join-item" disabled={busy || !online}>Buscar</button>
+    <section class="p-4 lg:p-8 max-w-3xl mx-auto flex flex-col gap-6 rise">
+      <PageHeader title="Ventas y devoluciones" icon="receipt" back={onClose} />
+      {!online && <Banner tone="warn">Las ventas del día y las devoluciones necesitan internet.</Banner>}
+      <form class="flex gap-2" onSubmit={(e) => { e.preventDefault(); void load(query); }}>
+        <label class="search-field flex-1">
+          <Icon name="search" size={22} />
+          <input type="search" placeholder="Folio del ticket (p. ej. 260-4-000008)" aria-label="Folio del ticket"
+            value={query} onInput={(e) => setQuery(e.currentTarget.value)} />
+        </label>
+        <button class="btn btn-primary h-14 rounded-[16px] px-6" disabled={busy || !online}>Buscar</button>
       </form>
-      {error && <div role="alert" class="alert alert-error">{error}</div>}
-      {busy && <span class="loading loading-spinner" />}
-      <ul class="list bg-base-100 rounded-box">
-        {orders.map((order) => (
-          <li key={order.id} class="list-row items-center">
-            <div class="list-col-grow">
-              <div class="font-semibold">
-                {order.pos_reference ?? order.name}
-                {order.is_refund && <span class="badge badge-warning badge-sm ml-2">Devolución</span>}
+      {error && <Banner tone="error">{error}</Banner>}
+      {busy ? <Loading /> : orders.length > 0 ? (
+        <Section title={query.trim().length >= 3 ? "Resultado" : "Ventas recientes de esta caja"}>
+          {orders.map((order) => (
+            <div key={order.id} class="row !py-3">
+              <span class="avatar-disc w-10 h-10 shrink-0" data-role={order.is_refund ? undefined : "manager"} aria-hidden="true">
+                <Icon name={order.is_refund ? "back" : "receipt"} size={20} />
+              </span>
+              <div class="flex-1 min-w-0">
+                <div class="font-semibold flex items-center gap-2">
+                  <span class="truncate">{order.pos_reference ?? order.name}</span>
+                  {order.is_refund && <span class="pill pill-plain pill-warn">Devolución</span>}
+                </div>
+                <div class="text-xs label-2">
+                  {formatDateTime(order.date_order.replace(" ", "T"))}
+                  {order.lines.length > 0 && ` · ${order.lines.length} producto(s)`}
+                </div>
               </div>
-              <div class="text-xs opacity-70">
-                {formatDateTime(order.date_order.replace(" ", "T"))}
-                {order.lines.length > 0 && ` · ${order.lines.length} producto(s)`}
+              <span class="font-semibold num">{money(order.amount_total)}</span>
+              <div class="flex gap-2">
+                <button class="btn btn-sm" onClick={() => setMode({ name: "ticket", order })} aria-label="Reimprimir" title="Reimprimir">
+                  <Icon name="printer" size={16} /><span class="hidden sm:inline">Reimprimir</span>
+                </button>
+                {!order.is_refund && order.lines.some((line) => line.refundable_qty > 0) && (
+                  <button class="btn btn-sm btn-primary" onClick={() => setMode({ name: "detail", order })}>Devolver</button>
+                )}
               </div>
             </div>
-            <div class="font-semibold">{money(order.amount_total)}</div>
-            <div class="flex gap-1">
-              <button class="btn btn-sm" onClick={() => setMode({ name: "ticket", order })}>Reimprimir</button>
-              {!order.is_refund && order.lines.some((line) => line.refundable_qty > 0) && (
-                <button class="btn btn-sm btn-warning" onClick={() => setMode({ name: "detail", order })}>Devolver</button>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
-      {!busy && !orders.length && online && <p class="opacity-60">No hay ventas que mostrar.</p>}
+          ))}
+        </Section>
+      ) : online && <EmptyState icon="receipt" title="No hay ventas que mostrar" hint="Busca un ticket por su folio." />}
     </section>
   );
 }
@@ -149,44 +156,47 @@ function ReturnForm({ order, onBack, onReturned }: { order: OrderResult; onBack:
   }
 
   return (
-    <section class="p-4 max-w-2xl mx-auto flex flex-col gap-3">
-      <div class="flex items-center gap-2">
-        <h2 class="text-xl flex-1">Devolución · {order.pos_reference ?? order.name}</h2>
-        <button class="btn btn-ghost btn-sm" onClick={onBack}>Volver</button>
-      </div>
-      <ul class="list bg-base-100 rounded-box">
+    <section class="p-4 lg:p-8 max-w-2xl mx-auto flex flex-col gap-6 rise">
+      <PageHeader title="Devolución" subtitle={order.pos_reference ?? order.name} icon="back" back={onBack} backLabel="Ventas" />
+      <Section title="¿Qué regresa?" footer="Escribe cuántas piezas (o kilos) regresan de cada producto.">
         {order.lines.filter((line) => line.qty > 0).map((line) => (
-          <li key={line.id} class="list-row items-center">
-            <div class="list-col-grow">
-              <div>{line.name}</div>
-              <div class="text-xs opacity-70">
+          <div key={line.id} class="row !py-3">
+            <div class="flex-1 min-w-0">
+              <div class="font-medium truncate">{line.name}</div>
+              <div class="text-xs label-2 num">
                 Vendidas {line.qty} · se pueden devolver {line.refundable_qty} · {money(line.price_subtotal_incl / line.qty)} c/u
               </div>
             </div>
-            <input class="input input-sm w-24" type="number" inputMode="decimal" min="0" max={line.refundable_qty} step="any"
+            <input class="input w-24 text-right num" type="number" inputMode="decimal" min="0" max={line.refundable_qty} step="any"
+              aria-label={`Cantidad que regresa de ${line.name}`}
               disabled={line.refundable_qty <= 0} placeholder="0" value={qty[line.id] ?? ""}
               onInput={(e) => { setQty({ ...qty, [line.id]: e.currentTarget.value }); setAmount(null); }} />
-          </li>
+          </div>
         ))}
-      </ul>
-      {error && <div role="alert" class="alert alert-error">{error}</div>}
+      </Section>
+      {error && <Banner tone="error">{error}</Banner>}
       {amount === null ? (
-        <button class="btn btn-primary" disabled={busy || !lines.length} onClick={() => void calculate()}>Calcular devolución</button>
+        <button class="btn btn-primary btn-xl" disabled={busy || !lines.length} onClick={() => void calculate()}>
+          {busy ? <span class="loading loading-spinner" /> : "Calcular devolución"}
+        </button>
       ) : (
         <>
-          <div class="stats bg-base-100 shadow">
-            <div class="stat"><div class="stat-title">Se devuelve</div><div class="stat-value">{money(amount)}</div></div>
+          <div class="surface p-6 flex flex-col items-center gap-1 text-center rise">
+            <span class="label-2 font-medium">Se devuelve</span>
+            <span class="display">{money(amount)}</span>
           </div>
-          <div class="flex flex-wrap gap-2">
-            {methods.map((method) => (
-              <button key={method.id} class={`btn ${methodId === method.id ? "btn-primary" : "btn-outline"}`}
-                onClick={() => setMethodId(method.id)}>
-                {method.type === "pay_later" ? "A su cuenta (crédito)" : method.name}
-              </button>
-            ))}
-          </div>
-          <button class="btn btn-warning btn-lg" disabled={busy || !methodId} onClick={() => void confirm()}>
-            Devolver {money(amount)}
+          <Field label="¿Cómo se devuelve el dinero?">
+            <div class="segmented" role="radiogroup" aria-label="Forma de devolución">
+              {methods.map((method) => (
+                <button key={method.id} type="button" role="radio" aria-selected={methodId === method.id} aria-checked={methodId === method.id}
+                  onClick={() => setMethodId(method.id)}>
+                  {method.type === "pay_later" ? "A su cuenta (crédito)" : method.name}
+                </button>
+              ))}
+            </div>
+          </Field>
+          <button class="btn btn-primary btn-xl" disabled={busy || !methodId} onClick={() => void confirm()}>
+            {busy ? <span class="loading loading-spinner" /> : `Devolver ${money(amount)}`}
           </button>
         </>
       )}
@@ -207,8 +217,11 @@ export function OrderTicket({ order, onDone }: { order: OrderResult; onDone: () 
   const company = setup.store.company;
   const money = (n: number) => formatMoney(n, setup.store.currency);
   return (
-    <section class="p-4 flex flex-col items-center gap-4">
-      <article class="receipt bg-white text-black font-mono text-sm p-4 w-[80mm] max-w-full shadow print:shadow-none">
+    <section class="p-4 lg:p-8 flex flex-col items-center gap-6">
+      <SuccessHeader title={order.is_refund ? "Devolución registrada" : "Reimpresión"} icon={order.is_refund ? "check" : "printer"}>
+        <span class="num">{order.pos_reference ?? order.name} · {money(Math.abs(order.amount_total))}</span>
+      </SuccessHeader>
+      <article class={SLIP} style={{ animationDelay: "100ms" }}>
         <header class="text-center">
           <div class="font-bold text-base">{company.name}</div>
           {company.vat && <div>RFC: {company.vat}</div>}
@@ -244,10 +257,7 @@ export function OrderTicket({ order, onDone }: { order: OrderResult; onDone: () 
         <hr class="my-2 border-dashed border-black" />
         {company.receipt_legend && <div class="text-center text-xs">{company.receipt_legend}</div>}
       </article>
-      <div class="flex gap-2 print:hidden">
-        <button class="btn btn-lg" onClick={() => window.print()}>Imprimir</button>
-        <button class="btn btn-primary btn-lg" onClick={onDone}>Listo</button>
-      </div>
+      <SlipActions onDone={onDone} />
     </section>
   );
 }
