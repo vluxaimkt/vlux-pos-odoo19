@@ -6,6 +6,7 @@ import { formatMoney } from "../lib/money";
 import { usePos } from "../state";
 import { explain } from "./SetupScreen";
 import { Icon } from "../ui/Icon";
+import { Banner, EmptyState, Loading, PageHeader, Section, Segmented, Stat } from "../ui/Page";
 
 const SECTION_LABELS: Record<string, string> = {
   dashboard: "Resumen del día",
@@ -39,20 +40,14 @@ export function OwnerScreen({ onClose, onOptionsSaved }: { onClose: () => void; 
   }, [online]);
 
   return (
-    <section class="p-4 max-w-5xl mx-auto flex flex-col gap-3">
-      <div class="flex items-center gap-2">
-        <h2 class="text-xl flex-1 flex items-center gap-2"><Icon name="crown" /> Dueño</h2>
-        <button class="btn btn-ghost btn-sm" onClick={onClose}>Volver a vender</button>
-      </div>
-      {!online && <div role="alert" class="alert alert-warning">El módulo del dueño necesita internet.</div>}
-      {error && <div role="alert" class="alert alert-error">{error}</div>}
-      <div role="tablist" class="tabs tabs-box">
-        {sections.map((s) => (
-          <button key={s} role="tab" class={`tab ${tab === s ? "tab-active" : ""}`} onClick={() => setTab(s)}>
-            {SECTION_LABELS[s] ?? s}
-          </button>
-        ))}
-      </div>
+    <section class="p-4 lg:p-8 max-w-5xl mx-auto flex flex-col gap-6 rise">
+      <PageHeader title="Dueño" subtitle={setup.store.company.name} icon="crown" back={onClose} />
+      {!online && <EmptyState icon="cloudOff" title="El módulo del dueño necesita internet" hint="Vuelve a intentarlo cuando regrese la conexión." />}
+      {error && <Banner tone="error">{error}</Banner>}
+      {sections.length > 0 && (
+        <Segmented label="Secciones" value={tab} onChange={setTab}
+          options={sections.map((s) => ({ value: s, label: SECTION_LABELS[s] ?? s }))} />
+      )}
       {tab === "dashboard" && sections.includes("dashboard") && <Dashboard />}
       {tab === "credit" && sections.includes("credit") && <Credit />}
       {tab === "options" && sections.includes("options") && <Options onSaved={onOptionsSaved} />}
@@ -78,38 +73,40 @@ function Dashboard() {
   const { client, setup } = usePos();
   const money = (n: number) => formatMoney(n, setup.store.currency);
   const { data, error, reload } = useLoad<OwnerDashboard>(() => client.ownerDashboard(setup.register.id));
-  if (error) return <div role="alert" class="alert alert-error">{error}</div>;
-  if (!data) return <span class="loading loading-spinner" />;
+  if (error) return <Banner tone="error">{error}</Banner>;
+  if (!data) return <Loading />;
   const peak = Math.max(1, ...data.sales_trend.map((t) => t.amount));
   const pct = data.summary.comparison_vs_yesterday_pct;
   return (
-    <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-6">
       <div class="flex items-center gap-2">
-        <span class="opacity-70 flex-1">{data.date_label}</span>
-        <button class="btn btn-ghost btn-xs" onClick={reload}>Actualizar</button>
+        <span class="label-2 flex-1">{data.date_label}</span>
+        <button class="btn btn-ghost btn-sm text-primary" onClick={reload}><Icon name="refresh" size={16} /> Actualizar</button>
       </div>
-      <div class="stats stats-vertical sm:stats-horizontal bg-base-100 shadow">
-        <div class="stat">
-          <div class="stat-title">Ventas de hoy</div>
-          <div class="stat-value text-2xl">{money(data.summary.sales_today)}</div>
-          {pct !== null && <div class={`stat-desc ${pct >= 0 ? "text-success" : "text-error"}`}>{pct >= 0 ? "▲" : "▼"} {Math.abs(pct)}% vs. ayer a esta hora</div>}
-        </div>
-        <div class="stat"><div class="stat-title">Tickets</div><div class="stat-value text-2xl">{data.summary.tickets}</div></div>
-        <div class="stat"><div class="stat-title">Ticket promedio</div><div class="stat-value text-2xl">{money(data.summary.average_ticket)}</div></div>
-        <div class="stat"><div class="stat-title">Piezas</div><div class="stat-value text-2xl">{data.summary.units_sold}</div></div>
+      <div class="grid gap-4 grid-cols-2 lg:grid-cols-4">
+        <Stat label="Ventas de hoy" value={money(data.summary.sales_today)}
+          note={pct !== null && (
+            <span class={`inline-flex items-center gap-1 font-medium ${pct >= 0 ? "text-success" : "text-danger"}`}>
+              <Icon name={pct >= 0 ? "arrowUp" : "arrowDown"} size={14} /> {Math.abs(pct)}% vs. ayer a esta hora
+            </span>
+          )} />
+        <Stat label="Tickets" value={data.summary.tickets} />
+        <Stat label="Ticket promedio" value={money(data.summary.average_ticket)} />
+        <Stat label="Piezas" value={data.summary.units_sold} />
       </div>
-      <div class="card bg-base-100 shadow"><div class="card-body p-4">
-        <h3 class="font-semibold">Ventas por hora</h3>
-        <div class="flex items-end gap-1 h-32" aria-label="Ventas por hora">
+      <div class="surface p-4 flex flex-col gap-4">
+        <h2 class="font-semibold">Ventas por hora</h2>
+        <div class="flex items-end gap-1 h-40" role="img" aria-label="Ventas por hora">
           {data.sales_trend.map((t) => (
-            <div key={t.label} class="flex-1 flex flex-col items-center gap-1" title={`${t.label}:00 · ${money(t.amount)}`}>
-              <div class="w-full bg-primary rounded-t" style={{ height: `${Math.round((t.amount / peak) * 100)}%` }} />
-              <span class="text-[10px] opacity-60">{t.label}</span>
+            <div key={t.label} class="flex-1 h-full flex flex-col items-center justify-end gap-1" title={`${t.label}:00 · ${money(t.amount)}`}>
+              <div class="w-full max-w-8 rounded-t-[8px] rounded-b-[2px] min-h-[2px]"
+                style={{ height: `${Math.round((t.amount / peak) * 100)}%`, background: "linear-gradient(180deg, #5ac8fa, #007aff)" }} />
+              <span class="text-[10px] label-2 num">{t.label}</span>
             </div>
           ))}
         </div>
-      </div></div>
-      <div class="grid gap-3 md:grid-cols-2">
+      </div>
+      <div class="grid gap-6 md:grid-cols-2">
         <List title="Por caja" rows={data.sales_by_register.map((r) => [`${r.name}${r.state === "open" ? " (abierta)" : ""}`, `${money(r.amount)} · ${r.share_pct}%`])} />
         <List title="Más vendidos" rows={data.top_products.map((p) => [p.name, `${p.qty} · ${money(p.amount)}`])} />
         <List title="Últimas ventas" rows={data.latest_sales.map((s) => [`${s.time} · ${s.reference}`, `${money(s.amount)} · ${s.cashier}`])} />
@@ -121,14 +118,14 @@ function Dashboard() {
 
 function List({ title, rows, empty = "Sin datos todavía." }: { title: string; rows: [string, string][]; empty?: string }) {
   return (
-    <div class="card bg-base-100 shadow"><div class="card-body p-4 gap-1">
-      <h3 class="font-semibold">{title}</h3>
+    <Section title={title}>
       {rows.length ? rows.map(([left, right], i) => (
-        <div key={i} class="flex justify-between gap-2 text-sm border-b border-base-200 py-1">
-          <span class="truncate">{left}</span><span class="whitespace-nowrap opacity-80">{right}</span>
+        <div key={i} class="row !min-h-12 text-sm">
+          <span class="flex-1 min-w-0 truncate">{left}</span>
+          <span class="whitespace-nowrap label-2 num">{right}</span>
         </div>
-      )) : <p class="text-sm opacity-60">{empty}</p>}
-    </div></div>
+      )) : <div class="row !min-h-12 text-sm label-2">{empty}</div>}
+    </Section>
   );
 }
 
@@ -138,8 +135,8 @@ function Credit() {
   const { data, error } = useLoad<OwnerCreditBalances>(() => client.ownerCredit(setup.register.id));
   const [statement, setStatement] = useState<OwnerStatement | null>(null);
   const [statementError, setStatementError] = useState<string | null>(null);
-  if (error) return <div role="alert" class="alert alert-error">{error}</div>;
-  if (!data) return <span class="loading loading-spinner" />;
+  if (error) return <Banner tone="error">{error}</Banner>;
+  if (!data) return <Loading />;
 
   async function open(partnerId: number) {
     setStatementError(null);
@@ -152,50 +149,53 @@ function Credit() {
 
   if (statement) {
     return (
-      <div class="flex flex-col gap-2">
-        <div class="flex items-center gap-2">
-          <h3 class="text-lg flex-1">{statement.customer.name} · debe {money(statement.balance)}</h3>
-          <button class="btn btn-ghost btn-sm" onClick={() => setStatement(null)}>Volver</button>
-        </div>
-        <ul class="list bg-base-100 rounded-box">
+      <div class="flex flex-col gap-6 rise">
+        <PageHeader title={statement.customer.name} subtitle={<>Debe <span class="text-danger font-semibold num">{money(statement.balance)}</span></>}
+          back={() => setStatement(null)} backLabel="Créditos" />
+        <Section title="Estado de cuenta">
           {[...statement.moves].reverse().map((m, i) => (
-            <li key={i} class="list-row">
-              <div class="list-col-grow">
-                <div class="font-semibold">{m.kind}{m.reference && <span class="opacity-60 text-xs"> · {m.reference}</span>}</div>
-                <div class="text-xs opacity-70">{formatDateTime(m.date.replace(" ", "T") + "Z")}</div>
-                {m.items.map((it, j) => <div key={j} class="text-xs">{it.qty} × {it.name} · {money(it.total)}</div>)}
+            <div key={i} class="row !items-start !py-3">
+              <div class="flex-1 min-w-0">
+                <div class="font-semibold">{m.kind}{m.reference && <span class="label-2 text-xs font-normal"> · {m.reference}</span>}</div>
+                <div class="text-xs label-2">{formatDateTime(m.date.replace(" ", "T") + "Z")}</div>
+                {m.items.map((it, j) => <div key={j} class="text-xs label-2 num">{it.qty} × {it.name} · {money(it.total)}</div>)}
               </div>
-              <div class="text-right text-sm">
-                {m.charge > 0 && <div>+{money(m.charge)}</div>}
-                {m.payment > 0 && <div class="text-success">−{money(m.payment)}</div>}
-                <div class="opacity-60 text-xs">saldo {money(m.balance)}</div>
+              <div class="text-right text-sm num">
+                {m.charge > 0 && <div class="font-semibold">+{money(m.charge)}</div>}
+                {m.payment > 0 && <div class="font-semibold text-success">−{money(m.payment)}</div>}
+                <div class="label-2 text-xs">saldo {money(m.balance)}</div>
               </div>
-            </li>
+            </div>
           ))}
-        </ul>
+        </Section>
       </div>
     );
   }
 
   return (
-    <div class="flex flex-col gap-3">
-      <div class="stats bg-base-100 shadow"><div class="stat">
-        <div class="stat-title">Total por cobrar</div><div class="stat-value text-2xl">{money(data.total_owed)}</div>
-      </div></div>
-      {statementError && <div role="alert" class="alert alert-error">{statementError}</div>}
-      <ul class="list bg-base-100 rounded-box">
-        {data.customers.map((c) => (
-          <li key={c.id} class="list-row items-center">
-            <div class="list-col-grow">
-              <div class="font-semibold">{c.name}{c.over_limit && <span class="badge badge-error badge-sm ml-2">Rebasa su límite</span>}</div>
-              <div class="text-xs opacity-70">{c.phone}{c.limit ? ` · límite ${money(c.limit)}` : ""}</div>
-            </div>
-            <div class="font-semibold">{money(c.balance)}</div>
-            <button class="btn btn-sm" onClick={() => void open(c.id)}>Estado de cuenta</button>
-          </li>
-        ))}
-      </ul>
-      {!data.customers.length && <p class="opacity-60">Nadie debe.</p>}
+    <div class="flex flex-col gap-6">
+      <div class="grid gap-4 grid-cols-2">
+        <Stat label="Total por cobrar" value={money(data.total_owed)} tone={data.total_owed > 0 ? "bad" : undefined} />
+        <Stat label="Clientes que deben" value={data.customers.length} />
+      </div>
+      {statementError && <Banner tone="error">{statementError}</Banner>}
+      {data.customers.length ? (
+        <Section title="Quién debe">
+          {data.customers.map((c) => (
+            <button key={c.id} class="row !py-3" onClick={() => void open(c.id)}>
+              <span class="avatar-disc w-10 h-10 text-base shrink-0" data-role="manager">{(c.name.trim()[0] ?? "?").toUpperCase()}</span>
+              <div class="flex-1 min-w-0">
+                <div class="font-semibold truncate flex items-center gap-2">
+                  {c.name}{c.over_limit && <span class="pill pill-plain !text-[var(--color-error)]">Rebasa su límite</span>}
+                </div>
+                <div class="text-xs label-2">{c.phone}{c.limit ? ` · límite ${money(c.limit)}` : ""}</div>
+              </div>
+              <span class="font-semibold num">{money(c.balance)}</span>
+              <Icon name="chevron" size={18} class="label-2" />
+            </button>
+          ))}
+        </Section>
+      ) : <EmptyState icon="checkCircle" title="Nadie debe" />}
       {data.flagged.length > 0 && (
         <List title="Ventas a crédito para revisar" rows={data.flagged.map((f) => [`${f.reference} · ${f.customer}`, `${money(f.amount)} · ${f.issues.join("; ")}`])} />
       )}
@@ -210,8 +210,8 @@ function Options({ onSaved }: { onSaved: () => Promise<void> }) {
   const [message, setMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  if (error) return <div role="alert" class="alert alert-error">{error}</div>;
-  if (!data) return <span class="loading loading-spinner" />;
+  if (error) return <Banner tone="error">{error}</Banner>;
+  if (!data) return <Loading />;
   const value = (field: OptionField) => (field.name in values ? values[field.name]! : field.value);
 
   async function save() {
@@ -232,36 +232,39 @@ function Options({ onSaved }: { onSaved: () => Promise<void> }) {
   }
 
   return (
-    <div class="flex flex-col gap-3 max-w-2xl">
+    <div class="flex flex-col gap-6 max-w-2xl">
       {data.items.map((field) => (
-        <fieldset key={field.name} class="fieldset bg-base-100 rounded-box p-3">
-          <legend class="fieldset-legend">{field.label}</legend>
+        <Section key={field.name} footer={field.help}>
           {field.type === "boolean" ? (
-            <label class="flex items-center gap-2 cursor-pointer">
+            <label class="row cursor-pointer">
+              <span class="flex-1 font-medium">{field.label}</span>
               <input type="checkbox" class="toggle" checked={!!value(field)}
                 onChange={(e) => setValues({ ...values, [field.name]: e.currentTarget.checked })} />
-              <span>{value(field) ? "Sí" : "No"}</span>
             </label>
           ) : field.type === "selection" ? (
-            <div class="flex flex-col gap-1">
+            <>
+              <div class="row !min-h-11 font-medium">{field.label}</div>
               {field.choices!.map((choice) => (
-                <label key={choice.value} class="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" class="radio radio-sm" name={field.name} checked={value(field) === choice.value}
+                <label key={choice.value} class="row cursor-pointer">
+                  <input type="radio" class="sr-only" name={field.name} checked={value(field) === choice.value}
                     onChange={() => setValues({ ...values, [field.name]: choice.value })} />
-                  {choice.label}
+                  <span class="flex-1">{choice.label}</span>
+                  {value(field) === choice.value && <Icon name="check" size={20} class="text-primary" />}
                 </label>
               ))}
-            </div>
+            </>
           ) : (
-            <textarea class="textarea w-full" rows={3} value={String(value(field) ?? "")}
-              onInput={(e) => setValues({ ...values, [field.name]: e.currentTarget.value })} />
+            <div class="row !items-stretch flex-col !gap-2 !py-3">
+              <span class="font-medium">{field.label}</span>
+              <textarea class="textarea w-full" rows={3} value={String(value(field) ?? "")}
+                onInput={(e) => setValues({ ...values, [field.name]: e.currentTarget.value })} />
+            </div>
           )}
-          {field.help && <p class="text-xs opacity-60">{field.help}</p>}
-        </fieldset>
+        </Section>
       ))}
-      {saveError && <div role="alert" class="alert alert-error">{saveError}</div>}
-      {message && <div role="status" class="alert alert-success">{message}</div>}
-      <button class="btn btn-primary" disabled={busy || !Object.keys(values).length} onClick={() => void save()}>
+      {saveError && <Banner tone="error">{saveError}</Banner>}
+      {message && <Banner tone="ok">{message}</Banner>}
+      <button class="btn btn-primary btn-xl" disabled={busy || !Object.keys(values).length} onClick={() => void save()}>
         {busy ? <span class="loading loading-spinner" /> : "Guardar opciones"}
       </button>
     </div>
@@ -275,19 +278,20 @@ const PURPOSES: Record<string, string> = {
 function Authorizations() {
   const { client, setup } = usePos();
   const { data, error } = useLoad(() => client.ownerAuthorizations(setup.register.id));
-  if (error) return <div role="alert" class="alert alert-error">{error}</div>;
-  if (!data) return <span class="loading loading-spinner" />;
+  if (error) return <Banner tone="error">{error}</Banner>;
+  if (!data) return <Loading />;
+  if (!data.items.length) return <EmptyState icon="lock" title="Nadie ha autorizado nada todavía" />;
   return (
-    <ul class="list bg-base-100 rounded-box max-w-2xl">
+    <Section title="Registro de autorizaciones" class="max-w-2xl">
       {data.items.map((row, i) => (
-        <li key={i} class="list-row">
-          <div class="list-col-grow">
+        <div key={i} class="row !py-3">
+          <span class="avatar-disc w-9 h-9 shrink-0" data-role="manager" aria-hidden="true"><Icon name="lock" size={18} /></span>
+          <div class="flex-1 min-w-0">
             <div><strong>{row.authorized_by}</strong> autorizó {PURPOSES[row.purpose] ?? row.purpose}{row.requested_by ? <> a <strong>{row.requested_by}</strong></> : null}</div>
-            <div class="text-xs opacity-70">{formatDateTime(row.date)}</div>
+            <div class="text-xs label-2">{formatDateTime(row.date)}</div>
           </div>
-        </li>
+        </div>
       ))}
-      {!data.items.length && <li class="list-row opacity-60">Nadie ha autorizado nada todavía.</li>}
-    </ul>
+    </Section>
   );
 }

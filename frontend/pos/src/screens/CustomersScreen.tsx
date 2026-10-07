@@ -7,6 +7,8 @@ import { formatMoney } from "../lib/money";
 import { normalize } from "../lib/text";
 import type { CartCustomer } from "../sale/cart";
 import { usePos } from "../state";
+import { Icon } from "../ui/Icon";
+import { Banner, EmptyState, Field, PageHeader, Stat } from "../ui/Page";
 import { explain } from "./SetupScreen";
 
 type Mode =
@@ -69,69 +71,83 @@ export function CustomersScreen({ onClose, onPick }: { onClose: () => void; onPi
     ? found
     : [...credit.values()].sort((a, b) => b.balance - a.balance).map((row) => ({ id: row.partner_id, name: row.name, phone: row.phone }));
   const owed = [...credit.values()].reduce((total, row) => total + Math.max(0, row.balance), 0);
+  const debtors = [...credit.values()].filter((row) => row.balance > 0).length;
 
   return (
-    <section class="p-4 max-w-3xl mx-auto flex flex-col gap-3">
-      <div class="flex flex-wrap items-center gap-2">
-        <h2 class="text-xl flex-1">{onPick ? "Elegir cliente" : "Clientes y crédito"}</h2>
-        <button class="btn btn-sm" onClick={() => setMode({ name: "new" })} disabled={!online}>Nuevo cliente</button>
-        <button class="btn btn-ghost btn-sm" onClick={onClose}>{onPick ? "Cancelar" : "Volver a vender"}</button>
-      </div>
-      <input class="input input-lg w-full" type="search" autofocus autocomplete="off"
-        placeholder="Busca por nombre o teléfono" value={query}
-        onInput={(event) => setQuery(event.currentTarget.value)} />
+    <section class="p-4 lg:p-8 max-w-3xl mx-auto flex flex-col gap-6 rise">
+      <PageHeader title={onPick ? "Elegir cliente" : "Clientes y crédito"} icon="people"
+        back={onClose} backLabel={onPick ? "Venta" : "Vender"}
+        actions={
+          <button class="btn btn-ghost text-primary" onClick={() => setMode({ name: "new" })} disabled={!online}>
+            <Icon name="plus" size={20} /> Nuevo cliente
+          </button>
+        } />
+      <label class="search-field">
+        <Icon name="search" size={22} />
+        <input type="search" autofocus autocomplete="off" aria-label="Busca por nombre o teléfono"
+          placeholder="Busca por nombre o teléfono" value={query}
+          onInput={(event) => setQuery(event.currentTarget.value)} />
+      </label>
       {!query.trim() && (
-        <div class="text-sm opacity-80">
-          Clientes con crédito · por cobrar <strong>{money(owed)}</strong>
-          {!online && " · sin internet: saldos de la última sincronización"}
+        <div class="grid gap-4 grid-cols-2">
+          <Stat label="Por cobrar" value={money(owed)} tone={owed > 0 ? "bad" : undefined} />
+          <Stat label="Clientes que deben" value={debtors} note={!online ? "Sin internet: saldos de la última sincronización" : undefined} />
         </div>
       )}
-      {!rows.length && <p class="opacity-60">{query.trim() ? "Ningún cliente con ese nombre o teléfono." : "Aún no hay clientes con crédito."}</p>}
-      <ul class="list bg-base-100 rounded-box">
-        {rows.map((customer) => {
-          const row = credit.get(customer.id);
-          const pick = { id: customer.id, name: customer.name };
-          return (
-            <li key={customer.id} class="list-row items-center">
-              <button class="list-col-grow text-left" disabled={!onPick} onClick={() => onPick?.(pick)}>
-                <div class="font-semibold">{customer.name}</div>
-                {customer.phone && <div class="text-xs opacity-60">{customer.phone}</div>}
-                <CreditLine row={row} money={money} />
-              </button>
-              {onPick ? (
-                <button class="btn btn-sm btn-primary" onClick={() => onPick(pick)}>Elegir</button>
-              ) : (
-                <div class="flex flex-wrap gap-1 justify-end">
-                  {row && row.balance > 0 && (
-                    <button class="btn btn-sm btn-primary" disabled={!online} onClick={() => setMode({ name: "abono", customer: pick })}>Abonar</button>
-                  )}
-                  {canAuthorizeCredit && (
-                    <button class="btn btn-sm" disabled={!online} onClick={() => setMode({ name: "credit", customer: pick })}>Crédito…</button>
-                  )}
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      {!rows.length ? (
+        query.trim()
+          ? <EmptyState icon="search" title="Sin resultados" hint="Ningún cliente con ese nombre o teléfono." />
+          : <EmptyState icon="people" title="Aún no hay clientes con crédito" hint="Busca un cliente por nombre o teléfono." />
+      ) : (
+        <div class="grouped">
+          {rows.map((customer) => {
+            const row = credit.get(customer.id);
+            const pick = { id: customer.id, name: customer.name };
+            return (
+              <div key={customer.id} class="row !py-3">
+                <span class="avatar-disc w-10 h-10 text-base shrink-0" data-role={row?.balance ? "manager" : undefined}>
+                  {(customer.name.trim()[0] ?? "?").toUpperCase()}
+                </span>
+                <button class="flex-1 min-w-0 text-left" disabled={!onPick} onClick={() => onPick?.(pick)}>
+                  <div class="font-semibold truncate">{customer.name}</div>
+                  {customer.phone && <div class="text-xs label-2">{customer.phone}</div>}
+                  <CreditLine row={row} money={money} />
+                </button>
+                {onPick ? (
+                  <button class="btn btn-sm btn-primary" onClick={() => onPick(pick)}>Elegir</button>
+                ) : (
+                  <div class="flex flex-wrap gap-2 justify-end">
+                    {row && row.balance > 0 && (
+                      <button class="btn btn-sm btn-primary" disabled={!online} onClick={() => setMode({ name: "abono", customer: pick })}>Abonar</button>
+                    )}
+                    {canAuthorizeCredit && (
+                      <button class="btn btn-sm" disabled={!online} onClick={() => setMode({ name: "credit", customer: pick })}>Crédito</button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
 
 export function CreditLine({ row, money }: { row: CreditRow | undefined; money: (n: number) => string }) {
-  if (!row) return <div class="text-xs opacity-60">Sin crédito</div>;
+  if (!row) return <div class="text-xs label-2">Sin crédito</div>;
   return (
-    <div class="text-sm flex flex-wrap gap-x-3">
-      {row.balance > 0 ? <span class="text-error font-semibold">Debe {money(row.balance)}</span> : <span class="opacity-70">No debe</span>}
+    <div class="text-xs flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+      {row.balance > 0 ? <span class="text-danger font-semibold num">Debe {money(row.balance)}</span> : <span class="label-2">No debe</span>}
       {row.allowed ? (
-        <span class="opacity-80">
-          Límite {row.limit ? money(row.limit) : "sin límite"}
+        <span class="label-2 num">
+          · Límite {row.limit ? money(row.limit) : "sin límite"}
           {row.available !== null && <> · disponible {money(Math.max(0, row.available))}</>}
         </span>
       ) : (
-        <span class="badge badge-ghost badge-sm">Crédito no autorizado</span>
+        <span class="pill pill-plain">Crédito no autorizado</span>
       )}
-      {row.over_limit && <span class="badge badge-error badge-sm">Rebasa su límite</span>}
+      {row.over_limit && <span class="pill pill-plain !text-[var(--color-error)]">Rebasa su límite</span>}
     </div>
   );
 }
@@ -165,25 +181,21 @@ function NewCustomer({ onCancel, onCreated }: { onCancel: () => void; onCreated:
   }
 
   return (
-    <form class="p-4 max-w-md mx-auto flex flex-col gap-2" onSubmit={save}>
-      <h2 class="text-xl">Nuevo cliente</h2>
-      <fieldset class="fieldset">
-        <legend class="fieldset-legend">Nombre</legend>
-        <input class="input w-full" required maxLength={128} value={name} onInput={(e) => setName(e.currentTarget.value)} />
-      </fieldset>
-      <fieldset class="fieldset">
-        <legend class="fieldset-legend">Teléfono (opcional)</legend>
+    <form class="p-4 lg:p-8 max-w-md mx-auto flex flex-col gap-6 rise" onSubmit={save}>
+      <PageHeader title="Nuevo cliente" icon="person" back={onCancel} backLabel="Clientes" />
+      <Field label="Nombre">
+        <input class="input w-full" required maxLength={128} autofocus value={name} onInput={(e) => setName(e.currentTarget.value)} />
+      </Field>
+      <Field label="Teléfono (opcional)">
         <input class="input w-full" type="tel" maxLength={32} value={phone} onInput={(e) => setPhone(e.currentTarget.value)} />
-      </fieldset>
-      <fieldset class="fieldset">
-        <legend class="fieldset-legend">Correo (opcional)</legend>
+      </Field>
+      <Field label="Correo (opcional)">
         <input class="input w-full" type="email" maxLength={128} value={email} onInput={(e) => setEmail(e.currentTarget.value)} />
-      </fieldset>
-      {error && <div role="alert" class="alert alert-error">{error}</div>}
-      <div class="flex gap-2">
-        <button type="button" class="btn btn-ghost flex-1" onClick={onCancel}>Cancelar</button>
-        <button class="btn btn-primary flex-[2]" disabled={busy || !name.trim()}>Guardar cliente</button>
-      </div>
+      </Field>
+      {error && <Banner tone="error">{error}</Banner>}
+      <button class="btn btn-primary btn-xl" disabled={busy || !name.trim()}>
+        {busy ? <span class="loading loading-spinner" /> : "Guardar cliente"}
+      </button>
     </form>
   );
 }
@@ -215,24 +227,24 @@ function CreditForm({ customer, onDone }: { customer: CartCustomer; onDone: () =
   }
 
   return (
-    <form class="p-4 max-w-md mx-auto flex flex-col gap-3" onSubmit={save}>
-      <h2 class="text-xl">Crédito de {customer.name}</h2>
-      <label class="label cursor-pointer gap-3">
-        <input type="checkbox" class="toggle toggle-primary" checked={allowed} onChange={(e) => setAllowed(e.currentTarget.checked)} />
-        <span>Puede comprar a crédito</span>
-      </label>
-      {allowed && (
-        <fieldset class="fieldset">
-          <legend class="fieldset-legend">Límite de crédito (0 = sin límite)</legend>
-          <input class="input input-lg w-full" type="number" inputMode="decimal" min="0" step="0.01" max="10000000"
-            value={limit} onInput={(e) => setLimit(e.currentTarget.value)} />
-        </fieldset>
-      )}
-      {error && <div role="alert" class="alert alert-error">{error}</div>}
-      <div class="flex gap-2">
-        <button type="button" class="btn btn-ghost flex-1" onClick={onDone}>Cancelar</button>
-        <button class="btn btn-primary flex-[2]" disabled={busy}>Guardar</button>
+    <form class="p-4 lg:p-8 max-w-md mx-auto flex flex-col gap-6 rise" onSubmit={save}>
+      <PageHeader title="Crédito" subtitle={customer.name} icon="card" back={onDone} backLabel="Clientes" />
+      <div class="grouped">
+        <label class="row cursor-pointer">
+          <span class="flex-1 font-medium">Puede comprar a crédito</span>
+          <input type="checkbox" class="toggle" checked={allowed} onChange={(e) => setAllowed(e.currentTarget.checked)} />
+        </label>
       </div>
+      {allowed && (
+        <Field label="Límite de crédito" hint="0 = sin límite.">
+          <input class="input input-lg w-full text-2xl num" type="number" inputMode="decimal" min="0" step="0.01" max="10000000"
+            value={limit} onInput={(e) => setLimit(e.currentTarget.value)} />
+        </Field>
+      )}
+      {error && <Banner tone="error">{error}</Banner>}
+      <button class="btn btn-primary btn-xl" disabled={busy}>
+        {busy ? <span class="loading loading-spinner" /> : "Guardar"}
+      </button>
     </form>
   );
 }
@@ -272,31 +284,29 @@ function AbonoForm({ customer, onCancel, onDone }: { customer: CartCustomer; onC
   }
 
   return (
-    <form class="p-4 max-w-md mx-auto flex flex-col gap-3" onSubmit={save}>
-      <h2 class="text-xl">Abono de {customer.name}</h2>
-      <div class="stats bg-base-100 shadow">
-        <div class="stat"><div class="stat-title">Debe</div><div class="stat-value text-error">{money(debt)}</div></div>
+    <form class="p-4 lg:p-8 max-w-md mx-auto flex flex-col gap-6 rise" onSubmit={save}>
+      <PageHeader title="Abono" subtitle={customer.name} icon="cash" back={onCancel} backLabel="Clientes" />
+      <div class="surface p-6 flex flex-col items-center gap-1 text-center">
+        <span class="label-2 font-medium">Debe</span>
+        <span class="display text-danger">{money(debt)}</span>
       </div>
-      <fieldset class="fieldset">
-        <legend class="fieldset-legend">¿Cuánto paga?</legend>
-        <div class="join w-full">
-          <input class="input input-lg join-item w-full" type="number" inputMode="decimal" min="0" step="0.01"
+      <Field label="¿Cuánto paga?">
+        <div class="flex gap-2">
+          <input class="input input-lg flex-1 text-2xl num" type="number" inputMode="decimal" min="0" step="0.01" autofocus
             value={amount} onInput={(e) => setAmount(e.currentTarget.value)} />
-          <button type="button" class="btn btn-lg join-item" onClick={() => setAmount(String(debt))}>Liquidar todo</button>
+          <button type="button" class="btn btn-lg" onClick={() => setAmount(String(debt))}>Liquidar todo</button>
         </div>
-      </fieldset>
-      <div class="flex flex-wrap gap-2">
+      </Field>
+      <div class="segmented" role="radiogroup" aria-label="Forma de pago">
         {methods.map((method) => (
-          <button key={method.id} type="button"
-            class={`btn ${methodId === method.id ? "btn-primary" : "btn-outline"}`}
+          <button key={method.id} type="button" role="radio" aria-selected={methodId === method.id} aria-checked={methodId === method.id}
             onClick={() => setMethodId(method.id)}>{method.name}</button>
         ))}
       </div>
-      {error && <div role="alert" class="alert alert-error">{error}</div>}
-      <div class="flex gap-2">
-        <button type="button" class="btn btn-ghost flex-1" onClick={onCancel}>Cancelar</button>
-        <button class="btn btn-primary btn-lg flex-[2]" disabled={busy}>Registrar abono</button>
-      </div>
+      {error && <Banner tone="error">{error}</Banner>}
+      <button class="btn btn-primary btn-xl" disabled={busy}>
+        {busy ? <span class="loading loading-spinner" /> : "Registrar abono"}
+      </button>
     </form>
   );
 }
@@ -305,9 +315,17 @@ function AbonoReceipt({ ticket, onDone }: { ticket: AbonoTicket; onDone: () => v
   const { setup } = usePos();
   const company = setup.store.company;
   const money = (value: number) => formatMoney(value, setup.store.currency);
+  const settled = ticket.new_balance <= 0;
   return (
-    <section class="p-4 flex flex-col items-center gap-4">
-      <article class="receipt bg-white text-black font-mono text-sm p-4 w-[80mm] max-w-full shadow print:shadow-none">
+    <section class="p-4 lg:p-8 flex flex-col items-center gap-6">
+      <header class="rise flex flex-col items-center gap-2 text-center print:hidden">
+        <span class="avatar-disc w-16 h-16 pop" style={{ background: "linear-gradient(180deg, #34c759, #248a3d)" }}>
+          <Icon name="check" size={36} />
+        </span>
+        <h1 class="text-3xl">{settled ? "Cuenta liquidada" : "Abono registrado"}</h1>
+        <p class="label-2 num">{ticket.partner_name} · saldo nuevo {money(ticket.new_balance)}</p>
+      </header>
+      <article class="receipt bg-white text-black font-mono text-sm p-4 w-[80mm] max-w-full rounded-[12px] shadow-lg print:shadow-none print:rounded-none rise" style={{ animationDelay: "100ms" }}>
         <div class="text-center font-bold text-base">{company.name}</div>
         <div class="text-center font-bold text-base border border-black mt-2 py-1">ABONO A CUENTA</div>
         <div class="mt-2">{formatDateTime(ticket.date.replace(" ", "T") + "Z")}</div>
@@ -318,14 +336,16 @@ function AbonoReceipt({ ticket, onDone }: { ticket: AbonoTicket; onDone: () => v
         <div class="flex justify-between"><span>Saldo anterior</span><span>{money(ticket.previous_balance)}</span></div>
         <div class="flex justify-between"><span>Abono ({ticket.method})</span><span>{money(ticket.amount)}</span></div>
         <div class="flex justify-between font-bold"><span>Saldo nuevo</span><span>{money(ticket.new_balance)}</span></div>
-        {ticket.new_balance <= 0 && <div class="text-center font-bold pt-2">CUENTA LIQUIDADA</div>}
+        {settled && <div class="text-center font-bold pt-2">CUENTA LIQUIDADA</div>}
         <hr class="my-2 border-dashed border-black" />
         {company.vat && <div class="text-center">RFC: {company.vat}</div>}
         {company.receipt_legend && <div class="text-center text-xs">{company.receipt_legend}</div>}
       </article>
-      <div class="flex gap-2 print:hidden">
-        <button class="btn btn-lg" onClick={() => window.print()}>Imprimir</button>
-        <button class="btn btn-primary btn-lg" onClick={onDone}>Listo</button>
+      <div class="flex flex-wrap justify-center gap-4 print:hidden w-full max-w-md">
+        <button class="btn btn-xl flex-1 bg-base-100 border-[0.5px] border-[var(--glass-border)]" onClick={() => window.print()}>
+          <Icon name="printer" size={20} /> Imprimir
+        </button>
+        <button class="btn btn-primary btn-xl flex-1" autofocus onClick={onDone}>Listo</button>
       </div>
     </section>
   );
