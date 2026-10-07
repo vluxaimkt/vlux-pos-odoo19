@@ -8,6 +8,7 @@ import { paymentState } from "../sale/payment";
 import type { Pricing } from "../sale/pricing";
 import { usePos } from "../state";
 import type { CreditTicket } from "./PayScreen";
+import { Icon } from "../ui/Icon";
 
 /**
  * The ticket. It is printed from what was charged; once the server has the
@@ -45,8 +46,24 @@ export function ReceiptScreen({ order, pricing, credit, onNext }: {
   const previous = result?.credit?.previous_balance ?? credit?.previous ?? 0;
   const onCredit = result?.credit?.amount ?? credit?.amount ?? 0;
   return (
-    <section class="p-4 flex flex-col items-center gap-4">
-      <article class="receipt bg-white text-black font-mono text-sm p-4 w-[80mm] max-w-full shadow print:shadow-none">
+    <section class="p-4 lg:p-8 flex flex-col items-center gap-6">
+      <header class="rise flex flex-col items-center gap-2 text-center print:hidden">
+        <span class="avatar-disc w-16 h-16 pop" style={{ background: "linear-gradient(180deg, #34c759, #248a3d)" }}>
+          <Icon name="check" size={36} />
+        </span>
+        <h1 class="text-3xl">{onCredit > 0 ? "Venta a crédito registrada" : "Venta registrada"}</h1>
+        {change > 0 ? (
+          <p class="flex items-baseline gap-2"><span class="label-2">Cambio</span><span class="display text-success">{formatMoney(change, currency)}</span></p>
+        ) : (
+          <p class="label-2 num">Total {formatMoney(pricing.total, currency)}</p>
+        )}
+        <p class="text-sm label-2 flex items-center gap-2">
+          {result
+            ? <><Icon name="checkCircle" size={16} class="text-success" /> Folio {result.pos_reference ?? result.name}</>
+            : <><Icon name="cloudOff" size={16} /> Guardada en esta caja; se enviará sola.</>}
+        </p>
+      </header>
+      <article class="receipt bg-white text-black font-mono text-sm p-4 w-[80mm] max-w-full rounded-[12px] shadow-lg print:shadow-none print:rounded-none rise" style={{ animationDelay: "100ms" }}>
         <header class="text-center">
           <div class="font-bold text-base">{company.name}</div>
           {company.vat && <div>RFC: {company.vat}</div>}
@@ -97,11 +114,10 @@ export function ReceiptScreen({ order, pricing, credit, onNext }: {
         {register.receipt_footer && <div class="text-center whitespace-pre-line">{register.receipt_footer}</div>}
         <div class="text-center text-xs mt-1">{order.uuid.slice(0, 8)}</div>
       </article>
-      <div class="flex gap-2 print:hidden">
-        <button class="btn btn-lg" onClick={() => window.print()}>Imprimir ticket</button>
-        <button class="btn btn-primary btn-lg" autofocus onClick={onNext}>Nueva venta</button>
+      <div class="flex flex-wrap justify-center gap-4 print:hidden w-full max-w-md">
+        <button class="btn btn-xl flex-1 bg-base-100 border-[0.5px] border-[var(--glass-border)]" onClick={() => window.print()}><Icon name="printer" size={20} /> Imprimir</button>
+        <button class="btn btn-primary btn-xl flex-1" autofocus onClick={onNext}><Icon name="plus" size={20} /> Nueva venta</button>
       </div>
-      {!result && <p class="text-sm opacity-70 print:hidden">La venta está guardada en esta caja y se enviará sola.</p>}
     </section>
   );
 }

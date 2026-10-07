@@ -71,29 +71,29 @@ export function ProductGrid({ searched, onPick, onChanged }: {
   const items = searched ?? browsed.items;
 
   return (
-    <div class="flex flex-col gap-2">
+    <div class="flex flex-col gap-4">
       {!searched && shown.length > 0 && (
-        <div class="flex gap-1 overflow-x-auto pb-1" role="tablist" aria-label="Categorías">
-          <button role="tab" class={`btn btn-sm ${category === null ? "btn-primary" : "btn-ghost"}`}
+        <div class="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" role="tablist" aria-label="Categorías">
+          <button role="tab" class="chip" aria-selected={category === null}
             onClick={() => { setCategory(null); setLimit(120); }}>Todos</button>
           {open?.parent_id != null && (
-            <button class="btn btn-sm btn-ghost" onClick={() => setCategory(open.parent_id)}>‹ Atrás</button>
+            <button class="chip" onClick={() => setCategory(open.parent_id)}><Icon name="back" size={16} /> Atrás</button>
           )}
           {tabs.map((c) => (
-            <button key={c.id} role="tab" class={`btn btn-sm whitespace-nowrap ${category === c.id ? "btn-primary" : "btn-ghost"}`}
+            <button key={c.id} role="tab" class="chip" aria-selected={category === c.id}
               onClick={() => { setCategory(c.id); setLimit(120); }}>{c.name}</button>
           ))}
         </div>
       )}
-      <div class="grid gap-2 grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]">
+      <div class="grid gap-4 grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]">
         {items.map((product) => (
           <ProductTile key={product.id} product={product} onPick={onPick} onInfo={() => setInfo(product)} />
         ))}
       </div>
       {!searched && browsed.more && (
-        <button class="btn btn-ghost btn-sm self-center" onClick={() => setLimit(limit + 120)}>Ver más productos</button>
+        <button class="btn btn-ghost text-primary self-center" onClick={() => setLimit(limit + 120)}>Ver más productos</button>
       )}
-      {!searched && !browsed.items.length && <p class="opacity-60">No hay productos en esta categoría.</p>}
+      {!searched && !browsed.items.length && <p class="label-2 py-16 text-center">No hay productos en esta categoría.</p>}
       {info && <ProductInfo product={info} currency={setup.store.currency}
         onAdd={() => { onPick(info); setInfo(null); }} onClose={() => setInfo(null)}
         editLocked={!canEditCatalog}
@@ -133,23 +133,24 @@ function ProductTile({ product, onPick, onInfo }: { product: ProductRow; onPick:
   }, []);
   const url = useImage(product, visible);
   return (
-    <div ref={tile} class="card bg-base-100 shadow-sm relative overflow-hidden">
-      <button class="flex flex-col text-left h-full" onClick={() => onPick(product)} aria-label={`Agregar ${product.name}`}>
-        <div class="aspect-square bg-base-200 flex items-center justify-center">
+    <div ref={tile} class="tile">
+      <button class="tile-main flex flex-col text-left h-full" onClick={() => onPick(product)} aria-label={`Agregar ${product.name}`}>
+        <div class="tile-art" style={url ? undefined : { background: tint(product.name) }}>
           {url
-            ? <img src={url} alt="" class="w-full h-full object-contain" loading="lazy" decoding="async" />
-            : <span class="text-3xl font-bold opacity-30" aria-hidden="true">{initials(product.name)}</span>}
+            ? <img src={url} alt="" class="w-full h-full object-contain p-2" loading="lazy" decoding="async" />
+            : <span class="text-3xl font-semibold text-white/90 tracking-tight" aria-hidden="true">{initials(product.name)}</span>}
         </div>
-        <div class="p-2 flex flex-col gap-1 flex-1">
-          <span class="text-sm leading-tight line-clamp-2">{product.name}</span>
-          <span class="font-semibold mt-auto">
+        <div class="p-3 flex flex-col gap-1 flex-1">
+          <span class="text-sm font-medium leading-tight line-clamp-2">{product.name}</span>
+          <span class="font-semibold mt-auto num">
             {formatMoney(product.list_price, setup.store.currency)}
-            {product.to_weight && <span class="text-xs opacity-70">/{product.uom.name}</span>}
+            {product.to_weight && <span class="text-xs font-normal label-2"> /{product.uom.name}</span>}
           </span>
         </div>
       </button>
-      <button class="btn btn-circle btn-xs absolute top-1 right-1 bg-base-100/80" aria-label={`Información de ${product.name}`}
-        onClick={onInfo}>i</button>
+      <button class="info-dot" aria-label={`Información de ${product.name}`} onClick={onInfo}>
+        <Icon name="info" size={18} />
+      </button>
     </div>
   );
 }
@@ -167,16 +168,18 @@ function ProductInfo({ product, currency, onAdd, onClose, onEdit, editLocked }: 
   const url = useImage(product, true);
   return (
     <dialog class="modal modal-open" aria-label={product.name}>
-      <div class="modal-box flex flex-col gap-3">
-        {url && <img src={url} alt="" class="max-h-64 object-contain self-center" />}
-        <h3 class="text-lg font-bold">{product.name}</h3>
-        <div class="text-xl font-semibold">
+      <div class="modal-box flex flex-col gap-4">
+        {url
+          ? <img src={url} alt="" class="max-h-64 object-contain self-center rounded-[12px]" />
+          : <div class="h-32 rounded-[12px] grid place-items-center text-4xl font-semibold text-white/90" style={{ background: tint(product.name) }} aria-hidden="true">{initials(product.name)}</div>}
+        <h3 class="text-2xl">{product.name}</h3>
+        <div class="text-xl font-semibold num">
           {formatMoney(product.list_price, currency)}{product.to_weight && ` / ${product.uom.name}`}
         </div>
         {product.description
           ? <p class="whitespace-pre-line text-sm">{product.description}</p>
-          : <p class="text-sm opacity-60">Sin descripción.</p>}
-        <div class="text-xs opacity-60 font-mono">
+          : <p class="text-sm label-2">Sin descripción.</p>}
+        <div class="text-xs label-2 font-mono">
           {product.barcode && <div>Código de barras: {product.barcode}</div>}
           {product.default_code && <div>Referencia: {product.default_code}</div>}
         </div>
@@ -191,6 +194,18 @@ function ProductInfo({ product, currency, onAdd, onClose, onEdit, editLocked }: 
   );
 }
 
+/** A soft gradient per product (stable by name), in Apple's system hues, for tiles without a picture. */
+const HUES = [
+  ["#5ac8fa", "#007aff"], ["#34c759", "#248a3d"], ["#ff9f0a", "#ff6b00"], ["#ff6482", "#ff2d55"],
+  ["#bf5af2", "#8944ab"], ["#64d2ff", "#30b0c7"], ["#ffd60a", "#ff9f0a"], ["#7d7aff", "#5856d6"],
+];
+function tint(name: string): string {
+  let hash = 0;
+  for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  const [from, to] = HUES[hash % HUES.length]!;
+  return `linear-gradient(160deg, ${from}, ${to})`;
+}
+
 function initials(name: string): string {
-  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]?.toUpperCase() ?? "").join("");
+  return name.split(/\s+/).filter((word) => /^[\p{L}\p{N}]/u.test(word)).slice(0, 2).map((word) => word[0]?.toUpperCase() ?? "").join("");
 }

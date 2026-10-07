@@ -141,9 +141,9 @@ export function PhoneScannerButton() {
 
   return (
     <>
-      <button class={`btn btn-sm ${pairing ? "btn-success" : "btn-ghost"}`} disabled={busy || (!online && !pairing)}
-        onClick={() => void open()} title="Usar un celular como escáner">
-        {busy ? <span class="loading loading-spinner loading-xs" /> : <><Icon name="phone" size={18} /> {pairing ? "Celular vinculado" : "Escáner del celular"}</>}
+      <button class={`btn h-14 rounded-[16px] px-4 border-[0.5px] border-[var(--glass-border)] ${pairing ? "btn-success" : "bg-base-100"}`} disabled={busy || (!online && !pairing)}
+        onClick={() => void open()} title="Usar un celular como escáner" aria-label={pairing ? "Celular vinculado" : "Escáner del celular"}>
+        {busy ? <span class="loading loading-spinner loading-xs" /> : <><Icon name="phone" size={22} /> <span class="hidden xl:inline">{pairing ? "Celular vinculado" : "Escáner del celular"}</span></>}
       </button>
       {error && step.name === "closed" && <span role="alert" class="text-sm text-error ml-2">{error}</span>}
       {step.name !== "closed" && (
