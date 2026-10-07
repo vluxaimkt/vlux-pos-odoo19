@@ -111,9 +111,9 @@ jobs:
           restore-keys: apt-${{ runner.os }}-${{ github.job }}-
 
       - name: Install system dependencies
-        # A slow apt mirror once hung this step for 10+ minutes (normally under 1):
-        # fail fast so the job can be re-run instead of waiting for the job timeout.
-        timeout-minutes: 8
+        # A slow apt mirror has held this step for 8+ minutes (normally under 1):
+        # cap it well under the job timeout; the cache below makes it rare.
+        timeout-minutes: 15
         run: |
           mkdir -p ~/apt-cache/partial
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
@@ -264,9 +264,9 @@ jobs:
           restore-keys: apt-${{ runner.os }}-${{ github.job }}-
 
       - name: Install system dependencies
-        # A slow apt mirror once hung this step for 10+ minutes (normally under 1):
-        # fail fast so the job can be re-run instead of waiting for the job timeout.
-        timeout-minutes: 8
+        # A slow apt mirror has held this step for 8+ minutes (normally under 1):
+        # cap it well under the job timeout; the cache below makes it rare.
+        timeout-minutes: 15
         run: |
           mkdir -p ~/apt-cache/partial
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
@@ -416,9 +416,9 @@ jobs:
           restore-keys: apt-${{ runner.os }}-${{ github.job }}-
 
       - name: Install system dependencies
-        # A slow apt mirror once hung this step for 10+ minutes (normally under 1):
-        # fail fast so the job can be re-run instead of waiting for the job timeout.
-        timeout-minutes: 8
+        # A slow apt mirror has held this step for 8+ minutes (normally under 1):
+        # cap it well under the job timeout; the cache below makes it rare.
+        timeout-minutes: 15
         run: |
           mkdir -p ~/apt-cache/partial
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
