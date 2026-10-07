@@ -2,6 +2,8 @@ import { useEffect, useState } from "preact/hooks";
 
 import type { StaffMember, StaffRole } from "../api/types";
 import { usePos } from "../state";
+import { Icon } from "../ui/Icon";
+import { Banner, Field, Loading, PageHeader, Section } from "../ui/Page";
 import { explain } from "./SetupScreen";
 
 export const ROLES: { value: StaffRole; label: string; help: string }[] = [
@@ -62,55 +64,62 @@ export function EmployeesScreen({ onClose, onChanged }: { onClose: () => void; o
   const others = members.filter((m) => m.active && m.role === "none");
   const archived = members.filter((m) => !m.active);
   const row = (member: StaffMember) => (
-    <li key={member.id} class="list-row items-center">
-      <div class="list-col-grow">
-        <div class="font-semibold">
-          {member.name}
-          {member.owner && <span class="badge badge-sm badge-accent ml-2">Dueño</span>}
+    <button key={member.id} class="row !py-3" disabled={!online} onClick={() => setMode({ name: "edit", member })}>
+      <span class="avatar-disc w-10 h-10 text-base shrink-0" data-role={member.role === "manager" ? "manager" : undefined}>
+        {(member.name.trim()[0] ?? "?").toUpperCase()}
+      </span>
+      <div class="flex-1 min-w-0">
+        <div class="font-semibold flex items-center gap-2">
+          <span class="truncate">{member.name}</span>
+          {member.owner && <span class="pill pill-plain"><Icon name="crown" size={12} /> Dueño</span>}
         </div>
-        <div class="text-xs opacity-70">
-          {member.has_pin ? "Con PIN" : member.role === "manager"
-            ? <span class="text-warning">Sin PIN: un encargado necesita PIN para entrar</span>
-            : "Sin PIN"}
+        <div class="text-xs label-2">
+          {roleLabel(member.role)} · {member.has_pin ? "con PIN" : member.role === "manager"
+            ? <span class="pill-warn">sin PIN: un encargado necesita PIN para entrar</span>
+            : "sin PIN"}
           {member.user ? ` · usuario ${member.user}` : ""}
         </div>
       </div>
-      <span class={`badge ${member.role === "manager" ? "badge-primary" : member.role === "none" ? "badge-ghost" : "badge-neutral"}`}>
-        {roleLabel(member.role)}
-      </span>
-      <button class="btn btn-sm" disabled={!online} onClick={() => setMode({ name: "edit", member })}>Editar</button>
-    </li>
+      <Icon name="chevron" size={18} class="label-2" />
+    </button>
   );
   return (
-    <section class="p-4 max-w-3xl mx-auto flex flex-col gap-3">
-      <div class="flex items-center gap-2">
-        <h2 class="text-xl flex-1">Empleados</h2>
-        <button class="btn btn-primary btn-sm" disabled={!online} onClick={() => setMode({ name: "new" })}>Nuevo empleado</button>
-        <button class="btn btn-ghost btn-sm" onClick={onClose}>Volver a vender</button>
-      </div>
-      {!online && <div role="alert" class="alert alert-warning">Administrar empleados necesita internet.</div>}
-      {error && <div role="alert" class="alert alert-error">{error}</div>}
-      {busy && <span class="loading loading-spinner" />}
-      <h3 class="font-semibold">Con acceso a esta caja ({withAccess.length})</h3>
-      <ul class="list bg-base-100 rounded-box">{withAccess.map(row)}</ul>
-      {others.length > 0 && (
-        <details class="collapse collapse-arrow bg-base-100">
-          <summary class="collapse-title text-sm">Otros empleados de la tienda, sin acceso a esta caja ({others.length})</summary>
-          <ul class="collapse-content list">{others.map(row)}</ul>
-        </details>
-      )}
-      {archived.length > 0 && (
-        <details class="collapse collapse-arrow bg-base-100">
-          <summary class="collapse-title text-sm">Dados de baja ({archived.length})</summary>
-          <ul class="collapse-content list">
-            {archived.map((member) => (
-              <li key={member.id} class="list-row items-center">
-                <div class="list-col-grow opacity-70">{member.name}</div>
-                <button class="btn btn-xs" disabled={!online} onClick={() => setMode({ name: "edit", member })}>Reactivar…</button>
-              </li>
-            ))}
-          </ul>
-        </details>
+    <section class="p-4 lg:p-8 max-w-3xl mx-auto flex flex-col gap-6 rise">
+      <PageHeader title="Empleados" subtitle={setup.register.name} icon="idcard" back={onClose}
+        actions={
+          <button class="btn btn-ghost text-primary" disabled={!online} onClick={() => setMode({ name: "new" })}>
+            <Icon name="plus" size={20} /> Nuevo empleado
+          </button>
+        } />
+      {!online && <Banner tone="warn">Administrar empleados necesita internet.</Banner>}
+      {error && <Banner tone="error">{error}</Banner>}
+      {busy && !members.length ? <Loading /> : (
+        <>
+          <Section title={`Con acceso a esta caja (${withAccess.length})`}>
+            {withAccess.length ? withAccess.map(row) : <div class="row label-2 text-sm">Nadie todavía.</div>}
+          </Section>
+          {others.length > 0 && (
+            <details class="flex flex-col gap-2">
+              <summary class="text-sm label-2 font-semibold uppercase tracking-wide px-4 cursor-pointer">
+                Otros empleados de la tienda, sin acceso a esta caja ({others.length})
+              </summary>
+              <div class="grouped mt-2">{others.map(row)}</div>
+            </details>
+          )}
+          {archived.length > 0 && (
+            <details class="flex flex-col gap-2">
+              <summary class="text-sm label-2 font-semibold uppercase tracking-wide px-4 cursor-pointer">Dados de baja ({archived.length})</summary>
+              <div class="grouped mt-2">
+                {archived.map((member) => (
+                  <div key={member.id} class="row">
+                    <span class="flex-1 label-2">{member.name}</span>
+                    <button class="btn btn-sm" disabled={!online} onClick={() => setMode({ name: "edit", member })}>Reactivar</button>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </>
       )}
     </section>
   );
@@ -163,45 +172,42 @@ function MemberForm({ member, self = false, onCancel, onSaved }: {
   }
 
   return (
-    <section class="p-4 max-w-md mx-auto flex flex-col gap-3">
-      <h2 class="text-xl">{member ? (archived ? `Reactivar a ${member.name}` : `Editar a ${member.name}`) : "Nuevo empleado"}</h2>
-      <form class="flex flex-col gap-3" onSubmit={submit}>
-        <fieldset class="fieldset">
-          <legend class="fieldset-legend">Nombre</legend>
+    <section class="p-4 lg:p-8 max-w-md mx-auto flex flex-col gap-6 rise">
+      <PageHeader title={member ? (archived ? "Reactivar" : "Editar empleado") : "Nuevo empleado"} subtitle={member?.name}
+        icon="idcard" back={onCancel} backLabel="Empleados" />
+      <form class="flex flex-col gap-6" onSubmit={submit}>
+        <Field label="Nombre">
           <input class="input w-full" type="text" maxLength={100} value={name} onInput={(e) => setName(e.currentTarget.value)} />
-        </fieldset>
-        <fieldset class="fieldset">
-          <legend class="fieldset-legend">Acceso a esta caja</legend>
-          {lockedRole && (
-            <p class="text-xs opacity-70">
-              {self ? "No puedes cambiar tu propio acceso." : "Es gerente del POS en Odoo: su acceso se cambia en Odoo."}
-            </p>
-          )}
+        </Field>
+        <Section title="Acceso a esta caja"
+          footer={lockedRole ? (self ? "No puedes cambiar tu propio acceso." : "Es gerente del POS en Odoo: su acceso se cambia en Odoo.") : undefined}>
           {ROLES.filter((r) => member || r.value !== "none").map((r) => (
-            <label key={r.value} class="flex gap-2 items-start cursor-pointer py-1">
-              <input type="radio" class="radio radio-sm mt-1" name="role" value={r.value} checked={role === r.value}
+            <label key={r.value} class={`row !items-start !py-3 ${lockedRole ? "opacity-60" : "cursor-pointer"}`}>
+              <input type="radio" class="sr-only" name="role" value={r.value} checked={role === r.value}
                 disabled={lockedRole} onChange={() => setRole(r.value)} />
-              <span><span class="font-semibold">{r.label}</span><br /><span class="text-xs opacity-70">{r.help}</span></span>
+              <span class="flex-1">
+                <span class="font-semibold block">{r.label}</span>
+                <span class="text-xs label-2">{r.help}</span>
+              </span>
+              {role === r.value && <Icon name="check" size={20} class="text-primary mt-1" />}
             </label>
           ))}
-        </fieldset>
-        <fieldset class="fieldset">
-          <legend class="fieldset-legend">{member ? "Nuevo PIN (déjalo vacío para no cambiarlo)" : "PIN (4 a 8 números)"}</legend>
-          <input class="input w-full" type="password" inputMode="numeric" autocomplete="new-password" maxLength={8}
-            value={pin} onInput={(e) => setPin(e.currentTarget.value.replace(/\D/g, ""))} placeholder="PIN" />
-          <input class="input w-full" type="password" inputMode="numeric" autocomplete="new-password" maxLength={8}
-            value={pin2} onInput={(e) => setPin2(e.currentTarget.value.replace(/\D/g, ""))} placeholder="Repite el PIN" />
-        </fieldset>
-        {error && <div role="alert" class="alert alert-error">{error}</div>}
-        <div class="flex gap-2">
-          <button type="button" class="btn" onClick={onCancel}>Cancelar</button>
-          <button class="btn btn-primary flex-1" disabled={busy}>{busy ? <span class="loading loading-spinner" /> : "Guardar"}</button>
-        </div>
+        </Section>
+        <Field label={member ? "Nuevo PIN" : "PIN"} hint={member ? "Déjalo vacío para no cambiarlo." : "De 4 a 8 números."}>
+          <div class="grid grid-cols-2 gap-2">
+            <input class="input w-full tracking-[0.3em]" type="password" inputMode="numeric" autocomplete="new-password" maxLength={8}
+              value={pin} onInput={(e) => setPin(e.currentTarget.value.replace(/\D/g, ""))} placeholder="PIN" aria-label="PIN" />
+            <input class="input w-full tracking-[0.3em]" type="password" inputMode="numeric" autocomplete="new-password" maxLength={8}
+              value={pin2} onInput={(e) => setPin2(e.currentTarget.value.replace(/\D/g, ""))} placeholder="Repite el PIN" aria-label="Repite el PIN" />
+          </div>
+        </Field>
+        {error && <Banner tone="error">{error}</Banner>}
+        <button class="btn btn-primary btn-xl" disabled={busy}>{busy ? <span class="loading loading-spinner" /> : "Guardar"}</button>
       </form>
       {member && member.active && !self && (
-        <button class="btn btn-ghost btn-sm text-error" disabled={busy}
+        <button class="btn btn-ghost text-danger" disabled={busy}
           onClick={() => { if (confirm(`¿Dar de baja a ${member.name}? Ya no podrá entrar a ninguna caja. Su historial se conserva y se puede reactivar.`)) void run(() => client.changeStaff(setup.register.id, member.id, { active: false })); }}>
-          Dar de baja
+          <Icon name="trash" size={18} /> Dar de baja
         </button>
       )}
     </section>

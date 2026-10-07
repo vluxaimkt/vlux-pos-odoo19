@@ -2,6 +2,8 @@ import { useState } from "preact/hooks";
 
 import type { RegisterState } from "../api/types";
 import { usePos } from "../state";
+import { Icon } from "../ui/Icon";
+import { Banner, EmptyState, Field } from "../ui/Page";
 import { explain } from "./SetupScreen";
 
 /** The register is closed: count the opening cash and open it. Needs the network. */
@@ -30,31 +32,40 @@ export function RegisterScreen({ state, onOpened }: { state: RegisterState; onOp
   // A session Odoo created but nobody opened ("opening_control") is opened here.
   if (state.session?.state === "closing_control") {
     return (
-      <div role="alert" class="alert alert-warning m-4">
-        La caja está en corte ({state.session.name}). Termínalo en Odoo antes de volver a abrirla.
-      </div>
+      <section class="p-4 lg:p-8 max-w-md mx-auto flex flex-col gap-6">
+        <EmptyState icon="calculator" title={`La caja está en corte (${state.session.name})`}
+          hint="Termínalo en Odoo antes de volver a abrirla." />
+      </section>
     );
   }
 
   return (
-    <form class="p-4 max-w-sm mx-auto flex flex-col gap-3" onSubmit={open}>
-      <h2 class="text-xl">Abrir {state.name}</h2>
-      <fieldset class="fieldset">
-        <legend class="fieldset-legend">Efectivo inicial en el cajón</legend>
-        <input
-          class="input input-lg w-full"
-          type="number"
-          inputMode="decimal"
-          min="0"
-          step="0.01"
-          value={cash}
-          onInput={(event) => setCash(event.currentTarget.value)}
-          required={state.cash_control}
-        />
-      </fieldset>
-      {!online && <div role="alert" class="alert alert-warning">Abrir la caja necesita internet.</div>}
-      {error && <div role="alert" class="alert alert-error">{error}</div>}
-      <button class="btn btn-primary btn-lg" type="submit" disabled={busy || !online}>
+    <form class="p-4 lg:p-8 min-h-[70vh] max-w-md mx-auto flex flex-col justify-center gap-6 rise" onSubmit={open}>
+      <div class="flex flex-col items-center gap-3 text-center">
+        <span class="avatar-disc w-20 h-20 pop" data-role="manager" aria-hidden="true"><Icon name="power" size={40} /></span>
+        <h1 class="text-3xl">Abrir {state.name}</h1>
+        <p class="label-2">Cuenta el efectivo que hay en el cajón para empezar el turno.</p>
+      </div>
+      <Field label="Efectivo inicial en el cajón">
+        <label class="input input-lg w-full !h-16 text-3xl num">
+          <span class="label-2">$</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            placeholder="0.00"
+            aria-label="Efectivo inicial en el cajón"
+            autofocus
+            value={cash}
+            onInput={(event) => setCash(event.currentTarget.value)}
+            required={state.cash_control}
+          />
+        </label>
+      </Field>
+      {!online && <Banner tone="warn">Abrir la caja necesita internet.</Banner>}
+      {error && <Banner tone="error">{error}</Banner>}
+      <button class="btn btn-primary btn-xl" type="submit" disabled={busy || !online}>
         {busy ? <span class="loading loading-spinner" /> : "Abrir caja"}
       </button>
     </form>

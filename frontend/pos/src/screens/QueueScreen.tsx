@@ -4,6 +4,8 @@ import type { OutboxRow } from "../db/db";
 import { formatDateTime } from "../lib/locale";
 import { formatMoney } from "../lib/money";
 import { usePos } from "../state";
+import { Icon } from "../ui/Icon";
+import { Banner, EmptyState, PageHeader, Section } from "../ui/Page";
 import { retrySale } from "../sync/outbox";
 
 const STATUS_LABEL: Record<OutboxRow["status"], string> = {
@@ -49,37 +51,49 @@ export function QueueScreen({ onClose }: { onClose: () => void }) {
     await sendNow();
   }
 
-  return (
-    <section class="p-4 flex flex-col gap-3 max-w-3xl mx-auto">
-      <div class="flex items-center gap-2">
-        <h2 class="text-xl flex-1">Ventas por enviar</h2>
-        <button class="btn btn-primary btn-sm" disabled={busy || !online} onClick={() => void sendNow()}>
-          {busy ? <span class="loading loading-spinner loading-sm" /> : "Enviar ahora"}
-        </button>
-        <button class="btn btn-ghost btn-sm" onClick={onClose}>Volver a vender</button>
+  const open = rows.filter((row) => row.status !== "sent");
+  const sent = rows.filter((row) => row.status === "sent");
+  const item = (row: OutboxRow) => (
+    <div key={row.uuid} class="row !items-start !py-3">
+      <span class="method-icon !w-9 !h-9 !rounded-[10px] shrink-0" aria-hidden="true" style={{ background: STATUS_COLOR[row.status] }}>
+        <Icon name={row.status === "sent" ? "check" : row.status === "attention" ? "warning" : "tray"} size={18} />
+      </span>
+      <div class="flex-1 min-w-0">
+        <div class="flex gap-2 items-center">
+          <span class="font-semibold">{STATUS_LABEL[row.status]}</span>
+          <span class="font-mono text-xs label-2 truncate">{row.result?.pos_reference ?? row.uuid.slice(0, 8)}</span>
+        </div>
+        <div class="text-xs label-2">{formatDateTime(row.createdAt)}</div>
+        {row.lastError && row.status !== "sent" && <div class="text-sm text-danger mt-1">{row.lastError.message}</div>}
       </div>
-      {!online && <div role="alert" class="alert alert-warning">Sin internet: se enviarán solas cuando vuelva.</div>}
-      {!rows.length && <p class="opacity-60">No hay ventas pendientes.</p>}
-      <ul class="list bg-base-100 rounded-box">
-        {rows.map((row) => (
-          <li key={row.uuid} class="list-row items-start">
-            <div class="list-col-grow">
-              <div class="flex gap-2 items-center">
-                <span class={`badge ${row.status === "attention" ? "badge-error" : row.status === "pending" ? "badge-warning" : "badge-success"}`}>
-                  {STATUS_LABEL[row.status]}
-                </span>
-                <span class="font-mono text-xs opacity-60">{row.result?.pos_reference ?? row.uuid.slice(0, 8)}</span>
-              </div>
-              <div class="text-sm">{formatDateTime(row.createdAt)}</div>
-              {row.lastError && row.status !== "sent" && <div class="text-sm text-error">{row.lastError.message}</div>}
-            </div>
-            <div class="font-semibold">{formatMoney(row.body.expected_total ?? 0, setup.store.currency)}</div>
-            {row.status === "attention" && (
-              <button class="btn btn-sm" disabled={busy || !online} onClick={() => void retry(row.uuid)}>Reintentar</button>
-            )}
-          </li>
-        ))}
-      </ul>
+      <span class="font-semibold num">{formatMoney(row.body.expected_total ?? 0, setup.store.currency)}</span>
+      {row.status === "attention" && (
+        <button class="btn btn-sm" disabled={busy || !online} onClick={() => void retry(row.uuid)}>
+          <Icon name="refresh" size={16} /> Reintentar
+        </button>
+      )}
+    </div>
+  );
+
+  return (
+    <section class="p-4 lg:p-8 max-w-3xl mx-auto flex flex-col gap-6 rise">
+      <PageHeader title="Ventas por enviar" icon="tray" back={onClose}
+        actions={
+          <button class="btn btn-primary btn-sm" disabled={busy || !online} onClick={() => void sendNow()}>
+            {busy ? <span class="loading loading-spinner loading-sm" /> : <><Icon name="arrowUp" size={16} /> Enviar ahora</>}
+          </button>
+        } />
+      {!online && <Banner tone="warn">Sin internet: se enviarán solas cuando vuelva.</Banner>}
+      {open.length
+        ? <Section title={`Pendientes (${open.length})`}>{open.map(item)}</Section>
+        : <EmptyState icon="checkCircle" title="No hay ventas pendientes" hint="Todo lo cobrado en esta caja ya está en el servidor." />}
+      {sent.length > 0 && <Section title="Enviadas recientemente">{sent.map(item)}</Section>}
     </section>
   );
 }
+
+const STATUS_COLOR: Record<OutboxRow["status"], string> = {
+  pending: "linear-gradient(180deg, #ffb340, #ff9500)",
+  attention: "linear-gradient(180deg, #ff6961, #d70015)",
+  sent: "linear-gradient(180deg, #34c759, #248a3d)",
+};

@@ -133,6 +133,42 @@ export function Banner({ tone, children, actions }: { tone: "warn" | "error" | "
   );
 }
 
+/** The paper slip on screen (ticket, voucher): white, rounded, lifted; plain on paper. */
+export const SLIP = "receipt bg-white text-black font-mono text-sm p-4 w-[80mm] max-w-full rounded-[12px] shadow-lg print:shadow-none print:rounded-none rise";
+
+/** Above a slip: a check that pops, the title and a line of detail. */
+export function SuccessHeader({ title, children, tone = "good", icon = "check" }: {
+  title: string;
+  children?: ComponentChildren;
+  tone?: "good" | "warn";
+  icon?: IconName;
+}) {
+  const background = tone === "good" ? "linear-gradient(180deg, #34c759, #248a3d)" : "linear-gradient(180deg, #ffb340, #ff9500)";
+  return (
+    <header class="rise flex flex-col items-center gap-2 text-center print:hidden">
+      <span class="avatar-disc w-16 h-16 pop" style={{ background }}><Icon name={icon} size={36} /></span>
+      <h1 class="text-3xl">{title}</h1>
+      {children && <div class="label-2">{children}</div>}
+    </header>
+  );
+}
+
+/** Below a slip: print it, then go on. */
+export function SlipActions({ onDone, doneLabel = "Listo", printLabel = "Imprimir" }: {
+  onDone: () => void;
+  doneLabel?: string;
+  printLabel?: string;
+}) {
+  return (
+    <div class="flex flex-wrap justify-center gap-4 print:hidden w-full max-w-md">
+      <button class="btn btn-xl flex-1 bg-base-100 border-[0.5px] border-[var(--glass-border)]" onClick={() => window.print()}>
+        <Icon name="printer" size={20} /> {printLabel}
+      </button>
+      <button class="btn btn-primary btn-xl flex-1" autofocus onClick={onDone}>{doneLabel}</button>
+    </div>
+  );
+}
+
 /** Loading, centered. */
 export function Loading() {
   return <div class="py-16 grid place-items-center"><span class="loading loading-spinner loading-lg text-primary" /></div>;

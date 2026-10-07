@@ -209,6 +209,11 @@ h3,
   animation: pop-in 300ms var(--ease-spring) both;
 }
 
+/* A tall dialog scrolls; its parts keep their height (a grouped list would collapse). */
+.modal-box > * {
+  flex-shrink: 0;
+}
+
 .modal::backdrop,
 .modal {
   -webkit-backdrop-filter: blur(8px);
