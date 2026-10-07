@@ -12,6 +12,7 @@ import type { Pricing } from "../sale/pricing";
 import { usePos } from "../state";
 import { enqueueSale } from "../sync/outbox";
 import { Icon, type IconName } from "../ui/Icon";
+import { Banner } from "../ui/Page";
 
 /** What a sale on credit prints: the customer and the balances. */
 export interface CreditTicket {
@@ -150,8 +151,8 @@ export function PayScreen({ cart, pricing, onBack, onPaid }: {
           ))}
         </div>
       )}
-      {state.problem && <div role="alert" class="alert alert-error">{state.problem}</div>}
-      {error && <div role="alert" class="alert alert-error">{error}</div>}
+      {state.problem && <Banner tone="error">{state.problem}</Banner>}
+      {error && <Banner tone="error">{error}</Banner>}
 
       {!done && (
         <>

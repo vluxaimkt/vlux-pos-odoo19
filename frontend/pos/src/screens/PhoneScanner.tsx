@@ -7,6 +7,7 @@ import type { ScanHandler } from "../input/sources";
 import { usePos } from "../state";
 import { explain } from "./SetupScreen";
 import { Icon } from "../ui/Icon";
+import { Banner } from "../ui/Page";
 
 const META_DEVICE = "device-id";
 const META_PHONE = "phone-scanner";
@@ -148,27 +149,37 @@ export function PhoneScannerButton() {
       {error && step.name === "closed" && <span role="alert" class="text-sm text-error ml-2">{error}</span>}
       {step.name !== "closed" && (
         <dialog class="modal modal-open" aria-label="Escáner del celular">
-          <div class="modal-box flex flex-col gap-3 items-center text-center">
+          <div class="modal-box flex flex-col gap-4 items-center text-center">
             {step.name === "linking" ? (
               <>
-                <h3 class="text-lg font-bold">Escanea este código con el celular</h3>
-                <img src={step.qr} alt="Código QR para vincular el celular" class="w-56 h-56 bg-white p-2 rounded" />
-                <div>o abre en el celular <span class="font-mono text-xs break-all">{step.url}</span></div>
-                <div>Código: <span class="font-mono text-xl tracking-widest">{step.code}</span></div>
-                <div class="text-xs opacity-60">Vence a las {formatTime(step.expiresAt)}</div>
-                <span class="loading loading-dots" aria-label="Esperando al celular" />
+                <span class="avatar-disc w-14 h-14" data-role="manager" aria-hidden="true"><Icon name="phone" size={28} /></span>
+                <h3 class="text-2xl">Vincula el celular</h3>
+                <p class="label-2 text-sm">Escanea este código con la cámara del celular.</p>
+                <img src={step.qr} alt="Código QR para vincular el celular" class="w-56 h-56 bg-white p-4 rounded-[20px] shadow-lg" />
+                <div class="flex flex-col gap-1">
+                  <span class="text-xs label-2">O escribe este código en el celular</span>
+                  <span class="font-mono text-3xl font-semibold tracking-[0.3em]">{step.code}</span>
+                </div>
+                <div class="text-xs label-2 break-all">{step.url}</div>
+                <div class="flex items-center gap-2 text-sm label-2">
+                  <span class="loading loading-dots loading-sm text-primary" aria-label="Esperando al celular" />
+                  Esperando al celular · vence a las {formatTime(step.expiresAt)}
+                </div>
               </>
             ) : (
               <>
-                <h3 class="text-lg font-bold flex items-center gap-2">Celular vinculado <Icon name="check" class="text-success" /></h3>
-                <p>Lo que escanees con el celular entra a esta venta.</p>
-                {lastSeen && <p class="text-xs opacity-60">Última señal: {formatTime(lastSeen)}</p>}
-                <button class="btn btn-warning btn-sm" onClick={() => void unlink()}>Desvincular celular</button>
+                <span class="avatar-disc w-14 h-14 pop" style={{ background: "linear-gradient(180deg, #34c759, #248a3d)" }} aria-hidden="true">
+                  <Icon name="check" size={28} />
+                </span>
+                <h3 class="text-2xl">Celular vinculado</h3>
+                <p class="label-2">Lo que escanees con el celular entra a esta venta.</p>
+                {lastSeen && <p class="text-xs label-2">Última señal: {formatTime(lastSeen)}</p>}
+                <button class="btn btn-ghost text-danger" onClick={() => void unlink()}><Icon name="link" size={18} /> Desvincular celular</button>
               </>
             )}
-            {error && <div role="alert" class="alert alert-error">{error}</div>}
-            <div class="modal-action">
-              <button class="btn" onClick={() => setStep({ name: "closed" })}>Cerrar</button>
+            {error && <div class="w-full text-left"><Banner tone="error">{error}</Banner></div>}
+            <div class="modal-action mt-0 self-stretch">
+              <button class="btn btn-primary flex-1" onClick={() => setStep({ name: "closed" })}>Listo</button>
             </div>
           </div>
         </dialog>
