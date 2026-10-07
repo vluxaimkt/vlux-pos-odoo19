@@ -63,6 +63,8 @@ jobs:
 
   test:
     runs-on: ubuntu-24.04
+    # Without it GitHub allows 6 hours: a stuck apt step held a run for over an hour.
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -108,7 +110,10 @@ jobs:
         with:
           path: ~/apt-cache
           key: apt-${{ runner.os }}-${{ github.job }}-${{ hashFiles('vlux-addons/.github/workflows/ci.yml') }}
-          restore-keys: apt-${{ runner.os }}-${{ github.job }}-
+          # Another job's packages are a good start (test and e2e share most).
+          restore-keys: |
+            apt-${{ runner.os }}-${{ github.job }}-
+            apt-${{ runner.os }}-
 
       - name: Install system dependencies
         # A slow apt mirror has held this step for 8+ minutes (normally under 1):
@@ -261,7 +266,10 @@ jobs:
         with:
           path: ~/apt-cache
           key: apt-${{ runner.os }}-${{ github.job }}-${{ hashFiles('vlux-addons/.github/workflows/ci.yml') }}
-          restore-keys: apt-${{ runner.os }}-${{ github.job }}-
+          # Another job's packages are a good start (test and e2e share most).
+          restore-keys: |
+            apt-${{ runner.os }}-${{ github.job }}-
+            apt-${{ runner.os }}-
 
       - name: Install system dependencies
         # A slow apt mirror has held this step for 8+ minutes (normally under 1):
@@ -413,7 +421,10 @@ jobs:
         with:
           path: ~/apt-cache
           key: apt-${{ runner.os }}-${{ github.job }}-${{ hashFiles('vlux-addons/.github/workflows/ci.yml') }}
-          restore-keys: apt-${{ runner.os }}-${{ github.job }}-
+          # Another job's packages are a good start (test and e2e share most).
+          restore-keys: |
+            apt-${{ runner.os }}-${{ github.job }}-
+            apt-${{ runner.os }}-
 
       - name: Install system dependencies
         # A slow apt mirror has held this step for 8+ minutes (normally under 1):
