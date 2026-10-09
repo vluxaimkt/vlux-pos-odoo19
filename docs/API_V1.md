@@ -265,7 +265,10 @@ caja). Un código ya usado responde `CONFLICT` con `details.existing`.
 
 Desde la caja VLUX (PWA) la persona no es un usuario de Odoo sino un empleado
 con PIN: `POST /registers/<id>/products` (alcance `orders:write`)
-`{"name", "barcode", "list_price", "taxes_ids"?}` hace la misma alta rápida
+`{"name", "barcode", "list_price", "standard_price"?, "initial_qty"?, "taxes_ids"?}`
+hace la misma alta rápida (`standard_price`: precio de compra; `initial_qty`:
+existencia inicial, que entra a la ubicación de la caja como ajuste de
+inventario si el producto lleva existencias)
 si quien está en la caja es encargado (o su usuario tiene el grupo de alta
 rápida), con PIN verificado y la caja abierta. Responde el producto como lo
 manda el catálogo, para venderlo en ese momento; `CONFLICT` si el código ya
@@ -275,10 +278,16 @@ existe. Requiere `vlux_pos_catalog`.
 `vlux_catalog_editors` (`managers`: encargados y dueño, por defecto; `owner`:
 sólo el dueño); `/employees` trae `can_edit_catalog`. El alta rápida acepta
 `image` (data URI). `POST /registers/<id>/products/<product_id>` cambia
-cualquiera de `name, list_price, description` (texto plano), `barcode` (no
-repetido), `pos_categ_id`, `to_weight`, `taxes_ids` e `image` (`null` la
-quita); se escribe como el usuario de quien lo hizo y responde el producto
-como lo manda el catálogo, con la versión de la foto.
+cualquiera de `name, list_price, standard_price, description` (texto plano),
+`barcode` (no repetido), `pos_categ_id`, `to_weight`, `taxes_ids` e `image`
+(`null` la quita); se escribe como el usuario de quien lo hizo y responde el
+producto como lo manda el catálogo, con la versión de la foto.
+
+**El precio de compra no viaja en el catálogo.** Sólo quien puede editar
+productos lo consulta con `GET /registers/<id>/products/<product_id>/details`
+→ `{"standard_price", "qty_available", "tracks_stock"}` (`qty_available` es
+`null` si el producto no lleva existencias); a cualquier otro responde
+`FORBIDDEN`.
 
 ### 4.3 Operación de venta (fase C)
 

@@ -1,10 +1,11 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 
-import type { PosCategory, ProductChanges } from "../api/types";
+import type { PosCategory, ProductChanges, ProductDetails } from "../api/types";
 import { productRow, type ProductRow } from "../db/db";
 import { usePos } from "../state";
 import { Icon } from "../ui/Icon";
-import { Banner, Field } from "../ui/Page";
+import { formatMoney } from "../lib/money";
+import { Banner, Field, MarginHint } from "../ui/Page";
 import { PhotoPicker } from "./PhotoPicker";
 import { explain } from "./SetupScreen";
 
@@ -30,6 +31,20 @@ export function ProductEditDialog({ product, picture, categories, onSaved, onCan
   const [category, setCategory] = useState(String(product.pos_category_ids[0] ?? ""));
   const [toWeight, setToWeight] = useState(!!product.to_weight);
   const [taxId, setTaxId] = useState(String(product.tax_ids[0] ?? ""));
+  // The purchase price and stock come apart: only editors may see them.
+  const [details, setDetails] = useState<ProductDetails | null>(null);
+  const [cost, setCost] = useState("");
+  useEffect(() => {
+    let current = true;
+    client.productDetails(setup.register.id, product.id)
+      .then((found) => {
+        if (!current) return;
+        setDetails(found);
+        setCost(found.standard_price ? String(found.standard_price) : "");
+      })
+      .catch(() => undefined);
+    return () => { current = false; };
+  }, [product.id]);
   // undefined: untouched; null: removed; string: a new picture.
   const [image, setImage] = useState<string | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +60,11 @@ export function ProductEditDialog({ product, picture, categories, onSaved, onCan
     const changes: ProductChanges = {};
     if (name.trim() !== product.name) changes.name = name.trim();
     if (Math.abs(listPrice - product.list_price) > 0.0001) changes.list_price = Math.round(listPrice * 100) / 100;
+    if (details) {
+      const standardPrice = cost.trim() ? Number(cost.replace(",", ".")) : 0;
+      if (!Number.isFinite(standardPrice) || standardPrice < 0) return setError("El precio de compra no es válido.");
+      if (Math.abs(standardPrice - details.standard_price) > 0.0001) changes.standard_price = Math.round(standardPrice * 100) / 100;
+    }
     if (description.trim() !== (product.description ?? "")) changes.description = description.trim();
     if (barcode.trim() !== (product.barcode ?? "")) changes.barcode = barcode.trim();
     if (category !== String(product.pos_category_ids[0] ?? "")) changes.pos_categ_id = category ? Number(category) : null;
@@ -83,6 +103,26 @@ export function ProductEditDialog({ product, picture, categories, onSaved, onCan
             <input type="text" inputMode="decimal" value={price} aria-label="Precio de venta" onInput={(e) => setPrice(e.currentTarget.value)} />
           </label>
         </Field>
+        {details && (
+          <div class="grid grid-cols-2 gap-4">
+            <Field label="Precio de compra">
+              <label class="input w-full num">
+                <span class="label-2">$</span>
+                <input type="text" inputMode="decimal" value={cost} placeholder="0.00" aria-label="Precio de compra"
+                  onInput={(e) => setCost(e.currentTarget.value)} />
+              </label>
+            </Field>
+            {details.tracks_stock && (
+              <Field label="Existencia">
+                <span class="input w-full num items-center label-2">
+                  {details.qty_available} {product.uom.name === "Unidades" ? "pzas" : product.uom.name}
+                </span>
+              </Field>
+            )}
+          </div>
+        )}
+        {details && <MarginHint price={Number(price.replace(",", "."))} cost={Number(cost.replace(",", "."))}
+          money={(n) => formatMoney(n, setup.store.currency)} />}
         <Field label="Descripción">
           <textarea class="textarea w-full" rows={3} maxLength={2000} value={description}
             onInput={(e) => setDescription(e.currentTarget.value)} />

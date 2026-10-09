@@ -16,7 +16,9 @@ from odoo.addons.vlux_core.controllers.api_catalog import _image_versions, _prod
 from ..models.pos_config import QUICK_CREATE_GROUP
 from .api_sales import _acting_employee, _register
 
-EDITABLE = ("name", "list_price", "description", "barcode", "pos_categ_id", "to_weight", "taxes_ids", "image")
+EDITABLE = ("name", "list_price", "standard_price", "description", "barcode", "pos_categ_id", "to_weight",
+            "taxes_ids", "image")
+QUICK_CREATE = ("name", "barcode", "list_price", "standard_price", "initial_qty", "taxes_ids", "image")
 
 
 def _editor(config, token, body):
@@ -50,9 +52,12 @@ class VluxApiCatalogEdit(http.Controller):
     @api_route("/registers/<int:register_id>/products", scope="orders:write", methods=("POST",),
                summary="Alta rápida de un producto desde la caja (con PIN)")
     def quick_product(self, token, register_id, **kwargs):
-        """Body ``{"name", "barcode", "list_price", "taxes_ids"?, "image"?}`` (needs vlux_pos_catalog).
+        """Body ``{"name", "barcode", "list_price", "standard_price"?, "initial_qty"?, "taxes_ids"?, "image"?}``
+        (needs vlux_pos_catalog).
 
-        A taken barcode answers ``CONFLICT``.
+        ``initial_qty`` is counted into the register's stock location (an
+        inventory adjustment), for products that track stock. A taken barcode
+        answers ``CONFLICT``.
         """
         Template = request.env["product.template"]
         if not hasattr(Template, "_vlux_quick_create_for"):
@@ -60,7 +65,7 @@ class VluxApiCatalogEdit(http.Controller):
         config = _register(register_id, token)
         body = json_body()
         _editor(config, token, body)
-        values = {key: body[key] for key in ("name", "barcode", "list_price", "taxes_ids", "image") if key in body}
+        values = {key: body[key] for key in QUICK_CREATE if key in body}
         try:
             result = Template._vlux_quick_create_for(values, config)
         except ValidationError as error:
@@ -70,10 +75,30 @@ class VluxApiCatalogEdit(http.Controller):
                                details={"existing": result.get("existing")})
         return _payload(request.env["product.product"].sudo().browse(result["product_id"]))
 
+    @api_route("/registers/<int:register_id>/products/<int:product_id>/details", scope="orders:write",
+               methods=("GET",), summary="Precio de compra y existencia de un producto (quien puede editar productos)")
+    def product_details(self, token, register_id, product_id, **kwargs):
+        """``{"standard_price", "qty_available", "tracks_stock"}``. Only for who may edit products:
+        the purchase price never travels in the catalog every register receives."""
+        config = _register(register_id, token)
+        _editor(config, token, {})
+        product = request.env["product.product"].sudo().with_company(config.company_id).with_context(
+            active_test=False).search([("id", "=", product_id), ("company_id", "in", [False, config.company_id.id])],
+                                      limit=1)
+        if not product:
+            raise VluxApiError("NOT_FOUND", "El producto no existe.")
+        tracks = bool(product.is_storable)
+        return {
+            "standard_price": product.standard_price,
+            "qty_available": product.qty_available if tracks else None,
+            "tracks_stock": tracks,
+        }
+
     @api_route("/registers/<int:register_id>/products/<int:product_id>", scope="orders:write", methods=("POST",),
                summary="Editar un producto desde la caja (precio, descripción, foto…; con PIN)")
     def edit_product(self, token, register_id, product_id, **kwargs):
-        """Body with any of ``name, list_price, description, barcode, pos_categ_id, to_weight, taxes_ids, image``.
+        """Body with any of ``name, list_price, standard_price, description, barcode, pos_categ_id, to_weight,
+        taxes_ids, image``.
 
         ``image: null`` removes the picture. ``description`` is plain text.
         """
