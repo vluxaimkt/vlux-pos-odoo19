@@ -47,6 +47,8 @@ export interface PosContextValue {
   /** End the current authorization: the person at the register acts again as themselves. */
   releaseAuthorization(): void;
   /** Try to send the queued sales now (after a sale, or from the queue screen). */
+  /** "Back" from a module: the previous module's name and how to go there. */
+  back: { label: string; go(): void };
   flushNow(): Promise<void>;
   forget(): Promise<void>;
 }

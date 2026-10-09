@@ -64,17 +64,19 @@ export function SalesScreen({ onClose }: { onClose: () => void }) {
           <input type="search" placeholder="Folio del ticket (p. ej. 260-4-000008)" aria-label="Folio del ticket"
             value={query} onInput={(e) => setQuery(e.currentTarget.value)} />
         </label>
-        <button class="btn btn-primary h-14 rounded-[16px] px-6" disabled={busy || !online}>Buscar</button>
+        <button class="btn btn-primary h-14 rounded-[16px] px-4 sm:px-6 shrink-0" disabled={busy || !online} aria-label="Buscar">
+          <Icon name="search" size={20} /><span class="hidden sm:inline">Buscar</span>
+        </button>
       </form>
       {error && <Banner tone="error">{error}</Banner>}
       {busy ? <Loading /> : orders.length > 0 ? (
         <Section title={query.trim().length >= 3 ? "Resultado" : "Ventas recientes de esta caja"}>
           {orders.map((order) => (
-            <div key={order.id} class="row !py-3">
+            <div key={order.id} class="row !py-3 flex-wrap">
               <span class="avatar-disc w-10 h-10 shrink-0" data-role={order.is_refund ? undefined : "manager"} aria-hidden="true">
                 <Icon name={order.is_refund ? "back" : "receipt"} size={20} />
               </span>
-              <div class="flex-1 min-w-0">
+              <div class="flex-1 min-w-0 basis-40">
                 <div class="font-semibold flex items-center gap-2">
                   <span class="truncate">{order.pos_reference ?? order.name}</span>
                   {order.is_refund && <span class="pill pill-plain pill-warn">Devolución</span>}
@@ -85,7 +87,7 @@ export function SalesScreen({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
               <span class="font-semibold num">{money(order.amount_total)}</span>
-              <div class="flex gap-2">
+              <div class="flex gap-2 ml-auto">
                 <button class="btn btn-sm" onClick={() => setMode({ name: "ticket", order })} aria-label="Reimprimir" title="Reimprimir">
                   <Icon name="printer" size={16} /><span class="hidden sm:inline">Reimprimir</span>
                 </button>
