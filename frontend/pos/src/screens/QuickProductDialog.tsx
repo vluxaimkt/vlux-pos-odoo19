@@ -3,7 +3,8 @@ import { useState } from "preact/hooks";
 import type { Product } from "../api/types";
 import { usePos } from "../state";
 import { Icon } from "../ui/Icon";
-import { Banner, Field } from "../ui/Page";
+import { formatMoney } from "../lib/money";
+import { Banner, Field, MarginHint } from "../ui/Page";
 import { PhotoPicker } from "./PhotoPicker";
 import { explain } from "./SetupScreen";
 
@@ -21,6 +22,8 @@ export function QuickProductDialog({ barcode, onCreated, onCancel }: {
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [taxId, setTaxId] = useState("");
+  const [cost, setCost] = useState("");
+  const [stock, setStock] = useState("");
   const [image, setImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,10 +44,16 @@ export function QuickProductDialog({ barcode, onCreated, onCancel }: {
     const listPrice = Number(price.replace(",", "."));
     if (!name.trim()) return setError("Escribe el nombre del producto.");
     if (!Number.isFinite(listPrice) || listPrice <= 0) return setError("Escribe el precio de venta.");
+    const standardPrice = cost.trim() ? Number(cost.replace(",", ".")) : 0;
+    if (!Number.isFinite(standardPrice) || standardPrice < 0) return setError("El precio de compra no es válido.");
+    const initialQty = stock.trim() ? Number(stock.replace(",", ".")) : 0;
+    if (!Number.isFinite(initialQty) || initialQty < 0) return setError("La existencia no es válida.");
     setBusy(true);
     try {
       const product = await client.quickProduct(setup.register.id, {
         name: name.trim(), barcode, list_price: Math.round(listPrice * 100) / 100,
+        ...(standardPrice ? { standard_price: Math.round(standardPrice * 100) / 100 } : {}),
+        ...(initialQty ? { initial_qty: initialQty } : {}),
         ...(taxId ? { taxes_ids: [Number(taxId)] } : {}),
         ...(image ? { image } : {}),
       });
@@ -77,6 +86,21 @@ export function QuickProductDialog({ barcode, onCreated, onCancel }: {
               onInput={(e) => setPrice(e.currentTarget.value)} />
           </label>
         </Field>
+        <div class="grid grid-cols-2 gap-4">
+          <Field label="Precio de compra (opcional)">
+            <label class="input w-full num">
+              <span class="label-2">$</span>
+              <input type="text" inputMode="decimal" autocomplete="off" placeholder="0.00" aria-label="Precio de compra" value={cost}
+                onInput={(e) => setCost(e.currentTarget.value)} />
+            </label>
+          </Field>
+          <Field label="Existencia inicial">
+            <input class="input w-full num" type="text" inputMode="decimal" autocomplete="off" placeholder="0" aria-label="Existencia inicial"
+              value={stock} onInput={(e) => setStock(e.currentTarget.value)} />
+          </Field>
+        </div>
+        <MarginHint price={Number(price.replace(",", "."))} cost={Number(cost.replace(",", "."))}
+          money={(n) => formatMoney(n, setup.store.currency)} />
         <Field label="Impuesto">
           <select class="select w-full" value={taxId} onChange={(e) => setTaxId(e.currentTarget.value)}>
             <option value="">Impuesto predeterminado de la tienda</option>

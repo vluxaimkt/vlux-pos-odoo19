@@ -223,6 +223,8 @@ export interface OptionField {
 export interface ProductChanges {
   name?: string;
   list_price?: number;
+  /** Purchase price (cost). */
+  standard_price?: number;
   description?: string;
   barcode?: string;
   pos_categ_id?: number | null;
@@ -230,6 +232,14 @@ export interface ProductChanges {
   taxes_ids?: number[];
   /** A data URI; null removes the picture. */
   image?: string | null;
+}
+
+/** What only catalog editors see of a product (GET .../products/<id>/details): never in the catalog feed. */
+export interface ProductDetails {
+  standard_price: number;
+  /** Stock on hand; null when the product does not track stock. */
+  qty_available: number | null;
+  tracks_stock: boolean;
 }
 
 export type StaffRole = "manager" | "cashier" | "minimal" | "none";

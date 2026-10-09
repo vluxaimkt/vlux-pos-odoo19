@@ -340,6 +340,44 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         response, body = self._call("POST", path, {**new, "barcode": "7501234567888", "name": ""}, employee=self.manager1)
         self.assertEqual(body["error"], "VALIDATION_ERROR")
 
+    def test_a_new_product_comes_with_its_stock_and_purchase_price(self):
+        if not hasattr(self.env["product.template"], "_vlux_quick_create_for"):
+            self.skipTest("vlux_pos_catalog is not installed")
+        self._open()
+        path = "/registers/%d/products" % self.config.id
+        response, body = self._call("POST", path, {
+            "name": "Refresco 2 L", "barcode": "7501234567901", "list_price": 38.0,
+            "standard_price": 26.5, "initial_qty": 24,
+        }, employee=self.manager1)
+        self.assertEqual(response.status_code, 200, body)
+        self.assertNotIn("standard_price", body["data"], "the cost never travels in the catalog feed")
+        product = self.env["product.product"].browse(body["data"]["id"])
+        self.assertEqual(product.standard_price, 26.5)
+        if product.is_storable:
+            self.assertEqual(product.qty_available, 24.0, "counted into the register's stock")
+
+        response, body = self._call("POST", path, {
+            "name": "Refresco 3 L", "barcode": "7501234567918", "list_price": 45.0, "initial_qty": -3,
+        }, employee=self.manager1)
+        self.assertEqual(body["error"], "VALIDATION_ERROR", "no negative stock")
+
+    def test_editors_see_and_change_the_purchase_price(self):
+        self._open()
+        details = "/registers/%d/products/%d/details" % (self.config.id, self.cookies.id)
+        response, body = self._call("GET", details, employee=self.emp2)
+        self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"), "a cashier does not see costs")
+
+        path = "/registers/%d/products/%d" % (self.config.id, self.cookies.id)
+        response, body = self._call("POST", path, {"standard_price": 9.75}, employee=self.manager1)
+        self.assertEqual(response.status_code, 200, body)
+        self.assertEqual(self.cookies.with_company(self.config.company_id).standard_price, 9.75)
+        response, body = self._call("GET", details, employee=self.manager1)
+        self.assertEqual(response.status_code, 200, body)
+        self.assertEqual(body["data"]["standard_price"], 9.75)
+        self.assertIn("tracks_stock", body["data"])
+        response, body = self._call("POST", path, {"standard_price": -1}, employee=self.manager1)
+        self.assertEqual(body["error"], "VALIDATION_ERROR")
+
     def test_a_manager_may_close_above_the_limit(self):
         _response, opened = self._open(opening_cash=100.0)
         response, body = self._call("POST", "/registers/%d/session/close" % self.config.id, {
