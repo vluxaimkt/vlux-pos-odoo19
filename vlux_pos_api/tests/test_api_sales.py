@@ -492,6 +492,12 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         self.assertEqual((response.status_code, body["error"]), (401, "PIN_REQUIRED"), "cash leaves the drawer")
 
         response, body = self._call("POST", "/orders/refund", refund, employee=self.emp2)
+        self.assertEqual((response.status_code, body["error"]), (403, "FORBIDDEN"),
+                         "by default a cashier needs a manager's PIN to return")
+        _response, state = self._call("GET", "/registers/%d/session" % self.config.id)
+        self.assertTrue(state["data"]["options"]["refunds_need_manager"], "the register learns the option")
+
+        response, body = self._call("POST", "/orders/refund", refund, employee=self.manager1)
         self.assertEqual(response.status_code, 200, body)
         self.assertTrue(body["data"]["is_refund"])
         self.assertEqual(body["data"]["amount_total"], -20.0)
@@ -501,13 +507,15 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         self.assertEqual(order.lines.refunded_orderline_id.id, soda_line["id"])
         self.assertEqual(order.state, "paid")
 
-        _response, again = self._call("POST", "/orders/refund", refund, employee=self.emp2)
+        _response, again = self._call("POST", "/orders/refund", refund, employee=self.manager1)
         self.assertEqual(again["data"]["id"], order.id, "a retried return is the same return")
 
         _response, closing = self._call("GET", "/registers/%d/session/closing" % self.config.id, employee=self.emp2)
         self.assertEqual(closing["data"]["cash"]["sales"], 55.5 - 20.0, "the refund left the drawer")
 
     def test_a_return_never_exceeds_what_was_sold_or_mismatches_the_money(self):
+        # The store let cashiers return on their own: they do, within what was sold.
+        self.config.vlux_refunds_need_manager = False
         sold = self._sold()
         soda_line = next(line for line in sold["lines"] if line["product_id"] == self.soda.id)
         base = {"register_id": self.config.id, "order_id": sold["id"]}
