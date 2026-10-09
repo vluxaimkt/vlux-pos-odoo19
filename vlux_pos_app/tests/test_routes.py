@@ -31,6 +31,9 @@ class TestVluxPosAppRoutes(HttpCase):
         self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
         for feature in ("camera", "microphone", "geolocation", "payment", "usb"):
             self.assertIn(f"{feature}=()", headers["Permissions-Policy"])
+        # Only the register itself may use the serial port (a scale wired to the computer).
+        self.assertIn("serial=(self)", headers["Permissions-Policy"])
+        self.assertNotIn("serial=*", headers["Permissions-Policy"])
         # The page itself carries no configuration, token or server detail.
         self.assertNotIn("token", response.text.lower())
 
