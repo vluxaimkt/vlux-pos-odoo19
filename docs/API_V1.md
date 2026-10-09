@@ -391,6 +391,16 @@ otra sesión). La regla de diferencia máxima (D6, $30) la aplica el servidor: p
 encima del límite sólo cierra un encargado (el empleado que cuenta); si no,
 `CLOSING_REFUSED` y la caja **sigue abierta**.
 
+**Cierre automático** (opción de la caja `vlux_auto_close`, apagada por
+defecto, y `vlux_auto_close_time`, hora local de la tienda cada media hora de
+16:00 a 03:00). Una tarea de Odoo cada 15 minutos cierra la sesión abierta que
+empezó antes de la última hora de cierre (aunque el servidor haya estado
+apagado a esa hora), con el efectivo esperado como contado; la sesión queda
+marcada `vlux_auto_closed` ("Cierre automático, sin conteo") con una nota para
+que el dueño la revise. Si Odoo no puede cerrarla (p. ej. pedidos en borrador)
+la deja abierta y lo anota en la sesión. Ambas opciones aparecen en el módulo
+del dueño de la caja.
+
 **Opciones de la caja.** El estado de la caja (`GET /registers/<id>/session`
 y las respuestas de abrir/cerrar) trae `options`: lo que cada negocio decide en
 Punto de venta → Ajustes y la pantalla respeta. Base (`vlux_pos_api`):
