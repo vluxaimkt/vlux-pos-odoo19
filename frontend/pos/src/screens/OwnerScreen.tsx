@@ -272,7 +272,7 @@ function Options({ onSaved }: { onSaved: () => Promise<void> }) {
 }
 
 const PURPOSES: Record<string, string> = {
-  cash: "Entradas y salidas", staff: "Empleados", owner: "Dueño", catalog: "Productos", closing: "Corte de caja",
+  cash: "Entradas y salidas", staff: "Empleados", owner: "Dueño", catalog: "Productos", closing: "Corte de caja", refund: "Devoluciones",
 };
 
 function Authorizations() {

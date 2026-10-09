@@ -469,6 +469,19 @@ contesta como `EXPIRED` (no se agrega tarde). `GET .../scanner/status` y
 `POST .../scanner/revoke` consultan y terminan la vinculación. Cada
 vinculación es de una caja y de un equipo (`device_id`).
 
+**Devoluciones.** `GET /orders/recent?register_id` y
+`GET /orders/lookup?reference` dan las ventas con lo que se puede devolver
+por renglón (`refundable_qty`). `POST /orders/refund/quote`
+`{"register_id", "order_id", "lines": [{"line_id", "qty"}]}` calcula el
+importe con los precios de la venta y cómo se pagó (`paid_with`).
+`POST /orders/refund` (idempotente por `uuid`) registra la devolución con
+`payments` que suman exactamente el importe; exige sesión de empleado (sale
+dinero del cajón). Si la caja lo pide (`vlux_refunds_need_manager`, encendida
+por defecto; `options.refunds_need_manager` en `/session`), sólo un encargado
+devuelve: un cajero recibe `FORBIDDEN` y la caja pide el PIN de un encargado
+(`/employees/authorize` con `purpose: "refund"`; la sesión breve actúa como
+ese encargado y queda en el registro de autorizaciones).
+
 ### 4.4 Crédito (fiado)
 
 Módulo `vlux_pos_credit`, con las mismas reglas que en el POS de Odoo (D7) y

@@ -4,6 +4,7 @@ import type { OrderResult } from "../api/types";
 import { formatDateTime } from "../lib/locale";
 import { formatMoney } from "../lib/money";
 import { round } from "../sale/money";
+import { refundNeedsManager } from "../sale/refund";
 import { usePos } from "../state";
 import { Icon } from "../ui/Icon";
 import { Banner, EmptyState, Field, Loading, PageHeader, Section, SLIP, SlipActions, SuccessHeader } from "../ui/Page";
@@ -19,8 +20,24 @@ type Mode =
  * return products (as the Odoo POS "Pedidos" screen). Needs the network.
  */
 export function SalesScreen({ onClose }: { onClose: () => void }) {
-  const { client, setup, online } = usePos();
+  const { client, setup, online, employee, registerState, authorizedBy, requestAuthorization, releaseAuthorization } = usePos();
   const [mode, setMode] = useState<Mode>({ name: "list" });
+  // A cashier's return needs a manager's PIN where the store asks for it (padlock on "Devolver").
+  const refundLocked = !authorizedBy && refundNeedsManager(!!registerState?.employee_login, employee, registerState?.options);
+
+  /** Open the return form: directly, or after a manager's PIN (a brief session that acts as the manager). */
+  async function startReturn(order: OrderResult) {
+    if (refundLocked) {
+      const ok = await requestAuthorization("Autorizar devolución", "refund", (e) => e.role === "manager");
+      if (!ok) return;
+    }
+    setMode({ name: "detail", order });
+  }
+  /** Leaving the return (done or cancelled) gives the register back to the person at it. */
+  function endReturn(next: Mode) {
+    if (authorizedBy) releaseAuthorization();
+    setMode(next);
+  }
   const [orders, setOrders] = useState<OrderResult[]>([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -47,8 +64,8 @@ export function SalesScreen({ onClose }: { onClose: () => void }) {
   }, [online]);
 
   if (mode.name === "detail") {
-    return <ReturnForm order={mode.order} onBack={() => setMode({ name: "list" })}
-      onReturned={(refund) => setMode({ name: "ticket", order: refund })} />;
+    return <ReturnForm order={mode.order} onBack={() => endReturn({ name: "list" })}
+      onReturned={(refund) => endReturn({ name: "ticket", order: refund })} />;
   }
   if (mode.name === "ticket") {
     return <OrderTicket order={mode.order} onDone={() => { setMode({ name: "list" }); void load(); }} />;
@@ -92,7 +109,10 @@ export function SalesScreen({ onClose }: { onClose: () => void }) {
                   <Icon name="printer" size={16} /><span class="hidden sm:inline">Reimprimir</span>
                 </button>
                 {!order.is_refund && order.lines.some((line) => line.refundable_qty > 0) && (
-                  <button class="btn btn-sm btn-primary" onClick={() => setMode({ name: "detail", order })}>Devolver</button>
+                  <button class="btn btn-sm btn-primary" disabled={!online} onClick={() => void startReturn(order)}
+                    title={refundLocked ? "Pide el PIN de un encargado" : undefined}>
+                    {refundLocked && <Icon name="lock" size={14} />}Devolver
+                  </button>
                 )}
               </div>
             </div>

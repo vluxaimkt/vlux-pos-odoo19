@@ -547,11 +547,16 @@ class VluxApiSales(http.Controller):
         """Body ``{"uuid", "register_id", "order_id", "lines", "payments"}``.
 
         Money goes back with ``payments`` (positive amounts, summing exactly
-        the return). Needs an employee session: cash leaves the drawer.
+        the return). Needs an employee session: cash leaves the drawer. Where
+        the register asks for it (``vlux_refunds_need_manager``, on by
+        default) only a manager may return: a cashier gets a manager's PIN
+        (the brief authorized session acts as that manager).
         """
         body = json_body()
         config = _register_from_body(body, token)
         employee, verified = _acting_employee(config, token, body, required=True)
+        if employee and config.vlux_refunds_need_manager and not config._vlux_api_is_manager(employee):
+            raise VluxApiError("FORBIDDEN", "Las devoluciones las autoriza un encargado con su PIN.")
         original = self._refund_original(body)
         try:
             order, duplicate = request.env["pos.order"]._vlux_api_register_refund(
