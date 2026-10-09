@@ -1,4 +1,7 @@
 import type { ComponentChildren } from "preact";
+import { useContext } from "preact/hooks";
+
+import { PosContext } from "../state";
 
 import { Icon, type IconName } from "./Icon";
 
@@ -10,7 +13,7 @@ import { Icon, type IconName } from "./Icon";
  */
 
 /** Large title, optional icon and subtitle; back button on the left, actions on the right. */
-export function PageHeader({ title, subtitle, icon, back, backLabel = "Vender", actions }: {
+export function PageHeader({ title, subtitle, icon, back, backLabel, actions }: {
   title: ComponentChildren;
   subtitle?: ComponentChildren;
   icon?: IconName;
@@ -18,13 +21,15 @@ export function PageHeader({ title, subtitle, icon, back, backLabel = "Vender", 
   backLabel?: string;
   actions?: ComponentChildren;
 }) {
+  // Top-level screens go back to the previous module; sub-screens name their parent.
+  const label = backLabel ?? useContext(PosContext)?.back.label ?? "Vender";
   return (
     <header class="flex flex-col gap-2">
       {(back || actions) && (
         <div class="flex items-center gap-2 min-h-11">
           {back && (
             <button type="button" class="btn btn-ghost text-primary -ml-3 px-3" onClick={back}>
-              <Icon name="back" size={20} /> {backLabel}
+              <Icon name="back" size={20} /> {label}
             </button>
           )}
           <div class="flex-1" />
@@ -36,7 +41,7 @@ export function PageHeader({ title, subtitle, icon, back, backLabel = "Vender", 
           <span class="avatar-disc w-11 h-11 shrink-0" data-role="manager" aria-hidden="true"><Icon name={icon} size={24} /></span>
         )}
         <div class="min-w-0">
-          <h1 class="text-3xl truncate">{title}</h1>
+          <h1 class="text-2xl sm:text-3xl leading-tight break-words">{title}</h1>
           {subtitle && <div class="label-2 text-sm">{subtitle}</div>}
         </div>
       </div>

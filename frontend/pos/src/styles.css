@@ -92,12 +92,14 @@
   --fill-strong: rgba(120, 120, 128, 0.2);
   --label-secondary: rgba(60, 60, 67, 0.66);
   --glow-a: rgba(0, 122, 255, 0.1);
+  --btn-default-bg: #e9e9ee;
   --glow-b: rgba(175, 82, 222, 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --glow-a: rgba(10, 132, 255, 0.28);
+    --btn-default-bg: #2c2c2e;
     --glow-b: rgba(191, 90, 242, 0.22);
     --glass-bg: rgba(28, 28, 30, 0.7);
     --glass-border: rgba(255, 255, 255, 0.15);
@@ -152,6 +154,8 @@ h3,
 
 /* Controls: 44 px targets, 12 px corners, the iOS tap. */
 .btn {
+  /* A plain button takes base-200 (the page background, black in dark mode): give it a button gray instead. */
+  --color-base-200: var(--btn-default-bg);
   min-height: 2.75rem;
   border-radius: 0.75rem;
   font-weight: 500;
@@ -439,6 +443,7 @@ h3,
 
 /* Search field with its icon, iOS style. */
 .search-field {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.75rem;

@@ -76,7 +76,7 @@ export function CustomersScreen({ onClose, onPick }: { onClose: () => void; onPi
   return (
     <section class="p-4 lg:p-8 max-w-3xl mx-auto flex flex-col gap-6 rise">
       <PageHeader title={onPick ? "Elegir cliente" : "Clientes y crédito"} icon="people"
-        back={onClose} backLabel={onPick ? "Venta" : "Vender"}
+        back={onClose} backLabel={onPick ? "Venta" : undefined}
         actions={
           <button class="btn btn-ghost text-primary" onClick={() => setMode({ name: "new" })} disabled={!online}>
             <Icon name="plus" size={20} /> Nuevo cliente

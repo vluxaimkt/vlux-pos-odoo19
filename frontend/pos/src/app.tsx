@@ -122,6 +122,10 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   const [taxes, setTaxes] = useState<Map<number, TaxInfo>>(new Map());
   const [credit, setCredit] = useState<Map<number, CreditRow>>(new Map());
   const [view, setViewState] = useState<ModuleId>("sell");
+  // The modules visited before this one: "back" returns to the last that can still open.
+  const [trail, setTrail] = useState<ModuleId[]>([]);
+  const viewRef = useRef(view);
+  viewRef.current = view;
   // A module waiting for someone's PIN (padlock).
   const [asking, setAsking] = useState<{ title: string; purpose: string; authorizers: Employee[]; resolve: (ok: boolean) => void } | null>(null);
   const [drawer, setDrawer] = useState(false);
@@ -272,17 +276,41 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
     setAsking(null);
   }
 
+  /** Show a module, remembering the one left (unless going back). */
+  function show(id: ModuleId, goingBack: boolean) {
+    const current = viewRef.current;
+    if (current === id) return;
+    if (!goingBack) setTrail((t) => [...t.filter((m) => m !== id), current].slice(-10));
+    setViewState(id);
+  }
+
   /** Go to a module: directly if allowed, else after someone's PIN. Leaving one ends its authorization. */
-  async function open(def: ModuleDef) {
+  async function open(def: ModuleDef, goingBack = false) {
     setDrawer(false);
     if (!isAvailable(def, access) || (def.needsSession && !access.sessionOpen)) return;
     if (authorization && authorization.purpose !== def.id) releaseAuthorization();
-    if (canOpen(def, employee, access) || authorization?.purpose === def.id) return setViewState(def.id);
+    if (canOpen(def, employee, access) || authorization?.purpose === def.id) return show(def.id, goingBack);
     if (!online) return setStatus((s) => ({ ...s, error: "Para autorizar con PIN se necesita internet." }));
     const ok = await requestAuthorization(def.label, def.id, authorizersFor(def, employees, access, employee));
-    if (ok) setViewState(def.id);
+    if (ok) show(def.id, goingBack);
   }
   const setView = (id: ModuleId) => void open(moduleById(id));
+
+  /** Where "back" goes: the last visited module that can still open (Vender if none), and the trail left. */
+  function backTarget(): { id: ModuleId; rest: ModuleId[] } {
+    const rest = [...trail];
+    while (rest.length) {
+      const id = rest.pop()!;
+      const def = moduleById(id);
+      if (id !== view && isAvailable(def, access) && !(def.needsSession && !access.sessionOpen)) return { id, rest };
+    }
+    return { id: "sell", rest };
+  }
+  const goBack = () => {
+    const { id, rest } = backTarget();
+    setTrail(rest);
+    void open(moduleById(id), true);
+  };
 
   // F1…F8 open the modules (as on many registers); not while a PIN is being typed.
   const openRef = useRef(open);
@@ -308,6 +336,7 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
     requestAuthorization: (title, purpose, allowed) => requestAuthorization(title, purpose,
       employees.filter((e) => e.id !== employee?.id && !!e.pin_sha1 && allowed(e))),
     releaseAuthorization,
+    back: { label: moduleById(backTarget().id).label, go: goBack },
     flushNow: flush,
     credit, saveCredit, refreshCredit,
     canSellOnCredit: canSellOnCredit(!!registerState?.employee_login, acting?.role, registerState?.options?.credit_sellers),
@@ -320,16 +349,16 @@ function Register({ db, paired, onForget, onRenewed, onSetup }: {
   if (!catalogReady) body = <Splash text={waiting ?? "Descargando catálogo…"} />;
   else if (!registerState) body = <Splash text={waiting ?? "Consultando la caja…"} />;
   else if (registerState.employee_login && !employee) body = <LoginScreen />;
-  else if (view === "queue") body = <QueueScreen onClose={() => setView("sell")} />;
-  else if (view === "customers") body = <CustomersScreen onClose={() => setView("sell")} />;
-  else if (view === "sales") body = <SalesScreen onClose={() => setView("sell")} />;
-  else if (view === "cash") body = <CashMoveScreen onClose={() => setView("sell")} />;
-  else if (view === "staff") body = <EmployeesScreen onClose={() => setView("sell")} onChanged={refreshRegister} />;
-  else if (view === "owner") body = <OwnerScreen onClose={() => setView("sell")} onOptionsSaved={refreshRegister} />;
+  else if (view === "queue") body = <QueueScreen onClose={goBack} />;
+  else if (view === "customers") body = <CustomersScreen onClose={goBack} />;
+  else if (view === "sales") body = <SalesScreen onClose={goBack} />;
+  else if (view === "cash") body = <CashMoveScreen onClose={goBack} />;
+  else if (view === "staff") body = <EmployeesScreen onClose={goBack} onChanged={refreshRegister} />;
+  else if (view === "owner") body = <OwnerScreen onClose={goBack} onOptionsSaved={refreshRegister} />;
   else if (view === "closing") {
     body = (
       <CloseScreen
-        onCancel={() => setView("sell")}
+        onCancel={goBack}
         onQueue={() => setView("queue")}
         onClosed={(state) => {
           applyRegisterState(state);
