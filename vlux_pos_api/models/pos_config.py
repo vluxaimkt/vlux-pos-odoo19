@@ -52,6 +52,12 @@ class PosConfig(models.Model):
         default="owner", required=True,
         help="Quién puede dar de alta empleados, cambiar su acceso y su PIN desde la caja VLUX.",
     )
+    vlux_refunds_need_manager = fields.Boolean(
+        string="Devoluciones requieren autorización del encargado",
+        default=True,
+        help="En la caja VLUX, una devolución hecha por un cajero necesita el PIN de un encargado (o del dueño). "
+             "Los encargados devuelven directo.",
+    )
     vlux_cashier_cash_out = fields.Boolean(
         string="Cajeros pueden sacar efectivo",
         help="Permite a los cajeros registrar salidas de efectivo (p. ej. pagar a un proveedor) con motivo y a su "
@@ -80,6 +86,7 @@ class PosConfig(models.Model):
 
         return {
             "cashier_cash_out": bool(self.vlux_cashier_cash_out),
+            "refunds_need_manager": bool(self.vlux_refunds_need_manager),
             "cash_reasons": {"in": lines(self.vlux_cash_in_reasons), "out": lines(self.vlux_cash_out_reasons)},
         }
 
@@ -123,7 +130,7 @@ class PosConfig(models.Model):
 
     def _vlux_api_option_fields(self):
         """Register options the owner may change from the register (extension point)."""
-        return ["vlux_cashier_cash_out", "vlux_cash_in_reasons", "vlux_cash_out_reasons",
+        return ["vlux_refunds_need_manager", "vlux_cashier_cash_out", "vlux_cash_in_reasons", "vlux_cash_out_reasons",
                 "vlux_catalog_editors", "vlux_staff_admins"]
 
     def _vlux_api_options_form(self):

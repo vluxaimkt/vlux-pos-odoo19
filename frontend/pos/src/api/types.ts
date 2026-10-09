@@ -166,6 +166,8 @@ export interface RegisterOptions {
   cash_reasons?: { in: string[]; out: string[] };
   /** With vlux_pos_credit: who may sell on credit ("managers" | "all"). */
   credit_sellers?: string;
+  /** A cashier's return needs a manager's PIN (on unless the store turned it off). */
+  refunds_need_manager?: boolean;
 }
 
 export interface Employee {
