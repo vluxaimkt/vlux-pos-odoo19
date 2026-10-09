@@ -6,7 +6,7 @@
         "tablet, abre sin red y vende con la API v1 (vlux_pos_api). La app compilada vive "
         "en static/dist; su codigo fuente esta en frontend/pos del repositorio."
     ),
-    "version": "19.0.0.1.0",
+    "version": "19.0.0.2.0",
     "category": "Sales/Point of Sale",
     "author": "VLUX",
     "website": "https://vlux.com.mx",

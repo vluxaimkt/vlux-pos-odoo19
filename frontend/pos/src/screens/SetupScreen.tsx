@@ -5,6 +5,7 @@ import type { Me, RegisterConfig, StoreConfig } from "../api/types";
 import { type PosDb, setMeta } from "../db/db";
 import { META_SETUP, META_TOKEN, type Setup } from "../state";
 import { META_TOKEN_INFO } from "../sync/token";
+import { APP_ICON } from "../ui/brand";
 import { Icon } from "../ui/Icon";
 import { Banner, Field } from "../ui/Page";
 
@@ -85,7 +86,7 @@ export function SetupScreen({ db, onReady }: { db: PosDb; onReady: (token: strin
       <div class="rise w-full max-w-md glass rounded-[20px] shadow-xl">
         <div class="flex flex-col gap-6 p-8">
           <div class="flex flex-col items-center gap-3 text-center">
-            <img src="/vlux_pos_app/static/img/icon-192.png" alt="" width={80} height={80} class="rounded-[20px] shadow-lg pop" />
+            <img src={APP_ICON} alt="" width={80} height={80} class="rounded-[20px] shadow-lg pop" />
             <h1 class="text-3xl">VLUX POS</h1>
             <p class="label-2">{checked ? "Confirma la caja de este equipo." : "Vincula este equipo con una caja de tu tienda."}</p>
           </div>
