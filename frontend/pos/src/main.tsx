@@ -2,7 +2,13 @@ import { render } from "preact";
 
 import { App } from "./app";
 import { PosDb } from "./db/db";
+import { applyTheme, readTheme } from "./lib/theme";
 import "./styles.css";
+
+// The device's light/dark choice before the first paint (no flash of the other theme).
+applyTheme(readTheme());
+// On "automatic", the system switching light/dark while open recolors the browser bar too.
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => applyTheme(readTheme()));
 
 const SW_URL = "/vlux-pos/sw.js";
 

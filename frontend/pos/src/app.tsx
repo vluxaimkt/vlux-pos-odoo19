@@ -27,6 +27,7 @@ import { syncFeed } from "./sync/catalog";
 import { flushOutbox } from "./sync/outbox";
 import { renewIfDue } from "./sync/token";
 import { APP_ICON } from "./ui/brand";
+import { ThemeSwitch } from "./ui/ThemeSwitch";
 import { Icon } from "./ui/Icon";
 import { Banner } from "./ui/Page";
 
@@ -477,6 +478,10 @@ function Sidebar({ view, access, status, open, drawer, onDrawer, person, authori
               </button>
             </div>
           )}
+          <div class="flex items-center justify-between gap-2 px-1">
+            <span class="text-xs label-2">Tema</span>
+            <ThemeSwitch />
+          </div>
           <button class="btn btn-ghost btn-sm justify-start text-[var(--label-secondary)] font-normal" onClick={() => {
             if (confirm("¿Desvincular este equipo? Se borran de este equipo el token, el catálogo, los clientes y los empleados. Las ventas por enviar se conservan.")) void forget();
           }}>
@@ -501,6 +506,7 @@ function TopBar({ status }: { status: { syncing: boolean; pending: number } }) {
       {status.pending > 0 && <span class="pill pill-warn">{status.pending} por enviar</span>}
       {status.syncing && <span class="loading loading-dots loading-sm text-primary" aria-label="Sincronizando" />}
       <span class={`pill ${online ? "pill-ok" : ""}`}>{online ? "En línea" : "Sin internet"}</span>
+      <ThemeSwitch class="hidden sm:flex" />
     </header>
   );
 }
