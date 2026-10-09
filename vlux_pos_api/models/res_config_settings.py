@@ -5,6 +5,8 @@ class ResConfigSettings(models.TransientModel):
     _inherit = "res.config.settings"
 
     pos_vlux_cashier_cash_out = fields.Boolean(related="pos_config_id.vlux_cashier_cash_out", readonly=False)
+    pos_vlux_auto_close = fields.Boolean(related="pos_config_id.vlux_auto_close", readonly=False)
+    pos_vlux_auto_close_time = fields.Selection(related="pos_config_id.vlux_auto_close_time", readonly=False)
     pos_vlux_catalog_editors = fields.Selection(related="pos_config_id.vlux_catalog_editors", readonly=False)
     pos_vlux_staff_admins = fields.Selection(related="pos_config_id.vlux_staff_admins", readonly=False)
     pos_vlux_cash_in_reasons = fields.Text(related="pos_config_id.vlux_cash_in_reasons", readonly=False)

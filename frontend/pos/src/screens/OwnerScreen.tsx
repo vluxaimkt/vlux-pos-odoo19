@@ -241,6 +241,15 @@ function Options({ onSaved }: { onSaved: () => Promise<void> }) {
               <input type="checkbox" class="toggle" checked={!!value(field)}
                 onChange={(e) => setValues({ ...values, [field.name]: e.currentTarget.checked })} />
             </label>
+          ) : field.type === "selection" && field.choices!.length > 6 ? (
+            // A long list (e.g. the closing time) reads better as a menu.
+            <label class="row">
+              <span class="flex-1 font-medium">{field.label}</span>
+              <select class="select w-auto" value={String(value(field))}
+                onChange={(e) => setValues({ ...values, [field.name]: e.currentTarget.value })}>
+                {field.choices!.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+              </select>
+            </label>
           ) : field.type === "selection" ? (
             <>
               <div class="row !min-h-11 font-medium">{field.label}</div>

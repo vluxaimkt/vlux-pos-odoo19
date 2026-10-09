@@ -124,7 +124,7 @@ class PosConfig(models.Model):
     def _vlux_api_option_fields(self):
         """Register options the owner may change from the register (extension point)."""
         return ["vlux_cashier_cash_out", "vlux_cash_in_reasons", "vlux_cash_out_reasons",
-                "vlux_catalog_editors", "vlux_staff_admins"]
+                "vlux_catalog_editors", "vlux_staff_admins", "vlux_auto_close", "vlux_auto_close_time"]
 
     def _vlux_api_options_form(self):
         """The options as a form the register can draw: label, help, type, choices and value."""
