@@ -67,7 +67,9 @@ jobs:
     timeout-minutes: 45
     services:
       postgres:
-        image: postgres:16
+        # Docker Hub rate-limits and times out anonymous pulls from GitHub runners;
+        # AWS ECR Public mirrors the same official image without that limit.
+        image: public.ecr.aws/docker/library/postgres:16
         env:
           POSTGRES_USER: odoo
           POSTGRES_PASSWORD: odoo
@@ -223,7 +225,9 @@ jobs:
     timeout-minutes: 45
     services:
       postgres:
-        image: postgres:16
+        # Docker Hub rate-limits and times out anonymous pulls from GitHub runners;
+        # AWS ECR Public mirrors the same official image without that limit.
+        image: public.ecr.aws/docker/library/postgres:16
         env:
           POSTGRES_USER: odoo
           POSTGRES_PASSWORD: odoo
@@ -378,7 +382,9 @@ jobs:
       PERF_DB: vlux_perf_ci
     services:
       postgres:
-        image: postgres:16
+        # Docker Hub rate-limits and times out anonymous pulls from GitHub runners;
+        # AWS ECR Public mirrors the same official image without that limit.
+        image: public.ecr.aws/docker/library/postgres:16
         env:
           POSTGRES_USER: odoo
           POSTGRES_PASSWORD: odoo
