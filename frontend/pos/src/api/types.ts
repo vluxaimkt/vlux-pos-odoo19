@@ -262,6 +262,8 @@ export interface SaleLine {
   price_unit?: number;
   /** The price came from a scale label: the store's price, not a manual change. */
   price_from_barcode?: boolean;
+  /** A wholesale price the cashier typed for this customer (needs price_unit; noted on the order). */
+  wholesale?: boolean;
 }
 
 export interface QuoteLine {
@@ -272,6 +274,7 @@ export interface QuoteLine {
   price_unit: number;
   catalog_price: number;
   price_overridden: boolean;
+  wholesale?: boolean;
   tax_ids: number[];
   price_subtotal: number;
   price_subtotal_incl: number;
@@ -324,6 +327,8 @@ export interface OrderResult {
   lines: {
     id: number; uuid: string; product_id: number; name: string; qty: number; price_unit: number;
     price_subtotal: number; price_subtotal_incl: number; refundable_qty: number;
+    /** Sold at a wholesale price the cashier typed. */
+    wholesale?: boolean;
   }[];
   payments: { payment_method_id: number; name: string; amount: number; is_change: boolean }[];
 }

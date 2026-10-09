@@ -24,6 +24,8 @@ from odoo.exceptions import ValidationError
 
 # How far in the future a client clock may be before its date is ignored.
 CLOCK_SKEW = timedelta(minutes=5)
+# The note on an order line sold at a wholesale price the cashier typed (shows in Odoo and on its ticket).
+WHOLESALE_NOTE = "Precio de mayoreo"
 
 
 class VluxSaleRefused(Exception):
@@ -142,6 +144,7 @@ class PosOrder(models.Model):
                     "qty": line["qty"],
                     "price_unit": line["price_unit"],
                     "price_type": "manual" if line["price_overridden"] else "original",
+                    **({"customer_note": WHOLESALE_NOTE} if line.get("wholesale") else {}),
                     "discount": 0.0,
                     "tax_ids": [[6, 0, line["taxes"].ids]],
                     "price_subtotal": line["price_subtotal"],
@@ -266,6 +269,7 @@ class PosOrder(models.Model):
                     "price_unit": line.price_unit,
                     "price_subtotal": line.price_subtotal,
                     "price_subtotal_incl": line.price_subtotal_incl,
+                    "wholesale": line.customer_note == WHOLESALE_NOTE,
                 }
                 for line in self.lines
             ],

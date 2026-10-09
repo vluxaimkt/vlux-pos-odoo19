@@ -8,6 +8,7 @@ import { parseBarcode } from "../lib/barcode";
 import { formatMoney } from "../lib/money";
 import {
   addProduct, type AddOptions, type Cart, emptyCart, isWeighed, itemCount, qtyLabel, refreshProduct, removeLine, setCustomer, setQty,
+  setWholesalePrice,
   unitPrice,
 } from "../sale/cart";
 import { fromQuote, localPricing, type Pricing } from "../sale/pricing";
@@ -19,6 +20,7 @@ import { explain } from "./SetupScreen";
 import { ProductGrid } from "./ProductGrid";
 import { QuickProductDialog } from "./QuickProductDialog";
 import { WeighDialog } from "./WeighDialog";
+import { WholesaleDialog } from "./WholesaleDialog";
 import { type ScanOutcome } from "../input/sources";
 import { PhoneScannerButton, usePhoneScanner } from "./PhoneScanner";
 import { Icon } from "../ui/Icon";
@@ -43,6 +45,8 @@ export function SellScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** A product sold by weight waiting for its kilos (new line, or re-weighing a line). */
+  /** The line whose wholesale price is being typed. */
+  const [wholesaleLine, setWholesaleLine] = useState<string | null>(null);
   const [weighing, setWeighing] = useState<{ product: ProductRow | Cart["lines"][number]["product"]; lineUuid?: string; qty?: number } | null>(null);
   /** A scanned code the store does not know: a manager may add it on the spot. */
   const [unknown, setUnknown] = useState<string | null>(null);
@@ -181,6 +185,7 @@ export function SellScreen() {
             lines: cart.lines.map((line) => ({
               uuid: line.uuid, product_id: line.product.id, qty: line.qty,
               ...(line.priceFromBarcode ? { price_unit: unitPrice(line), price_from_barcode: true } : {}),
+              ...(line.wholesale ? { price_unit: unitPrice(line), wholesale: true } : {}),
             })),
             ...(cart.customer ? { partner_id: cart.customer.id } : {}),
           });
@@ -333,6 +338,11 @@ export function SellScreen() {
               <li key={line.uuid} class="py-3 border-b border-[var(--hairline)] last:border-0 rise flex flex-col gap-2">
                 <div class="flex items-start gap-3">
                   <div class="flex-1 min-w-0 font-medium leading-snug line-clamp-2">{line.product.name}</div>
+                  {!line.priceFromBarcode && (
+                    <button type="button" class={`chip !h-7 !px-3 text-xs shrink-0 ${line.wholesale ? "!bg-[#ff9500] !text-white" : ""}`}
+                      aria-pressed={!!line.wholesale} title="Precio de mayoreo para este cliente"
+                      onClick={() => setWholesaleLine(line.uuid)}>Mayoreo</button>
+                  )}
                   <span class="font-semibold num">{money(unitPrice(line) * line.qty)}</span>
                 </div>
                 <div class="flex items-center gap-2">
@@ -341,6 +351,7 @@ export function SellScreen() {
                       ? `${qtyLabel(line.qty, line.product.uom?.name ?? "kg")} × ${money(unitPrice(line))}`
                       : `${money(unitPrice(line))} c/u`}
                     {line.priceFromBarcode && " · precio de etiqueta"}
+                    {line.wholesale && " · precio de mayoreo"}
                   </div>
                   {isWeighed(line) ? (
                     <button class="btn btn-sm" onClick={() => setWeighing({ product: line.product, lineUuid: line.uuid, qty: line.qty })}>
@@ -389,6 +400,19 @@ export function SellScreen() {
             add(row);
           }} />
       )}
+      {(() => {
+        const line = wholesaleLine ? cart.lines.find((candidate) => candidate.uuid === wholesaleLine) : undefined;
+        if (!line) return null;
+        const close = () => { setWholesaleLine(null); search.current?.focus(); };
+        return (
+          <WholesaleDialog name={line.product.name} catalogPrice={line.product.list_price}
+            current={line.wholesale ? line.priceUnit : undefined} qty={line.qty}
+            unit={isWeighed(line) ? line.product.uom?.name ?? "kg" : "pieza"} currency={setup.store.currency}
+            onDone={(price) => { update(setWholesalePrice(cart, line.uuid, price)); close(); }}
+            onRemove={() => { update(setWholesalePrice(cart, line.uuid, null)); close(); }}
+            onCancel={close} />
+        );
+      })()}
       {weighing && (
         <WeighDialog product={weighing.product} initial={weighing.qty} currency={setup.store.currency}
           onDone={weighed} onCancel={() => { setWeighing(null); search.current?.focus(); }} />

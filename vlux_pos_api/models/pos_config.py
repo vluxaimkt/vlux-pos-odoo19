@@ -491,8 +491,11 @@ class PosConfig(models.Model):
             uuid = line.get("uuid")
             if uuid is not None and (not isinstance(uuid, str) or len(uuid) > 64):
                 raise ValidationError(_("La línea %s tiene un uuid inválido.", index))
+            wholesale = bool(line.get("wholesale"))
+            if wholesale and price_unit is None:
+                raise ValidationError(_("La línea %s es de mayoreo y no trae su precio.", index))
             parsed.append({"product_id": product_id, "qty": qty, "price_unit": price_unit, "uuid": uuid,
-                           "price_from_barcode": bool(line.get("price_from_barcode"))})
+                           "price_from_barcode": bool(line.get("price_from_barcode")), "wholesale": wholesale})
         return parsed
 
     def _vlux_api_quote(self, lines, partner=None):
@@ -562,6 +565,8 @@ class PosConfig(models.Model):
                 "price_unit": price_unit,
                 "catalog_price": catalog_price,
                 "price_overridden": overridden,
+                # A wholesale price the cashier typed for this customer (noted on the order line).
+                "wholesale": line["wholesale"],
                 # pos.order.line keeps the product taxes; the order's fiscal
                 # position maps them when the line is priced again.
                 "taxes": taxes,

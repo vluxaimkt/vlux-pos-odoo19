@@ -509,6 +509,28 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         _response, body = self._call("POST", "/orders", sale)
         return body["data"]
 
+    def test_a_wholesale_price_the_cashier_types_is_charged_and_noted(self):
+        self._open()
+        lines = [{"product_id": self.soda.id, "qty": 2, "price_unit": 15.0, "wholesale": True},
+                 {"product_id": self.cookies.id, "qty": 1}]
+        _response, quote = self._call("POST", "/orders/quote", {"register_id": self.config.id, "lines": lines})
+        priced = quote["data"]["lines"]
+        self.assertEqual((priced[0]["price_unit"], priced[0]["wholesale"], priced[0]["price_overridden"]), (15.0, True, True))
+        self.assertFalse(priced[1]["wholesale"])
+
+        sale = self._sale([(self.cash, quote["data"]["amount_total"])], lines=lines)
+        response, body = self._call("POST", "/orders", sale, employee=self.emp2)
+        self.assertEqual(response.status_code, 200, body)
+        order = self.env["pos.order"].browse(body["data"]["id"])
+        soda_line = order.lines.filtered(lambda line: line.product_id == self.soda)
+        self.assertEqual((soda_line.price_unit, soda_line.customer_note), (15.0, "Precio de mayoreo"))
+        self.assertTrue(order.vlux_api_price_overridden, "the owner sees the sale had a price off the catalog")
+        self.assertEqual([line["wholesale"] for line in body["data"]["lines"]], [True, False], "the reprint says so")
+
+        response, body = self._call("POST", "/orders/quote", {"register_id": self.config.id, "lines": [
+            {"product_id": self.soda.id, "qty": 1, "wholesale": True}]})
+        self.assertEqual(body["error"], "VALIDATION_ERROR", "a wholesale line carries its price")
+
     def test_a_return_of_part_of_a_sale(self):
         sold = self._sold()
         soda_line = next(line for line in sold["lines"] if line["product_id"] == self.soda.id)
