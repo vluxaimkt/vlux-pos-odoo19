@@ -82,7 +82,7 @@ export function ReceiptScreen({ order, pricing, credit, onNext }: {
         <hr class="my-2 border-dashed border-black" />
         {pricing.lines.map((line) => (
           <div key={line.lineUuid}>
-            <div>{line.name}</div>
+            <div>{line.name}{line.wholesale && " (mayoreo)"}</div>
             <div class="flex justify-between">
               <span>{qtyLabel(line.qty, line.unit)} x {formatMoney(line.displayUnit, currency)}</span>
               <span>{formatMoney(line.total, currency)}</span>

@@ -157,6 +157,7 @@ def _quote_payload(quote):
                 "price_unit": line["price_unit"],
                 "catalog_price": line["catalog_price"],
                 "price_overridden": line["price_overridden"],
+                "wholesale": line["wholesale"],
                 "tax_ids": line["taxes"].ids,
                 "price_subtotal": line["price_subtotal"],
                 "price_subtotal_incl": line["price_subtotal_incl"],

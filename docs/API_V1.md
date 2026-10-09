@@ -345,7 +345,12 @@ decimales). `/store/config` publica `tax_rounding` (`round_per_line` o
 método) y `barcode_nomenclature` (reglas de etiquetas de báscula: peso
 `21.....{NNDDD}`, precio `23.....{NNNDD}`). Una línea con
 `"price_from_barcode": true` lleva el precio leído de una etiqueta de báscula:
-se cobra a `price_unit` y no se marca como precio cambiado a mano.
+se cobra a `price_unit` y no se marca como precio cambiado a mano. Una línea
+con `"wholesale": true` (exige `price_unit`) es un precio de mayoreo que la
+cajera escribió para ese cliente (varía entre clientes): se cobra a
+`price_unit`, el renglón de la orden queda con la nota "Precio de mayoreo" y
+la orden marcada como precio distinto al catálogo; la cotización y la venta
+responden `wholesale` por renglón.
 
 **Venta.** `POST /orders`:
 

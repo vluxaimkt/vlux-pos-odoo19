@@ -36,6 +36,7 @@ export function buildOrder(cart: Cart, pricing: Pricing, payments: Payment[], co
       qty: line.qty,
       price_unit: line.priceUnit,
       ...(line.priceFromBarcode ? { price_from_barcode: true } : {}),
+      ...(line.wholesale ? { wholesale: true } : {}),
     })),
     payments: payments.map((payment) => ({ payment_method_id: payment.method.id, amount: payment.amount })),
     expected_total: pricing.total,
