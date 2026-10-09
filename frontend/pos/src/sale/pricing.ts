@@ -22,6 +22,8 @@ export interface PricedLine {
   unit?: string;
   /** Read from a scale label: sent so the server does not take it for a manual price. */
   priceFromBarcode?: boolean;
+  /** A wholesale price the cashier typed (the ticket and the server note it). */
+  wholesale?: boolean;
   /** The unit price sent to the server (as the catalog holds it). */
   priceUnit: number;
   /** What one unit costs the customer, taxes included: what the ticket shows. */
@@ -45,10 +47,11 @@ export interface Pricing {
   exact: boolean;
 }
 
-function lineExtras(line: CartLine): Pick<PricedLine, "unit" | "priceFromBarcode"> {
+function lineExtras(line: CartLine): Pick<PricedLine, "unit" | "priceFromBarcode" | "wholesale"> {
   return {
     ...(isWeighed(line) ? { unit: line.product.uom?.name ?? "kg" } : {}),
     ...(line.priceFromBarcode ? { priceFromBarcode: true } : {}),
+    ...(line.wholesale ? { wholesale: true } : {}),
   };
 }
 

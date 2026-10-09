@@ -15,9 +15,11 @@ export interface CartLine {
   uuid: string;
   product: CartProduct;
   qty: number;
-  /** A price read from a scale label; otherwise the catalog price applies. */
+  /** A price read from a scale label or typed as wholesale; otherwise the catalog price applies. */
   priceUnit?: number;
   priceFromBarcode?: boolean;
+  /** Sold at a wholesale price the cashier typed for this customer (it varies between customers). */
+  wholesale?: boolean;
 }
 
 export interface CartCustomer {
@@ -96,6 +98,26 @@ export function setQty(cart: Cart, lineUuid: string, qty: number): Cart {
   const quantity = cleanQty(line, qty);
   if (quantity <= 0) return removeLine(cart, lineUuid);
   return { ...cart, lines: cart.lines.map((candidate) => (candidate.uuid === lineUuid ? { ...candidate, qty: quantity } : candidate)) };
+}
+
+/**
+ * Sell a line at a wholesale price per piece (or per kilo) typed by the
+ * cashier; `null` goes back to the catalog price. A price read from a scale
+ * label is not wholesale and stays as it is.
+ */
+export function setWholesalePrice(cart: Cart, lineUuid: string, price: number | null): Cart {
+  return {
+    ...cart,
+    lines: cart.lines.map((line) => {
+      if (line.uuid !== lineUuid || line.priceFromBarcode) return line;
+      if (price === null) {
+        const { priceUnit: _price, wholesale: _wholesale, ...rest } = line;
+        return rest;
+      }
+      if (!Number.isFinite(price) || price <= 0) return line;
+      return { ...line, priceUnit: Math.round(price * 100) / 100, wholesale: true };
+    }),
+  };
 }
 
 export function removeLine(cart: Cart, lineUuid: string): Cart {

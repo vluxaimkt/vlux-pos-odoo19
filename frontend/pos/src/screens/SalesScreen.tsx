@@ -257,7 +257,7 @@ export function OrderTicket({ order, onDone }: { order: OrderResult; onDone: () 
         <hr class="my-2 border-dashed border-black" />
         {order.lines.map((line) => (
           <div key={line.id}>
-            <div>{line.name}</div>
+            <div>{line.name}{line.wholesale && " (mayoreo)"}</div>
             <div class="flex justify-between">
               <span>{line.qty} x {money(shelfPrice(line))}</span>
               <span>{money(line.price_subtotal_incl)}</span>
