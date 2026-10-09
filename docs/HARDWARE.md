@@ -13,7 +13,8 @@ cambios de código.
 | Impresora de tickets Epson ePOS | Red (Ethernet o Wi-Fi), sin caja IoT | ⚙️ Configuración lista; falta probar con impresora física |
 | Cajón de dinero | Cable RJ11/RJ12 al puerto DK de la impresora | ⚙️ Se abre desde la impresora; falta prueba física |
 | Pantalla de cliente | Segunda pantalla o navegador | ⚙️ Soportado por Odoo; falta prueba con monitor |
-| Báscula | Requiere caja IoT | ⛔ Fuera de alcance por ahora |
+| Báscula con cable (Torrey PCR-40T u otra RS-232/USB) | Cable serial/USB a la PC de la caja VLUX (Chrome/Edge de escritorio) | ⚙️ Lectura lista y configurable; falta probar con la báscula del cliente |
+| Báscula que imprime etiqueta | Etiqueta con peso o precio (nomenclatura de la tienda) | ✅ La caja VLUX la lee con el lector |
 
 ## Lector de códigos USB
 
@@ -70,6 +71,24 @@ Un tour automático hace una venta completa y verifica que los tres aparezcan
 impresos. El timbrado de facturas (CFDI) **no** está incluido: `vlux_facturacion`
 sigue en modo simulación.
 
+## Báscula con cable (caja VLUX)
+
+La caja VLUX (PWA) lee el peso de una báscula conectada por cable serial
+(RS-232, con adaptador USB-serial si la PC no tiene puerto) usando Web Serial:
+funciona en **Chrome o Edge de escritorio** por HTTPS (no en celulares ni en
+Safari). En el diálogo de peso aparece **Conectar báscula** la primera vez
+(el navegador pide elegir el puerto) y después **Leer báscula**, que además se
+lee sola al abrir el diálogo. Escribir el peso a mano sigue funcionando.
+
+El protocolo cambia entre marcas y modelos; el de la Torrey PCR-40T no está
+publicado. Por eso los ajustes son de cada equipo (engrane en el diálogo):
+velocidad (9600 por defecto), paridad y bits, y el **comando para pedir el
+peso** (`P` por defecto; vacío si la báscula manda el peso sola). La caja toma
+el último número de la línea que manda la báscula (con su unidad kg/g/lb) y
+avisa si la báscula dice que el peso aún se mueve. "Lo último que mandó"
+muestra el texto crudo para afinar los ajustes. La página permite el puerto
+serie sólo para sí misma (`Permissions-Policy: serial=(self)`).
+
 ## Qué falta probar cuando llegue el equipo
 
 1. Imprimir un ticket real y medir el tiempo de impresión.
@@ -77,3 +96,4 @@ sigue en modo simulación.
 3. La ruta HTTPS con el certificado de la impresora, en la red de la tienda.
 4. Un lector de pistola físico, además de la simulación por teclado.
 5. La pantalla de cliente en un monitor real.
+6. La báscula Torrey PCR-40T con su cable: velocidad, comando y formato del peso.

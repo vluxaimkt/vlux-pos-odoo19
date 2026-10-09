@@ -5,6 +5,7 @@ import { formatMoney } from "../lib/money";
 import { MAX_QTY, WEIGHT_DECIMALS } from "../sale/cart";
 import { round } from "../sale/money";
 import { Icon } from "../ui/Icon";
+import { ScalePanel } from "./ScalePanel";
 
 interface Weighable {
   name: string;
@@ -13,9 +14,10 @@ interface Weighable {
 }
 
 /**
- * Ask for the weight of a product sold by weight: the cashier reads it from
- * the scale (labels from a printing scale skip this: the weight is in the
- * barcode). Shows price per kilo and the amount, as the law asks.
+ * Ask for the weight of a product sold by weight: read from a scale wired to
+ * this computer, or typed from the scale's display (labels from a printing
+ * scale skip this: the weight is in the barcode). Shows price per kilo and
+ * the amount, as the law asks.
  */
 export function WeighDialog({ product, initial, currency, onDone, onCancel }: {
   product: Weighable;
@@ -46,6 +48,7 @@ export function WeighDialog({ product, initial, currency, onDone, onCancel }: {
             <div class="label-2 num">{formatMoney(product.list_price, currency)} / {unit}</div>
           </div>
         </div>
+        <ScalePanel onWeight={(read) => setText(read.toFixed(WEIGHT_DECIMALS))} />
         <label class="input input-lg w-full !h-16 text-3xl num">
           <input ref={input} type="text" inputMode="decimal" autocomplete="off" placeholder="0.000" value={text} aria-label={`Peso en ${unit}`}
             onInput={(e) => setText(e.currentTarget.value)}

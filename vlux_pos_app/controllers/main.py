@@ -32,11 +32,13 @@ CSP = (
 )
 # Least privilege: the register uses no browser feature beyond storage yet.
 # Hardware (camera scanning, USB printer) opens only what it needs, when it lands.
-PERMISSIONS_POLICY = ", ".join(f"{feature}=()" for feature in (
+# Everything off, except the serial port for this page: a scale wired to the
+# register's computer is read with Web Serial (the person picks the port).
+PERMISSIONS_POLICY = ", ".join([f"{feature}=()" for feature in (
     "accelerometer", "autoplay", "bluetooth", "browsing-topics", "camera", "display-capture",
     "geolocation", "gyroscope", "hid", "idle-detection", "magnetometer", "microphone", "midi",
-    "payment", "publickey-credentials-get", "screen-wake-lock", "serial", "usb", "xr-spatial-tracking",
-))
+    "payment", "publickey-credentials-get", "screen-wake-lock", "usb", "xr-spatial-tracking",
+)] + ["serial=(self)"])
 
 
 def _harden(response, html=False):
