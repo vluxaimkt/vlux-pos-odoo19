@@ -96,8 +96,13 @@
   --glow-b: rgba(175, 82, 222, 0.08);
 }
 
+/*
+ * Dark tokens: when the system is dark and the person did not pick light, or
+ * when they picked dark (html[data-theme], set by lib/theme.ts). daisyUI's
+ * own themes follow the same attribute.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="vlux-light"]) {
     --glow-a: rgba(10, 132, 255, 0.28);
     --btn-default-bg: #2c2c2e;
     --glow-b: rgba(191, 90, 242, 0.22);
@@ -108,6 +113,18 @@
     --fill-strong: rgba(120, 120, 128, 0.36);
     --label-secondary: rgba(235, 235, 245, 0.62);
   }
+}
+
+:root[data-theme="vlux-dark"] {
+  --glow-a: rgba(10, 132, 255, 0.28);
+  --btn-default-bg: #2c2c2e;
+  --glow-b: rgba(191, 90, 242, 0.22);
+  --glass-bg: rgba(28, 28, 30, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.15);
+  --hairline: rgba(84, 84, 88, 0.6);
+  --fill: rgba(120, 120, 128, 0.24);
+  --fill-strong: rgba(120, 120, 128, 0.36);
+  --label-secondary: rgba(235, 235, 245, 0.62);
 }
 
 html,
@@ -331,9 +348,13 @@ h3,
 }
 
 @media (prefers-color-scheme: dark) {
-  .pill-warn {
+  :root:not([data-theme="vlux-light"]) .pill-warn {
     color: var(--color-warning);
   }
+}
+
+:root[data-theme="vlux-dark"] .pill-warn {
+  color: var(--color-warning);
 }
 
 /* PIN: round keys and four dots, as on the iOS lock screen. */
