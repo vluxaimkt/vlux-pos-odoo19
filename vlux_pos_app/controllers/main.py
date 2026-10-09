@@ -115,7 +115,7 @@ class VluxPosApp(http.Controller):
             "display": "standalone",
             "orientation": "any",
             "lang": "es-MX",
-            "background_color": "#09080e",
+            "background_color": "#000000",
             "theme_color": "#0d0a14",
             "icons": [
                 {"src": f"/vlux_pos_app/static/img/icon-192.png?v={version}", "sizes": "192x192", "type": "image/png"},

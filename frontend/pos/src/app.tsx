@@ -26,6 +26,7 @@ import { type AccessContext, authorizersFor, canOpen, isAvailable, type ModuleDe
 import { syncFeed } from "./sync/catalog";
 import { flushOutbox } from "./sync/outbox";
 import { renewIfDue } from "./sync/token";
+import { APP_ICON } from "./ui/brand";
 import { Icon } from "./ui/Icon";
 import { Banner } from "./ui/Page";
 
@@ -428,7 +429,7 @@ function Sidebar({ view, access, status, open, drawer, onDrawer, person, authori
         lg:visible lg:translate-x-0 lg:sticky lg:top-0 lg:shadow-none`} aria-label="Módulos">
         <div class="px-4 pt-6 pb-4 flex flex-col gap-3">
           <div class="flex items-center gap-3">
-            <img src="/vlux_pos_app/static/img/icon-192.png" alt="" width={40} height={40} class="rounded-[12px] shadow-sm" />
+            <img src={APP_ICON} alt="" width={40} height={40} class="rounded-[12px] shadow-sm" />
             <div class="min-w-0">
               <div class="font-semibold leading-tight truncate">{setup.register.name}</div>
               <div class="text-xs text-[var(--label-secondary)] truncate">{setup.store.company.name}</div>
@@ -492,7 +493,7 @@ function TopBar({ status }: { status: { syncing: boolean; pending: number } }) {
   const { setup, online } = usePos();
   return (
     <header class="glass sticky top-0 z-30 h-[72px] px-6 flex items-center gap-3 rounded-none border-x-0 border-t-0 print:hidden">
-      <img src="/vlux_pos_app/static/img/icon-192.png" alt="" width={40} height={40} class="rounded-[12px] shadow-sm" />
+      <img src={APP_ICON} alt="" width={40} height={40} class="rounded-[12px] shadow-sm" />
       <div class="flex-1 min-w-0 flex flex-col items-start">
         <span class="font-semibold leading-tight truncate max-w-full">{setup.register.name}</span>
         <span class="text-xs text-[var(--label-secondary)] truncate max-w-full">{setup.store.company.name}</span>
