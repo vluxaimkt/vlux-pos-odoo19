@@ -210,8 +210,11 @@ function Options({ onSaved }: { onSaved: () => Promise<void> }) {
   const [message, setMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // What the server answered to the last save: the form as it is now (the loaded copy is older).
+  const [saved, setSaved] = useState<OptionField[] | null>(null);
   if (error) return <Banner tone="error">{error}</Banner>;
   if (!data) return <Loading />;
+  const items = saved ?? data.items;
   const value = (field: OptionField) => (field.name in values ? values[field.name]! : field.value);
 
   async function save() {
@@ -220,7 +223,8 @@ function Options({ onSaved }: { onSaved: () => Promise<void> }) {
     setSaveError(null);
     setMessage(null);
     try {
-      await client.saveOwnerOptions(setup.register.id, values);
+      const answer = await client.saveOwnerOptions(setup.register.id, values);
+      setSaved(answer.items);
       setValues({});
       setMessage("Opciones guardadas. La caja ya las usa.");
       await onSaved();
@@ -233,7 +237,7 @@ function Options({ onSaved }: { onSaved: () => Promise<void> }) {
 
   return (
     <div class="flex flex-col gap-6 max-w-2xl">
-      {data.items.map((field) => (
+      {items.map((field) => (
         <Section key={field.name} footer={field.help}>
           {field.type === "boolean" ? (
             <label class="row cursor-pointer">
