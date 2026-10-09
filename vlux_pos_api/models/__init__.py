@@ -1,3 +1,4 @@
+from . import auto_close
 from . import employee_session
 from . import pos_config
 from . import pos_order

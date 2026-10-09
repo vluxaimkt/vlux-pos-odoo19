@@ -7,6 +7,7 @@ cent; the closing balances and keeps the difference limit.
 import hashlib
 import json
 import uuid
+from datetime import datetime, timedelta
 
 from odoo.tests import tagged
 
@@ -377,6 +378,43 @@ class TestVluxApiSales(TestPosHrHttpCommon, VluxApiCase):
         self.assertIn("tracks_stock", body["data"])
         response, body = self._call("POST", path, {"standard_price": -1}, employee=self.manager1)
         self.assertEqual(body["error"], "VALIDATION_ERROR")
+
+    def test_the_last_closing_time_is_in_the_store_time_zone(self):
+        self.config.company_id.partner_id.tz = "America/Mexico_City"  # UTC-6
+        self.config.vlux_auto_close_time = "23:00"
+        # 00:30 local on Oct 8 → the last closing was Oct 7 at 23:00 local (Oct 8 05:00 UTC).
+        self.assertEqual(self.config._vlux_last_closing(datetime(2026, 10, 8, 6, 30)), datetime(2026, 10, 8, 5, 0))
+        # 22:00 local on Oct 8 → still Oct 7's closing.
+        self.assertEqual(self.config._vlux_last_closing(datetime(2026, 10, 9, 4, 0)), datetime(2026, 10, 8, 5, 0))
+        self.config.vlux_auto_close_time = "01:00"
+        # 00:30 local on Oct 8, closing after midnight → Oct 7 at 01:00 local.
+        self.assertEqual(self.config._vlux_last_closing(datetime(2026, 10, 8, 6, 30)), datetime(2026, 10, 7, 7, 0))
+
+    def test_a_register_left_open_closes_itself_marked_for_review(self):
+        self.config.company_id.partner_id.tz = "America/Mexico_City"
+        self.config.vlux_auto_close_time = "23:00"
+        _response, opened = self._open(opening_cash=100.0)
+        session = self.env["pos.session"].browse(opened["data"]["session"]["id"])
+        self._call("POST", "/orders", self._sale([(self.cash, 55.5)]), employee=self.emp2)
+        session.start_at = datetime(2026, 10, 7, 15, 0)  # 09:00 local
+        after_closing = datetime(2026, 10, 8, 5, 30)  # 23:30 local
+
+        self.env["pos.config"]._vlux_cron_auto_close(now=after_closing)
+        self.assertEqual(session.state, "opened", "off by default: nothing closes by itself")
+
+        self.config.vlux_auto_close = True
+        self.env["pos.config"]._vlux_cron_auto_close(now=datetime(2026, 10, 8, 4, 30))  # 22:30 local
+        self.assertEqual(session.state, "opened", "not before the closing time")
+        self.env["pos.config"]._vlux_cron_auto_close(now=after_closing)
+        self.assertEqual(session.state, "closed")
+        self.assertTrue(session.vlux_auto_closed, "marked for the owner to review")
+        self.assertTrue(self.config.currency_id.is_zero(session.cash_register_difference), "counted taken as expected")
+        self.assertEqual(session.cash_register_balance_end_real, 155.5)
+
+        _response, reopened = self._open(opening_cash=155.5)
+        fresh = self.env["pos.session"].browse(reopened["data"]["session"]["id"])
+        self.env["pos.config"]._vlux_cron_auto_close(now=fresh.start_at + timedelta(minutes=30))
+        self.assertEqual(fresh.state, "opened", "a register opened after the closing time stays open")
 
     def test_a_manager_may_close_above_the_limit(self):
         _response, opened = self._open(opening_cash=100.0)

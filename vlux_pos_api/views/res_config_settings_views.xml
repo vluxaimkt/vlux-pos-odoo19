@@ -10,6 +10,14 @@
                          help="En la caja VLUX, si un cajero hace una devolución, un encargado (o el dueño) la autoriza con su PIN.">
                     <field name="pos_vlux_refunds_need_manager"/>
                 </setting>
+                <setting id="vlux_auto_close" string="Cierre automático de caja"
+                         help="Si la caja sigue abierta a esta hora, se cierra sola con el efectivo esperado como contado y queda marcada 'sin conteo' para revisarla.">
+                    <field name="pos_vlux_auto_close"/>
+                    <div class="content-group" invisible="not pos_vlux_auto_close">
+                        <label for="pos_vlux_auto_close_time" string="Hora" class="fw-normal me-2"/>
+                        <field name="pos_vlux_auto_close_time"/>
+                    </div>
+                </setting>
                 <setting id="vlux_cashier_cash_out" string="Cajeros pueden sacar efectivo"
                          help="En la caja VLUX, los cajeros pueden registrar salidas de efectivo (con motivo, a su nombre). Las entradas siguen siendo del encargado.">
                     <field name="pos_vlux_cashier_cash_out"/>
