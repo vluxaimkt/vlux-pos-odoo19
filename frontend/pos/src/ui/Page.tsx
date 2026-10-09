@@ -169,6 +169,18 @@ export function SlipActions({ onDone, doneLabel = "Listo", printLabel = "Imprimi
   );
 }
 
+/** "Ganancia por pieza": sale price minus purchase price, with the margin. Nothing until both are known. */
+export function MarginHint({ price, cost, money }: { price: number; cost: number; money: (n: number) => string }) {
+  if (!(price > 0) || !(cost > 0)) return null;
+  const gain = price - cost;
+  const pct = Math.round((gain / price) * 100);
+  return (
+    <span class={`text-xs px-1 num ${gain < 0 ? "text-danger font-semibold" : "label-2"}`}>
+      {gain < 0 ? `Se vende abajo del costo: pierdes ${money(-gain)} por pieza` : `Ganancia por pieza: ${money(gain)} (${pct}%)`}
+    </span>
+  );
+}
+
 /** Loading, centered. */
 export function Loading() {
   return <div class="py-16 grid place-items-center"><span class="loading loading-spinner loading-lg text-primary" /></div>;

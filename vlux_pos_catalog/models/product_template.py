@@ -119,6 +119,7 @@ class ProductTemplate(models.Model):
             raise ValidationError(_("El nombre del producto es demasiado largo."))
         barcode = self._vlux_clean_barcode(values.get("barcode"))
         list_price = self._vlux_clean_float(values.get("list_price"), _("El precio de venta"), PRICE_MAX)
+        standard_price = self._vlux_clean_float(values.get("standard_price") or 0.0, _("El precio de compra"), PRICE_MAX)
         default_code = str(values.get("default_code") or "").strip()[:DEFAULT_CODE_MAX_LENGTH] or False
         is_storable = bool(values.get("is_storable", self._vlux_default_is_storable()))
         initial_qty = self._vlux_clean_float(values.get("initial_qty") or 0.0, _("El stock inicial"), QTY_MAX)
@@ -156,6 +157,8 @@ class ProductTemplate(models.Model):
             "taxes_id": [(6, 0, tax_ids)],
             "image_1920": self._vlux_clean_image(values.get("image")),
         }
+        if standard_price:
+            product_values["standard_price"] = standard_price
         if pos_categ_id:
             product_values["pos_categ_ids"] = [(6, 0, [pos_categ_id])]
         if categ_id:

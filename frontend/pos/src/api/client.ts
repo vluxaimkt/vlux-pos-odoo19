@@ -1,7 +1,7 @@
 import type { TaxInfo } from "../sale/pricing";
 import type {
   AbonoTicket, CashMove, CreditRow,
-  ClosingSummary, Customer, Employee, Envelope, FeedPage, Me, OrderRequest, OrderResult, Product, ProductChanges, Quote,
+  ClosingSummary, Customer, Employee, Envelope, FeedPage, Me, OrderRequest, OrderResult, Product, ProductChanges, ProductDetails, Quote,
   OptionField, OwnerCreditBalances, OwnerDashboard, OwnerStatement, PosCategory, RegisterState, SaleLine, StaffMember, StaffRole, StoreConfig, TokenInfo,
 } from "./types";
 
@@ -298,11 +298,19 @@ export class ApiClient {
   }
 
   /** Quick create of a product from an unknown barcode (manager with PIN). */
-  quickProduct(registerId: number, body: { name: string; barcode: string; list_price: number; taxes_ids?: number[]; image?: string }) {
+  quickProduct(registerId: number, body: {
+    name: string; barcode: string; list_price: number; standard_price?: number; initial_qty?: number; taxes_ids?: number[];
+    image?: string;
+  }) {
     return this.request<Product>("POST", `/registers/${registerId}/products`, body);
   }
 
   /** Change a product from the register (whoever the register allows, with PIN). */
+  /** Purchase price and stock on hand, for who may edit products (the server checks). */
+  productDetails(registerId: number, productId: number) {
+    return this.request<ProductDetails>("GET", `/registers/${registerId}/products/${productId}/details`);
+  }
+
   editProduct(registerId: number, productId: number, body: ProductChanges) {
     return this.request<Product>("POST", `/registers/${registerId}/products/${productId}`, body);
   }

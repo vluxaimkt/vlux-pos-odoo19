@@ -328,9 +328,10 @@ class PosConfig(models.Model):
         return base64.b64encode(raw)
 
     def _vlux_api_update_product(self, product, actor, values):
-        """Change a product from the register: name, price, description, barcode,
-        POS category, sold by weight, sale tax and picture. Written as the
-        actor's own user (audit), or the system when the actor has none."""
+        """Change a product from the register: name, price, purchase price,
+        description, barcode, POS category, sold by weight, sale tax and
+        picture. Written as the actor's own user (audit), or the system when
+        the actor has none."""
         self.ensure_one()
         actor_user = actor.sudo().user_id if actor else self.env["res.users"]
         env_user = actor_user or self.env.ref("base.user_root")
@@ -351,6 +352,15 @@ class PosConfig(models.Model):
             # The register shows the variant's price (template price + attribute extras).
             extra = sum(product.product_template_attribute_value_ids.mapped("price_extra"))
             vals["list_price"] = price - extra
+        if "standard_price" in values:
+            try:
+                cost = float(values["standard_price"] or 0)
+            except (TypeError, ValueError):
+                raise ValidationError(_("El precio de compra debe ser un número."))
+            if cost < 0 or cost > 10_000_000:
+                raise ValidationError(_("El precio de compra no es válido."))
+            # The cost is per variant and per company.
+            product.with_user(env_user).sudo().with_company(self.company_id).standard_price = cost
         if "description" in values:
             text = str(values["description"] or "").strip()[:2000]
             vals["public_description"] = plaintext2html(text) if text else False
