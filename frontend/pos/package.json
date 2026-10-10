@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "dexie": "^4.4.6",
-    "preact": "^10.29.8"
+    "preact": "^11.0.0"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.6",
