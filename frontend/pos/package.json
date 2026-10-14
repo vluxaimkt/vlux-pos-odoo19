@@ -10,16 +10,19 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.sw.json && vite build",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.sw.json",
-    "test": "vitest run"
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.sw.json && tsc -p tsconfig.e2e.json",
+    "test": "vitest run",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "dexie": "^4.4.6",
     "preact": "^10.29.8"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@preact/preset-vite": "^2.10.6",
     "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "24.13.6",
     "daisyui": "^5.7.46",
     "fake-indexeddb": "^6.2.5",
     "tailwindcss": "^4.3.3",

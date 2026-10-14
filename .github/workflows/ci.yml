@@ -371,6 +371,166 @@ jobs:
           path: ${{ runner.temp }}/e2e.log
           retention-days: 7
 
+  pos-pwa-e2e:
+    # Golden Path of the register PWA (/vlux-pos/) in Chrome, desktop and phone
+    # viewports, against a disposable Odoo built like a tenant (real VLUX API,
+    # nothing simulated): link, PIN, open, sell, lost answer retried, offline +
+    # reload + reconnect, return with the manager's PIN, closing. Every step
+    # reads back what Odoo stored. See docs/PRUEBAS_PWA_E2E.md.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      E2E_DB: vlux_pwa_e2e_test
+      E2E_PORT: "8069"
+    services:
+      postgres:
+        image: public.ecr.aws/docker/library/postgres:16
+        env:
+          POSTGRES_USER: odoo
+          POSTGRES_PASSWORD: odoo
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U odoo -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout VLUX addons
+        uses: actions/checkout@v5
+        with:
+          path: vlux-addons
+
+      - name: Checkout Odoo Community 19.0 baseline
+        uses: actions/checkout@v5
+        with:
+          repository: odoo/odoo
+          ref: ${{ env.ODOO_COMMIT }}
+          path: odoo
+          fetch-depth: 1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            odoo/requirements.txt
+            vlux-addons/requirements-extra.txt
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: vlux-addons/frontend/pos/package-lock.json
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-cache
+          key: apt-${{ runner.os }}-${{ github.job }}-${{ hashFiles('vlux-addons/.github/workflows/ci.yml') }}
+          restore-keys: |
+            apt-${{ runner.os }}-${{ github.job }}-
+            apt-${{ runner.os }}-
+
+      - name: Install system dependencies
+        timeout-minutes: 15
+        run: |
+          mkdir -p ~/apt-cache/partial
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+            -o Dir::Cache::Archives="$HOME/apt-cache" -o APT::Keep-Downloaded-Packages=true \
+            install -y --no-install-recommends \
+            build-essential \
+            libevent-dev \
+            libfreetype6-dev \
+            libjpeg-dev \
+            libldap2-dev \
+            libpq-dev \
+            libsasl2-dev \
+            libssl-dev \
+            libxml2-dev \
+            libxslt1-dev \
+            pkg-config \
+            postgresql-client-16 \
+            python3-dev \
+            zlib1g-dev
+
+      - name: Let the cache keep the apt packages
+        run: |
+          sudo rm -f ~/apt-cache/lock
+          sudo chown -R "$USER" ~/apt-cache
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r "$ODOO_DIR/requirements.txt"
+          python -m pip install -r "$ADDONS_DIR/requirements-extra.txt"
+          python -m pip check
+
+      - name: Verify fixed Odoo baseline
+        working-directory: ${{ env.ODOO_DIR }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$ODOO_COMMIT"
+
+      - name: Install the PWA test runner
+        working-directory: ${{ env.ADDONS_DIR }}/frontend/pos
+        run: |
+          npm ci
+          npm audit signatures
+          google-chrome --version
+
+      - name: Prepare the disposable database (tenant-like, synthetic data)
+        working-directory: ${{ env.ADDONS_DIR }}
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: odoo
+          PGPASSWORD: odoo
+        run: |
+          python tools/e2e/pwa_e2e_env.py prepare --odoo-home "$ODOO_DIR" \
+            --addons-path "$ODOO_DIR/addons,$ODOO_DIR/odoo/addons,$ADDONS_DIR" \
+            -d "$E2E_DB" --fixture frontend/pos/e2e/.fixture.json
+
+      - name: Serve Odoo (no cron jobs)
+        working-directory: ${{ env.ADDONS_DIR }}
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: odoo
+          PGPASSWORD: odoo
+        run: |
+          nohup python tools/e2e/pwa_e2e_env.py serve --odoo-home "$ODOO_DIR" \
+            --addons-path "$ODOO_DIR/addons,$ODOO_DIR/odoo/addons,$ADDONS_DIR" \
+            -d "$E2E_DB" --port "$E2E_PORT" > "$RUNNER_TEMP/odoo.log" 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -fsS "http://127.0.0.1:$E2E_PORT/web/health" > /dev/null && exit 0
+            sleep 2
+          done
+          tail -50 "$RUNNER_TEMP/odoo.log"
+          exit 1
+
+      - name: Golden Path (Playwright, desktop and phone)
+        working-directory: ${{ env.ADDONS_DIR }}/frontend/pos
+        env:
+          VLUX_E2E_BASE_URL: http://127.0.0.1:${{ env.E2E_PORT }}
+          VLUX_E2E_CHANNEL: chrome
+        run: npm run e2e
+
+      - name: Keep the reports (traces, screenshots, Odoo log)
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pos-pwa-e2e-report
+          path: |
+            ${{ env.ADDONS_DIR }}/frontend/pos/playwright-report
+            ${{ env.ADDONS_DIR }}/frontend/pos/test-results
+            ${{ env.ADDONS_DIR }}/frontend/pos/e2e-results
+            ${{ runner.temp }}/odoo.log
+          retention-days: 14
+
   performance:
     # Nightly / on demand only: seeds a small synthetic dataset and checks
     # generous absolute budgets. Relative BEFORE/AFTER comparisons are done

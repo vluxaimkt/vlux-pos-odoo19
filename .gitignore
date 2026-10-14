@@ -17,6 +17,8 @@
 !/tools/
 !/tools/perf/
 !/tools/perf/**
+!/tools/e2e/
+!/tools/e2e/**
 !/config/
 !/docs/
 !/packaging/
@@ -31,6 +33,11 @@
 !/vlux_pos_app/
 !/frontend/
 **/node_modules/
+# Browser tests: generated secrets (tokens, PINs) and reports.
+/frontend/pos/e2e/.fixture*.json
+/frontend/pos/e2e-results/
+/frontend/pos/playwright-report/
+/frontend/pos/test-results/
 
 **/__pycache__/
 *.py[cod]
